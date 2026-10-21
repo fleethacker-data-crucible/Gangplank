@@ -15,6 +15,7 @@ if (-not $script:KeystoneRoot) {
 . (Join-Path $script:KeystoneRoot "Core\Utils.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Configuration.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Diff.ps1")
+. (Join-Path $script:KeystoneRoot "Core\SmartSave.ps1")
 . (Join-Path $script:KeystoneRoot "ArcBridge.ps1")
 . (Join-Path $script:KeystoneRoot "Providers\GitProviderBase.ps1")
 . (Join-Path $script:KeystoneRoot "Providers\GitLabProvider.ps1")
