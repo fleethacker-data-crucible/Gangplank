@@ -1,5 +1,22 @@
 #Requires -Version 5.1
 # Verified workspace operations: download baseline -> inspect -> select -> save.
+
+function Assert-KeystoneTrustedRepositoryUrl {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Url)
+    $uri = $null
+    if (-not [uri]::TryCreate($Url,[UriKind]::Absolute,[ref]$uri)) { throw 'Enter a complete HTTPS GitHub or GitLab project URL.' }
+    if ($uri.Scheme -ne 'https' -or $uri.UserInfo -or $uri.Port -ne 443) { throw 'Only standard HTTPS project URLs without embedded credentials are supported.' }
+    $hosts = @('github.com','web.git.mil')
+    if ($env:KEYSTONE_GITLAB_ALLOWED_HOSTS) {
+        $hosts += @($env:KEYSTONE_GITLAB_ALLOWED_HOSTS -split ',' | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
+    }
+    if ($uri.Host.ToLowerInvariant() -notin $hosts) {
+        throw 'Repository host not allowlisted. Ask an administrator to set KEYSTONE_GITLAB_ALLOWED_HOSTS for approved self-hosted GitLab.'
+    }
+    if ($uri.Host -eq 'github.com' -and @($uri.AbsolutePath.Trim('/') -split '/').Count -lt 2) { throw 'GitHub project URL needs an owner and repository.' }
+    if ($uri.AbsolutePath.Trim('/') -eq '') { throw 'Repository path is missing.' }
+}
 # All writes are restricted to changed, explicitly selected files.
 
 function Get-KeystoneRemoteHead {
@@ -146,10 +163,17 @@ function Invoke-KeystoneWorkspaceSave {
         }
         $project = $provider.EncodePath($Session.ProjectPath)
         $payload = @{ branch = $branch; commit_message = $Message; actions = @($actions.ToArray()) }
-        # GitLab update/delete actions should supply last_commit_id for stricter per-file protection.
+        # GitLab needs the last commit that touched EACH file, not the branch tip.
         foreach ($a in $payload.actions) {
-            if ($a.action -ne 'create') { $a.last_commit_id = $head }
+            if ($a.action -eq 'create') { continue }
+            $filePath = ($a.file_path -split '/' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '%2F'
+            $encodedBranch = [uri]::EscapeDataString($branch)
+            $metadata = $provider.InvokeApi('GET',"projects/$project/repository/files/$filePath" + "?ref=$encodedBranch")
+            if (-not $metadata.last_commit_id) { throw "Cannot verify last modification for $($a.file_path)." }
+            $a.last_commit_id = [string]$metadata.last_commit_id
         }
+        # One last HEAD check before publishing this batch.
+        if ((Get-KeystoneRemoteHead -Session $Session -Branch $branch) -ne $head) { throw 'The remote branch changed while preparing the save.' }
         $result = $provider.InvokeApi('POST',"projects/$project/repository/commits",$payload)
         $newHead = [string]$result.id
     } else {
