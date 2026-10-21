@@ -1,0 +1,10 @@
+{
+  "Version": "1.0",
+  "ArcItems": {
+    "GitLab": "gitmil",
+    "GitHub": "github"
+  },
+  "LastUsed": null,
+  "Repositories": {},
+  "LogLevel": "INFO"
+}
