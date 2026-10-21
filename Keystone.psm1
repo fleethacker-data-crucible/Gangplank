@@ -188,25 +188,30 @@ function Invoke-KeystonePush {
 }
 
 function New-KeystoneMergeRequest {
+    [CmdletBinding()]
     param(
         $Session,
         [string]$SourceBranch,
         [string]$TargetBranch,
         [string]$Title,
-        [string]$Description = ""
+        [string]$Description = ''
     )
-    if ($Session.Provider -ne "GitLab") {
-        throw "Create MR is GitLab-only in Phase A/B. GitHub PR is Phase C."
-    }
+    if (-not $Session) { throw 'Open a project first.' }
     if (-not $SourceBranch) { $SourceBranch = $Session.LastBranch }
     if (-not $TargetBranch) { $TargetBranch = $Session.DefaultBranch }
-    if (-not $Title) { throw "MR title required" }
-
-    $mr = $Session.ProviderObj.CreateMergeRequest(
-        $Session.ProjectPath, $SourceBranch, $TargetBranch, $Title, $Description
-    )
-    Write-KeystoneLog -Level INFO -Message "MR created $($mr.web_url)"
-    return $mr
+    if (-not $SourceBranch -or -not $TargetBranch) { throw 'Source and target branches are required.' }
+    if ([string]::IsNullOrWhiteSpace($Title)) { throw 'Review title is required.' }
+    if ($Session.Provider -eq 'GitHub') {
+        $review = $Session.ProviderObj.CreatePullRequest($Session.ProjectPath,$SourceBranch,$TargetBranch,$Title,$Description)
+        Write-KeystoneLog -Level INFO -Message "GitHub pull request created: $($review.html_url)"
+        return $review
+    }
+    if ($Session.Provider -eq 'GitLab') {
+        $review = $Session.ProviderObj.CreateMergeRequest($Session.ProjectPath,$SourceBranch,$TargetBranch,$Title,$Description)
+        Write-KeystoneLog -Level INFO -Message "GitLab merge request created: $($review.web_url)"
+        return $review
+    }
+    throw 'Unknown project provider.'
 }
 
 Export-ModuleMember -Function @(
