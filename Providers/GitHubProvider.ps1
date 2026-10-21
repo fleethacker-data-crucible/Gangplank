@@ -235,7 +235,7 @@ class GitHubProvider : GitProviderBase {
 
         $body = @{
             sha   = $commitSha
-            force = $true
+            force = $false
         }
         if ($existing) {
             $this.InvokeApi("PATCH", "repos/$projectPath/git/refs/heads/$branch", $body) | Out-Null
@@ -357,7 +357,7 @@ class GitHubProvider : GitProviderBase {
         $commitSha = $this.CreateCommit($projectPath, $message, $treeSha, @($parentSha))
         Write-KeystoneLog -Level INFO -Message "Commit $commitSha"
 
-        $this.CreateOrUpdateBranchRef($projectPath, $branch, $commitSha, $true)
+        $this.CreateOrUpdateBranchRef($projectPath, $branch, $commitSha, $false)
         Write-KeystoneLog -Level INFO -Message "Branch $branch -> $commitSha"
 
         return [PSCustomObject]@{
