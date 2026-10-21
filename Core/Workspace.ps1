@@ -32,6 +32,31 @@ function Get-KeystoneRemoteHead {
     return [string]$ref.commit.id
 }
 
+function New-KeystoneWorkBranch {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Session,[string]$Name)
+    $base = $Session.DefaultBranch
+    $head = Get-KeystoneRemoteHead -Session $Session -Branch $base
+    if (-not $head) { throw 'The default branch has no commit. Initialize this repository through the provider first.' }
+    if (-not $Name) { $Name = 'keystone/work-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + ([guid]::NewGuid().ToString('N').Substring(0,6)) }
+    if ($Name.Length -gt 100 -or $Name -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]+$' -or $Name -match '(\.\.|//|@{|/\.|\.lock($|/)|/$)') {
+        throw 'Invalid work branch name.'
+    }
+    if ($Session.Provider -eq 'GitHub') {
+        $payload = @{ ref = "refs/heads/$Name"; sha = $head }
+        [void]$Session.ProviderObj.InvokeApi('POST',"repos/$($Session.ProjectPath)/git/refs",$payload)
+    } elseif ($Session.Provider -eq 'GitLab') {
+        $project = $Session.ProviderObj.EncodePath($Session.ProjectPath)
+        $payload = @{ branch = $Name; ref = $base }
+        [void]$Session.ProviderObj.InvokeApi('POST',"projects/$project/repository/branches",$payload)
+    } else { throw 'Unsupported provider.' }
+    $Session.LastBranch = $Name
+    $Session.BaselineSha = $null
+    $Session.BaselineMap = @{}
+    $Session.LocalPath = $null
+    return $Name
+}
+
 function Get-KeystoneSafeWorkspacePath {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Base, [Parameter(Mandatory)][string]$Project, [Parameter(Mandatory)][string]$Branch)
@@ -131,6 +156,9 @@ function Invoke-KeystoneWorkspaceSave {
     if ([string]::IsNullOrWhiteSpace($Message)) { $Message = $suggestion.Title }
     if ($Message.Length -gt 160 -or $Message -match '[\r\n]') { throw 'Commit message must be a single line under 160 characters.' }
     $branch = $preview.Branch
+    if ($branch -eq $Session.DefaultBranch -and $env:KEYSTONE_ALLOW_DEFAULT_BRANCH_WRITES -ne '1') {
+        throw 'Direct saves to the default branch are disabled. Create a work branch from the browser before saving.'
+    }
     $head = Get-KeystoneRemoteHead -Session $Session -Branch $branch
     if ($head -ne $Session.BaselineSha) { throw 'Remote branch changed. Save cancelled before upload.' }
 
