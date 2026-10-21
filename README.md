@@ -1,27 +1,43 @@
-# Keystone (Phase A/B)
+# Keystone Enterprise Workspace
 
-Modular PowerShell tool - GitLab + GitHub **without git.exe**.
+Browser-first, no-Git-training development workspace built for Windows PowerShell 5.1 and a browser. No git.exe, Node or Python installation required.
 
-## Menus
-1. Open project (URL)
-2. Get latest files (branch zip snapshot)
-3. Share my folder (push commit; works on empty repos)
-4. Create merge request (GitLab)
-5. List branches
-6. Session / Explorer
+**Engineering preview, not accredited enterprise production software.** See docs/SECURITY-MODEL.md.
 
-## ARC Service names
-- GitLab: `gitmil`
-- GitHub: `github`
+## Launch
+Double-click Launch-Keystone.bat for the browser UI. For the classic text menu run Launch-Keystone.bat -Cli. Or run Start-KeystoneWeb.ps1 from an approved PowerShell session.
+The server binds to http://localhost:8769/. Press Ctrl+C in its PowerShell window to stop. If HttpListener requires a URL reservation, work with your IT administrator.
 
-## Token scopes
-- GitLab PAT: `api` (or write_repository + read_api as required by your host)
-- GitHub: Contents read/write for push; classic `repo` for private
+## Connect → Download → Edit → Smart Save
+1. Paste a GitHub or GitLab project URL and connect using your configured credentials.
+2. Download a fresh snapshot into a new, safe working folder. Existing local work is never overwritten.
+3. Edit files using your normal tools.
+4. Open Smart Save, refresh and choose exactly which added or modified files to publish. Deletions are unselected by default.
+5. Accept the automatically generated commit title, or explicitly request a filename-only AI suggestion, then confirm publication.
 
-## Layout
-See Core/, Providers/, ArcBridge.ps1
+Keystone checks the remote HEAD against your pinned download baseline, uses non-forced GitHub branch updates, and GitLab per-file commit guards. If others updated the branch, publishing stops.
+Smart Save publishes directly to the remote branch. It is not an offline-only backup or staging mechanism.
 
-## Smoke test
-1. Open empty GitHub repo URL
-2. Share my folder -> this Keystone folder -> main
-3. Refresh GitHub - files should appear
+## AI assistant
+Assistant chat is a read-only, token-streaming advisor backed by an administrator-approved OpenAI-compatible HTTPS chat endpoint.
+Default endpoint: https://api.genai.mil/v1/chat/completions . Default model: gemini-3.8-flash (override with KEYSTONE_AI_MODEL after confirming approved availability).
+Set GENAI_TOKEN or KEYSTONE_AI_TOKEN in the PowerShell launch environment, or authenticate ARC and unlock the genapi item. Additional approved AI hosts may be configured with KEYSTONE_AI_ALLOWED_HOSTS.
+Your explicit chat text and project/branch name go to the selected AI provider. AI commit-title refinement sends filenames and statuses only. Source code is never sent to AI automatically.
+
+## Credentials and trust
+GitHub credential: GITHUB_TOKEN or ARC github. GitLab: GITLAB_TOKEN or ARC gitmil.
+Only HTTPS github.com, web.git.mil and administrator-approved KEYSTONE_GITLAB_ALLOWED_HOSTS are permitted for repository connections.
+Do not commit API tokens in scripts or configuration. Obtain approval for the data classification before using any model gateway.
+
+## Tests
+Windows PowerShell 5.1: run tests/SmartSave.Tests.ps1 and tests/Workspace.Tests.ps1. GitHub Actions runs them on Windows.
+
+## Important limits
+- The verified browser flow requires an existing initialized remote branch. Empty repo bootstrap is a future feature.
+- The assistant cannot autonomously change code, run tools, or create patches.
+- Common credential filenames/obvious secret patterns and files >5 MB are blocked; this is not comprehensive DLP.
+- Enterprise SSO, RBAC, signing, formal audits, CI integration and security authorization remain future milestones.
+- Deprecated legacy bulk upload API remains available to existing module consumers; new workflows should use Smart Save.
+
+## Source layout
+Start-KeystoneWeb.ps1 hosts the browser API; web/index.html is the UI; Core/Workspace.ps1 provides the safe save workflow; Core/SmartSave.ps1 generates titles; Core/AI.ps1 handles approved AI streaming; Providers/ contains native GitHub and GitLab REST adapters; ArcBridge.ps1 integrates ARC; Keystone.ps1 is the CLI.
