@@ -154,6 +154,9 @@ function Invoke-KeystonePush {
         [ValidateSet("Omit","Include")]
         [string]$DeletePolicy = "Omit"
     )
+    if ($env:KEYSTONE_ALLOW_LEGACY_BULK_UPLOAD -ne '1') {
+        throw 'Legacy full-folder upload is disabled by default. Use verified Smart Save, or require explicit administrative opt-in.'
+    }
     if (-not $Session) { throw "Open a repository first." }
     if (-not $Branch) {
         $Branch = if ($Session.DefaultBranch) { $Session.DefaultBranch } else { "main" }
