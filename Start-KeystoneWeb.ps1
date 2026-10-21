@@ -100,6 +100,7 @@ try {
                     branch = $(if ($session) { $session.LastBranch } else { $null })
                     workspace = $(if ($session) { $session.LocalPath } else { $null })
                     ai = [bool]($env:KEYSTONE_AI_TOKEN -or $env:GENAI_TOKEN)
+                    canReview = [bool]($session -and $session.LastSaveMessage -and -not $session.LastReviewUrl)
                 }
             }
             elseif ($req.HttpMethod -eq 'POST' -and $path -eq '/api/connect') {
@@ -171,12 +172,17 @@ try {
                 if (-not $session -or -not $session.LastBranch) { throw 'Start a work branch before requesting review.' }
                 if ($session.LastBranch -eq $session.DefaultBranch) { throw 'Cannot review the default branch against itself.' }
                 if (-not $session.LastSaveMessage) { throw 'Save your changes before requesting review.' }
+                if ($session.LastReviewUrl) {
+                    Send-KeystoneWebJson -Response $res -Value @{ url = $session.LastReviewUrl; title = 'Review already created' }
+                    continue
+                }
                 # Safe generated descriptions; no manually written PR text needed.
                 $title = 'Review: ' + [string]$session.LastSaveMessage
                 $desc = 'Created with Keystone Smart Save.' + [char]10 + [char]10 + 'Files in most recent save:' + [char]10
                 foreach ($p in @($session.LastSavedFiles)) { $desc += '- ' + $p + [char]10 }
                 $review = New-KeystoneMergeRequest -Session $session -SourceBranch $session.LastBranch -TargetBranch $session.DefaultBranch -Title $title -Description $desc
                 $reviewUrl = if ($review.html_url) { [string]$review.html_url } else { [string]$review.web_url }
+                $session | Add-Member -MemberType NoteProperty -Name LastReviewUrl -Value $reviewUrl -Force
                 Send-KeystoneWebJson -Response $res -Value @{ url = $reviewUrl; title = $title }
             }
             elseif ($req.HttpMethod -eq 'POST' -and $path -eq '/api/chat/stream') {
