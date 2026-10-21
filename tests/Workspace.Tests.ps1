@@ -42,6 +42,30 @@ try {
     Assert (-not $preview.RemoteChanged) 'Unexpected stale result'
     Assert (@($preview.Changes | Where-Object { $_.Kind -eq 'Modified' }).Count -eq 1) 'Modified file was missed'
     Assert (@($preview.Changes | Where-Object { $_.Kind -eq 'Deleted' -and $_.Selected }).Count -eq 0) 'Deletion selected automatically'
+    # Work branch creation is separate from download and uses provider refs only.
+    $provider | Add-Member -MemberType ScriptMethod -Name InvokeApi -Value {
+        param($method,$path,$body)
+        if ($method -ne 'POST' -or $path -notmatch '/git/refs    Assert (Get-KeystoneWorkspacePreview -Session $session).RemoteChanged 'Remote update was not found'
+    $blocked = $false
+    try { Invoke-KeystoneWorkspaceSave -Session $session -SelectedPaths @('keep.txt') | Out-Null } catch { $blocked = $true }
+    Assert $blocked 'Stale changes must not be saved'
+} finally {
+    Remove-Item -LiteralPath $temp -Force -Recurse -ErrorAction SilentlyContinue
+}
+$one = New-KeystoneSmartMessage -Added @('src/New.ps1')
+Assert ($one.HasChanges -and $one.Title -match '^feat') 'Smart title invalid'
+Assert (-not (New-KeystoneSmartMessage).HasChanges) 'Empty save invalid'
+Write-Host 'All offline Keystone checks passed.' -ForegroundColor Green
+ -or $body.ref -notmatch '^refs/heads/keystone/work-') {
+            throw 'Unexpected branch creation call.'
+        }
+        return @{ ref = $body.ref; object = @{ sha = $body.sha } }
+    }
+    $branchName = New-KeystoneWorkBranch -Session $session
+    Assert ($branchName -match '^keystone/work-') 'Safe branch name'
+    Assert (-not $session.BaselineSha) 'Branch creation must clear download baseline'
+    # Restore downloaded state for stale-save tests.
+    $session.LastBranch = 'main'; $session.BaselineSha = 'abc123'
     $provider.CurrentHead = 'other'
     Assert (Get-KeystoneWorkspacePreview -Session $session).RemoteChanged 'Remote update was not found'
     $blocked = $false
