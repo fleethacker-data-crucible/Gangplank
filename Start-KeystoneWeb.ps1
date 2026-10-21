@@ -111,6 +111,13 @@ try {
                     branch = $session.DefaultBranch; branches = @($session.Branches)
                 }
             }
+            elseif ($req.HttpMethod -eq 'POST' -and $path -eq '/api/start') {
+                if (-not $session) { throw 'Connect a project first.' }
+                $newBranch = New-KeystoneWorkBranch -Session $session
+                $folder = Get-KeystoneSafeWorkspacePath -Base (Join-Path $root 'work') -Project $session.ProjectPath -Branch $newBranch
+                $downloaded = Invoke-KeystonePull -Session $session -Branch $newBranch -LocalPath $folder
+                Send-KeystoneWebJson -Response $res -Value @{ folder = $downloaded; branch = $newBranch; sha = $session.BaselineSha }
+            }
             elseif ($req.HttpMethod -eq 'POST' -and $path -eq '/api/download') {
                 if (-not $session) { throw 'Connect a project first.' }
                 $body = Read-KeystoneWebBody -Request $req
@@ -156,7 +163,21 @@ try {
                 $selected = [string[]]@($body.paths)
                 $message = if ($body.message) { [string]$body.message } else { '' }
                 $saved = Invoke-KeystoneWorkspaceSave -Session $session -SelectedPaths $selected -Message $message
+                $session | Add-Member -MemberType NoteProperty -Name LastSaveMessage -Value $saved.Message -Force
+                $session | Add-Member -MemberType NoteProperty -Name LastSavedFiles -Value $selected -Force
                 Send-KeystoneWebJson -Response $res -Value $saved
+            }
+            elseif ($req.HttpMethod -eq 'POST' -and $path -eq '/api/review') {
+                if (-not $session -or -not $session.LastBranch) { throw 'Start a work branch before requesting review.' }
+                if ($session.LastBranch -eq $session.DefaultBranch) { throw 'Cannot review the default branch against itself.' }
+                if (-not $session.LastSaveMessage) { throw 'Save your changes before requesting review.' }
+                # Safe generated descriptions; no manually written PR text needed.
+                $title = 'Review: ' + [string]$session.LastSaveMessage
+                $desc = 'Created with Keystone Smart Save.' + [char]10 + [char]10 + 'Files in most recent save:' + [char]10
+                foreach ($p in @($session.LastSavedFiles)) { $desc += '- ' + $p + [char]10 }
+                $review = New-KeystoneMergeRequest -Session $session -SourceBranch $session.LastBranch -TargetBranch $session.DefaultBranch -Title $title -Description $desc
+                $reviewUrl = if ($review.html_url) { [string]$review.html_url } else { [string]$review.web_url }
+                Send-KeystoneWebJson -Response $res -Value @{ url = $reviewUrl; title = $title }
             }
             elseif ($req.HttpMethod -eq 'POST' -and $path -eq '/api/chat/stream') {
                 $body = Read-KeystoneWebBody -Request $req
