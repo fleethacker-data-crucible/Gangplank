@@ -50,8 +50,8 @@ while ($true) {
     $opts = @(
         "Open project (paste GitLab or GitHub URL)",
         "Get latest files (download branch snapshot)",
-        "Share my folder (push commit - works on empty repos)",
-        "Create merge request (GitLab)",
+        "Smart Save (automatic message, safe changed files)",
+        "Create review request (GitHub / GitLab)",
         "List remote branches",
         "Show session / open local folder",
         "Exit"
@@ -72,7 +72,7 @@ while ($true) {
                 $session = Open-KeystoneRepository -Url $url.Trim()
                 Show-Session $session
                 if ($session.Branches.Count -eq 0) {
-                    Write-Host "No branches yet - empty repo is OK. Use Share my folder for first commit." -ForegroundColor Yellow
+                    Write-Host "This repository has no branches yet. First-commit workflow is not supported in Smart Save." -ForegroundColor Yellow
                 }
                 Wait-KeystoneEnter
             }
@@ -86,7 +86,7 @@ while ($true) {
                 $in = Read-Host
                 if (-not [string]::IsNullOrWhiteSpace($in)) { $br = $in.Trim() }
 
-                $suggest = Get-KeystoneSuggestedWorkPath -ProjectPath $session.ProjectPath -Branch $br -ToolRoot $here
+                $suggest = Get-KeystoneSafeWorkspacePath -Base (Join-Path $here 'work') -Project $session.ProjectPath -Branch $br
                 $fp = Show-KeystoneMenu -Title "Local folder" -Options @(
                     "Use suggested (created on download)",
                     "Choose folder (popup)",
@@ -107,104 +107,41 @@ while ($true) {
                 Wait-KeystoneEnter
             }
             2 {
-                Write-KeystoneLog -Level INFO -Message "MENU: Share/push selected"
-                if (-not $session) {
-                    Write-Host ""
-                    Write-Host "No project open. Open a project first (option 1), then come back here." -ForegroundColor Yellow
-                    Write-KeystoneLog -Level WARN -Message "Push aborted: no session"
+                if (-not $session -or -not $session.LocalPath) {
+                    Write-Host 'Open and download a project first (option 1, then 2).' -ForegroundColor Yellow
                     Wait-KeystoneEnter
                     continue
                 }
-
-                Write-Host ""
-                Write-Host "======== SHARE / PUSH ========" -ForegroundColor Cyan
-                Write-Host "Provider : $($session.Provider)" -ForegroundColor Gray
-                Write-Host "Project  : $($session.ProjectPath)" -ForegroundColor Gray
-                Write-Host "Default  : $($session.DefaultBranch)" -ForegroundColor Gray
-                Write-Host "=============================" -ForegroundColor Cyan
-                Write-Host ""
-                Write-Host "Folder to upload:" -ForegroundColor Cyan
-                Write-Host "  [Enter] = this Keystone folder:" -ForegroundColor DarkGray
-                Write-Host "           $here" -ForegroundColor DarkGray
-                if ($session.LocalPath) {
-                    Write-Host "  Or type: session" -ForegroundColor DarkGray
-                    Write-Host "           $($session.LocalPath)" -ForegroundColor DarkGray
-                }
-                Write-Host "  Or type a full folder path" -ForegroundColor DarkGray
-                Clear-KeystoneInputBuffer
-                $pathIn = Read-Host "Path"
-                if ([string]::IsNullOrWhiteSpace($pathIn)) {
-                    $pushPath = $here
-                }
-                elseif ($pathIn.Trim().ToLowerInvariant() -eq "session") {
-                    if (-not $session.LocalPath) {
-                        Write-Host "No session local path. Use Enter for Keystone folder." -ForegroundColor Yellow
-                        Wait-KeystoneEnter; continue
-                    }
-                    $pushPath = $session.LocalPath
-                }
-                else {
-                    $pushPath = $pathIn.Trim().Trim('"')
-                }
-
-                if (-not (Test-Path -LiteralPath $pushPath)) {
-                    Write-Host "Folder not found: $pushPath" -ForegroundColor Red
-                    Write-KeystoneLog -Level ERROR -Message "Push path missing: $pushPath"
-                    Wait-KeystoneEnter; continue
-                }
-                Write-Host "Using folder: $pushPath" -ForegroundColor Green
-                Write-KeystoneLog -Level INFO -Message "Push path=$pushPath"
-
-                $br = if ($session.DefaultBranch) { $session.DefaultBranch } else { "main" }
-                Clear-KeystoneInputBuffer
-                $brIn = Read-Host "Branch [$br]"
-                if (-not [string]::IsNullOrWhiteSpace($brIn)) { $br = $brIn.Trim() }
-
-                $msg = "Commit from Keystone - $($session.ProjectPath)"
-                Clear-KeystoneInputBuffer
-                $msgIn = Read-Host "Commit message [default]"
-                if (-not [string]::IsNullOrWhiteSpace($msgIn)) { $msg = $msgIn.Trim() }
-
-                $policy = "Omit"
-                Write-Host ""
-                Write-Host "Will push:" -ForegroundColor Yellow
-                Write-Host "  $pushPath" -ForegroundColor Gray
-                Write-Host "  -> $($session.Provider) $($session.ProjectPath) @ $br" -ForegroundColor Gray
-                Write-Host "  msg: $msg" -ForegroundColor Gray
-                Clear-KeystoneInputBuffer
-                $yes = Read-Host "Type YES to upload (anything else cancels)"
-                if ($yes -ne "YES" -and $yes -ne "yes") {
-                    Write-Host "Cancelled (you must type YES in capitals or lowercase)." -ForegroundColor Yellow
-                    Write-KeystoneLog -Level INFO -Message "Push cancelled at YES prompt (got: $yes)"
+                $preview = Get-KeystoneWorkspacePreview -Session $session
+                if ($preview.RemoteChanged) {
+                    Write-Host 'Your branch changed online. Saving is blocked to protect your teammates.' -ForegroundColor Yellow
+                    Write-Host 'Download a fresh workspace and reconcile local edits.' -ForegroundColor Gray
                     Wait-KeystoneEnter
                     continue
                 }
-
-                Write-Host ""
-                Write-Host "Uploading..." -ForegroundColor Cyan
-                Write-KeystoneLog -Level INFO -Message "UI confirm push path=$pushPath branch=$br provider=$($session.Provider)"
-                try {
-                    $result = Invoke-KeystonePush -Session $session -LocalPath $pushPath -Branch $br -Message $msg -DeletePolicy $policy
-                    Write-Host ""
-                    Write-Host "[OK] Push finished" -ForegroundColor Green
-                    if ($null -ne $result) {
-                        Write-Host "  Files/actions : $($result.FileCount)" -ForegroundColor Green
-                        if ($result.CommitSha) { Write-Host "  Commit        : $($result.CommitSha)" -ForegroundColor Green }
-                        if ($result.Commits) { Write-Host "  Commits       : $($result.Commits -join ', ')" -ForegroundColor Green }
-                        if ($result.Message) { Write-Host "  Note          : $($result.Message)" -ForegroundColor Cyan }
-                        if ($result.Url) { Write-Host "  URL           : $($result.Url)" -ForegroundColor Yellow }
-                    }
-                    Write-KeystoneLog -Level INFO -Message "Push OK files=$($result.FileCount) sha=$($result.CommitSha)"
+                $selected = @($preview.Changes | Where-Object { $_.Selected })
+                if ($selected.Count -eq 0) {
+                    Write-Host 'No safe changes to save.' -ForegroundColor Green
+                    Wait-KeystoneEnter
+                    continue
                 }
-                catch {
-                    Write-KeystoneError -ErrorRecord $_ -Context "Push"
-                    Write-Host ""
-                    Write-Host "PUSH FAILED" -ForegroundColor Red
-                    Write-Host $_.Exception.Message -ForegroundColor Red
-                    Write-Host "See Logs\keystone-*.log" -ForegroundColor Yellow
+                Write-Host 'Keystone Smart Save' -ForegroundColor Cyan
+                Write-Host 'The following files will be saved (deletions are excluded):' -ForegroundColor Gray
+                foreach ($file in $selected) { Write-Host ("  {0}: {1}" -f $file.Kind,$file.Path) }
+                $added = @($selected | Where-Object { $_.Kind -eq 'New' } | ForEach-Object Path)
+                $modified = @($selected | Where-Object { $_.Kind -eq 'Modified' } | ForEach-Object Path)
+                $msg = New-KeystoneSmartMessage -Added $added -Modified $modified
+                Write-Host ("Automatic message: {0}" -f $msg.Title) -ForegroundColor Green
+                $yes = Read-Host 'Type YES to publish these selected changes'
+                if ($yes -cne 'YES') {
+                    Write-Host 'Save cancelled.' -ForegroundColor Yellow
+                    Wait-KeystoneEnter
+                    continue
                 }
-                Write-Host ""
-                Wait-KeystoneEnter -Prompt "Press Enter for main menu..."
+                $saved = Invoke-KeystoneWorkspaceSave -Session $session -SelectedPaths @($selected | ForEach-Object Path)
+                Write-Host ("Saved {0} files: {1}" -f $saved.FileCount,$saved.Message) -ForegroundColor Green
+                Write-Host $saved.Url -ForegroundColor Cyan
+                Wait-KeystoneEnter
             }
             3 {
                 if (-not $session) {
@@ -212,8 +149,6 @@ while ($true) {
                     Wait-KeystoneEnter; continue
                 }
                 if ($session.Provider -ne "GitLab") {
-                    Write-Host "MR is GitLab-only (GitHub PR in Phase C)." -ForegroundColor Yellow
-                    Wait-KeystoneEnter; continue
                 }
                 $src = if ($session.LastBranch) { $session.LastBranch } else { $session.DefaultBranch }
                 $tgt = $session.DefaultBranch
@@ -227,7 +162,8 @@ while ($true) {
                 Write-Host "Description (optional):" -ForegroundColor Cyan
                 $desc = Read-Host
                 $mr = New-KeystoneMergeRequest -Session $session -SourceBranch $src -TargetBranch $tgt -Title $title -Description $desc
-                Write-Host "[OK] $($mr.web_url)" -ForegroundColor Green
+                $reviewUrl = if ($mr.html_url) { $mr.html_url } else { $mr.web_url }
+                Write-Host "[OK] $reviewUrl" -ForegroundColor Green
                 Wait-KeystoneEnter
             }
             4 {
