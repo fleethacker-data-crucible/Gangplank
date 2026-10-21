@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Keystone Workspace</title><style>
+:root{color-scheme:dark;font-family:Segoe UI,system-ui,sans-serif;background:#0b1220;color:#e8eef8}*{box-sizing:border-box}
+body{margin:0}header{padding:18px 24px;background:#111d30;border-bottom:1px solid #2b3b55;display:flex;align-items:center;justify-content:space-between}
+.brand{font-size:21px;font-weight:750;letter-spacing:.07em}.tag{font-size:12px;color:#93b6e7}main{display:grid;grid-template-columns:220px minmax(0,1fr) 350px;min-height:calc(100vh - 65px)}
+nav{padding:20px;border-right:1px solid #2b3b55}nav a{display:block;padding:13px;color:#c3d2e8;text-decoration:none;border-radius:9px}nav a.active{background:#223755;color:#fff}
+section{padding:30px;max-width:1000px;width:100%;margin:auto}.muted{color:#9cabc1}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin:26px 0}
+.card,.panel{background:#142238;border:1px solid #2a3c57;border-radius:13px;padding:20px}.card h3{margin:0 0 9px;font-size:15px}.card p{margin:0;font-size:13px;color:#aabbd0}
+button{background:#4b92ec;border:0;color:#071321;font-weight:700;padding:11px 15px;border-radius:9px;cursor:pointer}button:focus-visible,textarea:focus-visible{outline:3px solid #b7d8ff}
+aside{border-left:1px solid #2b3b55;display:flex;flex-direction:column;min-height:500px}.chathead{padding:22px;border-bottom:1px solid #2b3b55;font-weight:700}
+.messages{flex:1;padding:18px;overflow:auto}.bubble{background:#20344e;border-radius:12px;padding:13px;margin-bottom:12px;font-size:14px;line-height:1.5}
+form{padding:14px;border-top:1px solid #2b3b55}textarea{width:100%;background:#101c2e;color:#fff;border:1px solid #38506d;border-radius:9px;padding:12px;resize:vertical;min-height:75px}form button{margin-top:8px;width:100%}
+@media(max-width:950px){main{grid-template-columns:180px 1fr}aside{grid-column:1/-1;min-height:320px;border-top:1px solid #2b3b55;border-left:0}}@media(max-width:600px){main{display:block}nav{display:flex;overflow:auto;gap:5px}nav a{white-space:nowrap}section{padding:18px}}
+</style></head><body>
+<header><span class="brand">◆ KEYSTONE</span><span class="tag">Workspace Preview · Offline</span></header>
+<main><nav aria-label="Workspace navigation"><a class="active" href="#home">⌂ Overview</a><a href="#projects">▣ Projects</a><a href="#changes">↗ Changes</a><a href="#activity">◷ Activity</a><a href="#settings">⚙ Settings</a></nav>
+<section><h1>Your development workspace</h1><p class="muted">Create, improve, and share software without memorizing Git commands.</p>
+<div class="cards"><div class="card"><h3>Projects</h3><p>Connect your GitHub or GitLab workspace</p></div><div class="card"><h3>Smart Save</h3><p>Automatic change summaries and commit messages</p></div><div class="card"><h3>Review</h3><p>Inspect differences before sharing</p></div></div>
+<div class="panel"><h2>Get started</h2><p class="muted">This interface is a standalone design preview. Repository actions will become available after the secure local API host is implemented.</p><button type="button" id="copy">Copy launch instructions</button><p id="feedback" role="status" class="muted"></p></div></section>
+<aside><div class="chathead">✦ Keystone AI <span class="tag">Preview</span></div><div class="messages" id="messages" aria-live="polite"><div class="bubble">Welcome! I'm the Keystone assistant interface. Live project-aware AI requires the upcoming approved provider integration.</div></div>
+<form id="chat"><label for="prompt" class="muted">Your message</label><textarea id="prompt" placeholder="Ask about your project..." required></textarea><button type="submit">Send</button></form></aside></main>
+<script>
+const messages=document.getElementById('messages');
+document.getElementById('chat').addEventListener('submit',e=>{e.preventDefault();const field=document.getElementById('prompt');const value=field.value.trim();if(!value)return;const bubble=document.createElement('div');bubble.className='bubble';bubble.textContent=value;messages.appendChild(bubble);field.value='';const note=document.createElement('div');note.className='bubble';note.textContent='AI service not connected yet. This preview does not send or store your message.';messages.appendChild(note);messages.scrollTop=messages.scrollHeight;});
+document.getElementById('copy').addEventListener('click',async()=>{const t='Open web/index.html in a browser to preview Keystone Workspace.';try{await navigator.clipboard.writeText(t);document.getElementById('feedback').textContent='Instructions copied.'}catch{document.getElementById('feedback').textContent=t}});
+</script></body></html>
