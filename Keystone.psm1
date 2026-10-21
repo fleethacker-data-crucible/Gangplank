@@ -17,6 +17,7 @@ if (-not $script:KeystoneRoot) {
 . (Join-Path $script:KeystoneRoot "Core\Diff.ps1")
 . (Join-Path $script:KeystoneRoot "Core\SmartSave.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Workspace.ps1")
+. (Join-Path $script:KeystoneRoot "Core\AI.ps1")
 . (Join-Path $script:KeystoneRoot "ArcBridge.ps1")
 . (Join-Path $script:KeystoneRoot "Providers\GitProviderBase.ps1")
 . (Join-Path $script:KeystoneRoot "Providers\GitLabProvider.ps1")
@@ -66,6 +67,7 @@ function Open-KeystoneRepository {
         [Parameter(Mandatory)][string]$Url,
         [string]$Token
     )
+    Assert-KeystoneTrustedRepositoryUrl -Url $Url
     $parsed = Parse-KeystoneRepoUrl -Url $Url
     Write-KeystoneLog -Level INFO -Message "Provider=$($parsed.Provider) Path=$($parsed.ProjectPath)"
 
@@ -235,6 +237,13 @@ Export-ModuleMember -Function @(
     "Get-KeystoneRemoteHead",
     "Get-KeystoneSafeWorkspacePath",
     "Test-KeystoneSensitivePath",
+    "Assert-KeystoneTrustedRepositoryUrl",
+    "Get-KeystoneAiConfiguration",
+    "Get-KeystoneAiToken",
+    "New-KeystoneAiPayload",
+    "Invoke-KeystoneAI",
+    "Invoke-KeystoneAIStream",
+    "Send-KeystoneSseEvent",
     "Get-KeystoneWorkspacePreview",
     "Invoke-KeystoneWorkspaceSave",
     "New-KeystoneSmartMessage",
