@@ -241,6 +241,7 @@ Export-ModuleMember -Function @(
     "Get-KeystonePathDiff",
     "Get-KeystoneRemoteHead",
     "Get-KeystoneSafeWorkspacePath",
+    "New-KeystoneWorkBranch",
     "Test-KeystoneSensitivePath",
     "Assert-KeystoneTrustedRepositoryUrl",
     "Get-KeystoneAiConfiguration",
