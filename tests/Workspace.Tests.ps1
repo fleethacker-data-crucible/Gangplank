@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $root 'Keystone.psm1') -Force
 function Assert($value,[string]$message) { if (-not $value) { throw "FAIL: $message" } }
-$sourceFiles = @(Get-ChildItem -LiteralPath $root -Include '*.ps1','*.psm1' -File -Recurse)
+$sourceFiles = @(Get-ChildItem -LiteralPath $root -File -Recurse | Where-Object { $_.Extension -in @('.ps1','.psm1') })
 foreach ($file in $sourceFiles) {
     $tokens = $null; $errors = $null
     [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName,[ref]$tokens,[ref]$errors)
