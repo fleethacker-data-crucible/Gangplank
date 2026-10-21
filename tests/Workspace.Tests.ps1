@@ -49,7 +49,7 @@ try {
     $name = New-KeystoneWorkBranch -Session $session
     Assert ($name -match '^keystone/work-') 'Generated work branch name invalid'
     Assert (-not $session.BaselineSha) 'Branch creation must clear baseline'
-    $session.LastBranch = 'main'; $session.BaselineSha = 'abc123'
+    $session.LastBranch = 'main'; $session.BaselineSha = 'abc123'; $session.LocalPath = $temp
     $provider.CurrentHead = 'other'
     Assert (Get-KeystoneWorkspacePreview -Session $session).RemoteChanged 'Remote update undetected'
     $blocked = $false
