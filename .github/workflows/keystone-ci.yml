@@ -17,3 +17,4 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & .\tests\SmartSave.Tests.ps1
           & .\tests\Workspace.Tests.ps1
+          & .\tests\WebHost.Tests.ps1
