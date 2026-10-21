@@ -54,6 +54,19 @@ function Test-KeystoneSensitivePath {
     return $false
 }
 
+function Test-KeystoneSecretContent {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $file = Get-Item -LiteralPath $Path
+    if ($file.Length -gt 5242880) { return $true }
+    if ($file.Extension.ToLowerInvariant() -notin @('.txt','.ps1','.psm1','.json','.yaml','.yml','.py','.js','.ts','.cs','.html','.xml','.config','.properties','.md','.sh','.bat','.cmd','.env')) { return $false }
+    $text = [IO.File]::ReadAllText($file.FullName)
+    if ($text -match '-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----') { return $true }
+    if ($text -match '\b(?:gh[pousr]_[A-Za-z0-9_]{24,}|github_pat_[A-Za-z0-9_]{24,}|AKIA[0-9A-Z]{16})\b') { return $true }
+    return $false
+}
+
 function Get-KeystoneWorkspacePreview {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session)
@@ -77,6 +90,7 @@ function Get-KeystoneWorkspacePreview {
                 $file = Join-Path $Session.LocalPath ($path.Replace('/',[IO.Path]::DirectorySeparatorChar))
                 if (Test-Path -LiteralPath $file -PathType Leaf) { $size = (Get-Item -LiteralPath $file).Length }
                 if ($size -gt 5242880) { $blocked = $true }
+                elseif (Test-KeystoneSecretContent -Path $file) { $blocked = $true }
             }
             [void]$records.Add([pscustomobject]@{
                 Path = $path; Kind = $kind; Size = $size
@@ -135,6 +149,7 @@ function Invoke-KeystoneWorkspaceSave {
             $item = Get-Item -LiteralPath $full
             if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Linked files are not supported: $p" }
             if ($item.Length -gt 5242880) { throw "File grew beyond 5 MB: $p" }
+            if (Test-KeystoneSecretContent -Path $full) { throw "Potential secret detected. File not uploaded: $p" }
             $sha = $provider.CreateBlob($Session.ProjectPath,[IO.File]::ReadAllBytes($full))
             [void]$treeItems.Add(@{ path = $p; mode = '100644'; type = 'blob'; sha = $sha })
         }
@@ -156,6 +171,7 @@ function Invoke-KeystoneWorkspaceSave {
             $item = Get-Item -LiteralPath $full
             if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Linked files are not supported: $p" }
             if ($item.Length -gt 5242880) { throw "File grew beyond 5 MB: $p" }
+            if (Test-KeystoneSecretContent -Path $full) { throw "Potential secret detected. File not uploaded: $p" }
             [void]$actions.Add(@{
                 action = $(if ($available[$p].Kind -eq 'New') { 'create' } else { 'update' })
                 file_path = $p; content = [Convert]::ToBase64String([IO.File]::ReadAllBytes($full)); encoding = 'base64'
