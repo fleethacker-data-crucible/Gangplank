@@ -1,6 +1,6 @@
 @echo off
 setlocal
-cd /d "%~dp0" || (echo ERROR: cannot cd to tool folder & pause & exit /b 1)
+cd /d "%~dp0" || (echo ERROR: cannot open Keystone folder & pause & exit /b 1)
 
 if not defined ARC_PATH (
   if exist "%~dp0..\arc\pm.ps1" set "ARC_PATH=%~dp0..\arc"
@@ -8,19 +8,26 @@ if not defined ARC_PATH (
 )
 
 echo.
-echo ================================================
-echo          Keystone Launcher
-echo ================================================
+echo ==============================================
+echo    KEYSTONE   -   Development Workspace
+echo ==============================================
 echo.
-if defined ARC_PATH echo ARC_PATH=%ARC_PATH%
+echo Starting local browser workspace.
+echo To use the classic text menu, run:
+echo    Launch-Keystone.bat -Cli
+echo.
+where powershell >nul 2>&1 || (echo ERROR: Windows PowerShell 5.1 not found & pause & exit /b 1)
 
-where powershell >nul 2>&1 || (echo ERROR: powershell not on PATH & pause & exit /b 1)
-
-powershell.exe -NoProfile -ExecutionPolicy Bypass -NoLogo -File "%~dp0Keystone.ps1"
-set ERR=%ERRORLEVEL%
+if /i "%~1"=="-Cli" (
+  powershell.exe -NoProfile -NoLogo -File "%~dp0Keystone.ps1"
+) else (
+  powershell.exe -NoProfile -NoLogo -File "%~dp0Start-KeystoneWeb.ps1"
+)
+set "ERR=%ERRORLEVEL%"
 if not "%ERR%"=="0" (
   echo.
-  echo Exit code %ERR%
+  echo Keystone stopped with code %ERR%.
+  echo Check execution policy, script signing and localhost permissions with your administrator.
   pause
 )
 exit /b %ERR%
