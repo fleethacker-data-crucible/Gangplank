@@ -16,6 +16,7 @@ if (-not $script:KeystoneRoot) {
 . (Join-Path $script:KeystoneRoot "Core\Configuration.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Diff.ps1")
 . (Join-Path $script:KeystoneRoot "Core\SmartSave.ps1")
+. (Join-Path $script:KeystoneRoot "Core\Workspace.ps1")
 . (Join-Path $script:KeystoneRoot "ArcBridge.ps1")
 . (Join-Path $script:KeystoneRoot "Providers\GitProviderBase.ps1")
 . (Join-Path $script:KeystoneRoot "Providers\GitLabProvider.ps1")
@@ -95,56 +96,50 @@ function Open-KeystoneRepository {
         ProviderObj   = $prov
         LocalPath     = $null
         LastBranch    = $null
+        BaselineSha   = $null
+        BaselineMap   = @{}
     }
 }
 
 function Invoke-KeystonePull {
+    [CmdletBinding()]
     param($Session, [string]$Branch, [string]$LocalPath)
+    if (-not $Session) { throw 'Open a repository first.' }
     if (-not $Branch) { $Branch = $Session.DefaultBranch }
     if (-not $LocalPath) {
-        $safe = Get-KeystoneSafeName ($Session.ProjectPath -replace '/', '-')
-        $LocalPath = Join-Path $script:KeystoneRoot "work\$safe\$Branch"
+        $LocalPath = Get-KeystoneSafeWorkspacePath -Base (Join-Path $script:KeystoneRoot 'work') -Project $Session.ProjectPath -Branch $Branch
     }
-    if (-not (Test-Path -LiteralPath $LocalPath)) {
-        New-Item -ItemType Directory -Path $LocalPath -Force | Out-Null
-        Write-KeystoneLog -Level INFO -Message "Created local folder: $LocalPath"
+    # Never delete, replace, or silently merge local files with a downloaded snapshot.
+    if (Test-Path -LiteralPath $LocalPath) {
+        if (-not (Test-Path -LiteralPath $LocalPath -PathType Container)) { throw 'Download target is not a folder.' }
+        if (@(Get-ChildItem -LiteralPath $LocalPath -Force -ErrorAction Stop).Count -gt 0) {
+            throw 'Destination contains files. To prevent data loss, choose a new empty folder for this download.'
+        }
     }
-
-    # Empty branch list => likely empty repo; skip hard failure
-    $branchCount = 0
-    try { $branchCount = @($Session.Branches).Count } catch { }
-    if ($branchCount -eq 0) {
-        Write-KeystoneLog -Level WARN -Message "No remote branches for $($Session.ProjectPath) - empty repo; nothing to pull"
-        throw "EMPTY_REPO|Branch list is empty. Use Share my folder to create the first commit, then Get latest works."
-    }
-
-    $tmpZip = Join-Path ([IO.Path]::GetTempPath()) ("keystone-{0}.zip" -f [guid]::NewGuid().ToString("N"))
-    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) ("keystone-ex-{0}" -f [guid]::NewGuid().ToString("N"))
+    $head = Get-KeystoneRemoteHead -Session $Session -Branch $Branch
+    if (-not $head) { throw "Branch '$Branch' has no downloadable commit. Initialize the repository first." }
+    $tmpZip = Join-Path ([IO.Path]::GetTempPath()) ("keystone-{0}.zip" -f [guid]::NewGuid().ToString('N'))
+    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) ("keystone-ex-{0}" -f [guid]::NewGuid().ToString('N'))
     try {
-        Write-KeystoneLog -Level INFO -Message "Downloading $($Session.Provider) $($Session.ProjectPath)@$Branch"
-        try {
-            $Session.ProviderObj.DownloadArchive($Session.ProjectPath, $Branch, $tmpZip)
+        # Download a fixed commit, not a moving branch tip.
+        $Session.ProviderObj.DownloadArchive($Session.ProjectPath,$head,$tmpZip)
+        if (-not (Test-Path -LiteralPath $tmpZip) -or (Get-Item -LiteralPath $tmpZip).Length -eq 0) {
+            throw 'Repository archive was empty.'
         }
-        catch {
-            $msg = $_.Exception.Message
-            if ($msg -match '404|Not Found|empty') {
-                throw "EMPTY_REPO|No archive for branch '$Branch'. Repo may be empty - Share my folder first. ($msg)"
-            }
-            throw
-        }
-        if (-not (Test-Path $tmpZip) -or ((Get-Item $tmpZip).Length -eq 0)) {
-            throw "EMPTY_REPO|Archive empty for '$Branch'. Share my folder first."
-        }
-        Expand-Archive -Path $tmpZip -DestinationPath $tmpDir -Force
-        $top = Get-ChildItem $tmpDir -Force | Select-Object -First 1
-        $src = if ($top -and $top.PSIsContainer) { $top.FullName } else { $tmpDir }
-        Get-ChildItem $LocalPath -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Expand-Archive -LiteralPath $tmpZip -DestinationPath $tmpDir -Force
+        $roots = @(Get-ChildItem -LiteralPath $tmpDir -Force)
+        $src = if ($roots.Count -eq 1 -and $roots[0].PSIsContainer) { $roots[0].FullName } else { $tmpDir }
+        if (-not (Test-Path -LiteralPath $LocalPath)) { New-Item -ItemType Directory -Path $LocalPath -Force | Out-Null }
         Copy-KeystoneTree -Source $src -Destination $LocalPath
-        Write-KeystoneLog -Level INFO -Message "Pulled '$Branch' into $LocalPath"
-        return $LocalPath
+        $Session.LocalPath = [IO.Path]::GetFullPath($LocalPath)
+        $Session.LastBranch = $Branch
+        $Session.BaselineSha = $head
+        $Session.BaselineMap = Get-KeystoneLocalFileMap -Root $Session.LocalPath
+        Write-KeystoneLog -Level INFO -Message "Workspace downloaded at commit $head -> $LocalPath"
+        return $Session.LocalPath
     } finally {
-        if (Test-Path $tmpZip) { Remove-Item $tmpZip -Force -ErrorAction SilentlyContinue }
-        if (Test-Path $tmpDir) { Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $tmpZip) { Remove-Item -LiteralPath $tmpZip -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $tmpDir) { Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
 
@@ -237,6 +232,13 @@ Export-ModuleMember -Function @(
     "Get-KeystoneArcItemName",
     "Get-KeystoneArcCanonicalMap",
     "Get-KeystonePathDiff",
+    "Get-KeystoneRemoteHead",
+    "Get-KeystoneSafeWorkspacePath",
+    "Test-KeystoneSensitivePath",
+    "Get-KeystoneWorkspacePreview",
+    "Invoke-KeystoneWorkspaceSave",
+    "New-KeystoneSmartMessage",
+    "Get-KeystoneSmartSavePrompt",
     "Get-KeystoneLocalFileMap",
     "Get-KeystoneSafeName",
     "Clear-KeystoneInputBuffer",
