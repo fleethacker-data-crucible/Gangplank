@@ -10,12 +10,13 @@ The server binds to http://localhost:8769/. Press Ctrl+C in its PowerShell windo
 
 ## Connect → Download → Edit → Smart Save
 1. Paste a GitHub or GitLab project URL and connect using your configured credentials.
-2. Download a fresh snapshot into a new, safe working folder. Existing local work is never overwritten.
+2. Click **Start my safe workspace**. Keystone creates an isolated work branch and downloads a fresh snapshot into a new folder. Existing local work is never overwritten.
 3. Edit files using your normal tools.
 4. Open Smart Save, refresh and choose exactly which added or modified files to publish. Deletions are unselected by default.
 5. Accept the automatically generated commit title, or explicitly request a filename-only AI suggestion, then confirm publication.
+6. Click **Create review request** to have Keystone automatically compose a GitHub pull request or GitLab merge request for your changes.
 
-Keystone checks the remote HEAD against your pinned download baseline, uses non-forced GitHub branch updates, and GitLab per-file commit guards. If others updated the branch, publishing stops.
+Keystone checks the remote HEAD against your pinned download baseline, uses non-forced GitHub branch updates, and GitLab per-file commit guards. If others updated the branch, publishing stops. Direct saves to the default branch are disabled unless KEYSTONE_ALLOW_DEFAULT_BRANCH_WRITES=1 is explicitly set.
 Smart Save publishes directly to the remote branch. It is not an offline-only backup or staging mechanism.
 
 ## AI assistant
