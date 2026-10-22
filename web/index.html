@@ -16,7 +16,7 @@
 <div class="actions"><button class="btn mainBtn" id="saveBtn" disabled>Save selected files →</button><button id="reviewBtn" class="btn" disabled>Create review request →</button></div><div id="saveNotice" class="notice" role="status" hidden></div></section>
 <section class="section" id="activity"><div class="eyebrow">ACTIVITY</div><h1>Your session history.</h1><p class="muted">Local in-session records, no external telemetry.</p><div id="activityList"><div class="activityItem">Keystone started<time>Current session</time></div></div></section>
 <section class="section" id="integrations"><div class="eyebrow">CREDENTIAL CONNECTIONS</div><h1>Arc &amp; Integrations</h1><p class="muted sub">Keystone uses the same Arc vault as your other PowerShell tools. Authentication happens once in the Keystone PowerShell window, before the browser server starts.</p>
-<div class="panel"><div class="split"><h2 style="margin:0">Arc vault status</h2><button id="arcRefresh" class="btn" type="button">Refresh status</button></div><div id="arcStatus" class="notice" role="status">Checking Arc…</div><p class="small">If Arc is locked, restart Keystone and complete CAC + TOTP in its own PowerShell window. An already-unlocked separate Arc window does not share its in-memory session.</p></div>
+<div class="panel"><div class="split"><h2 style="margin:0">Arc vault status</h2><button id="arcRefresh" class="btn" type="button">Refresh status</button></div><div id="arcStatus" class="notice" role="status">Checking Arc…</div><div id="arcDetails" class="mono muted" style="white-space:pre-wrap;overflow-wrap:anywhere;margin-top:10px"></div><div class="actions"><button id="copyArcDiagnostics" type="button" class="btn">Copy safe diagnostics</button></div><p class="small">If Arc is locked, restart Keystone and complete CAC + TOTP in its own PowerShell window. An already-unlocked separate Arc window does not share its in-memory session.</p></div>
 <div class="panel"><h2>Provider credentials</h2><p class="muted">Only service names and readiness are displayed here. Keystone never sends token values to your browser.</p><div id="arcMappings"></div><div id="arcNotice" class="notice" hidden role="status"></div></div>
 <div class="panel"><h2>Connection troubleshooting</h2><p class="small">GitHub uses the Arc item <strong>github</strong>; GitLab uses <strong>gitmil</strong>; GenAI uses <strong>genapi</strong> by default. If your item has a different name, select it above and save the mapping.</p><p class="small">A 401 means the provider rejected the token. A 403 usually means permissions, SSO, or scopes. A 404 can mean the URL is incorrect or the account cannot access the repository.</p></div></section>
 <section class="section" id="help"><div class="eyebrow">HOW IT WORKS</div><h1>No Git training necessary.</h1><div class="panel"><h2>Three steps</h2><p><strong>Connect</strong> your project using its web URL.</p><p><strong>Download</strong> a fresh copy to an isolated folder. Edit files normally.</p><p><strong>Smart Save</strong> shows changed files and generates a description automatically.</p></div><div class="panel"><h2>Privacy and AI</h2><p>Keystone Assist is advisory; it cannot execute commands or edit files. Your chat text and project name are sent only to your configured, approved model gateway. No source code is uploaded to AI automatically.</p><p class="mono">KEYSTONE_AI_URL · KEYSTONE_AI_MODEL · GENAI_TOKEN / ARC genapi</p></div><div class="panel"><h2>Compatibility</h2><p>Windows PowerShell 5.1, a browser, GitHub or GitLab API access. The backend stays on localhost. Ctrl+C in its PowerShell window stops it.</p></div></section></div></div>
@@ -29,6 +29,8 @@ function note(id,t,k=''){let x=el(id);x.hidden=!t;x.className='notice '+k;x.text
 function log(t){let d=document.createElement('div'),x=document.createElement('time');d.className='activityItem';d.textContent=t;x.textContent=new Date().toLocaleTimeString();d.append(x);el('activityList').prepend(d);}
 async function api(path,method='GET',body){let r=await fetch(path,{method,headers:{'X-Keystone-Session':CSRF,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,cache:'no-store'}),t=await r.text(),x;try{x=JSON.parse(t)}catch{throw Error('Invalid service response')}if(!r.ok)throw Error(x.error||'Request failed');return x;}
 
+let arcDiagnosticText='';
+el('copyArcDiagnostics').addEventListener('click',async()=>{if(!arcDiagnosticText){await loadIntegrations()}try{await navigator.clipboard.writeText(arcDiagnosticText);note('arcNotice','Safe diagnostics copied. They contain no tokens or passwords.','ok')}catch(e){note('arcNotice','Clipboard access denied. Select and copy the details displayed above.','warn')}});
 async function loadIntegrations(){
   const status=el('arcStatus'),list=el('arcMappings');
   try{
@@ -36,6 +38,20 @@ async function loadIntegrations(){
     const ready=info.arcLoaded&&info.arcUnlocked;
     status.className='notice '+(ready?'ok':'warn');
     status.textContent=info.message||'Arc status unavailable.';
+    const helper=info.helpers||{};
+    const missing=Array.isArray(info.missingModules)?info.missingModules:[];
+    const details=[
+      'Status code: '+(info.code||'OK'),
+      'ARC located: '+Boolean(info.arcFound),
+      'ARC loaded: '+Boolean(info.arcLoaded),
+      'Vault unlocked: '+Boolean(info.arcUnlocked),
+      'Helpers available: '+Object.entries(helper).filter(([k,v])=>v).map(([k,v])=>k).join(', '),
+      ...(missing.length?['Missing ARC library files:',...missing.map(x=>'  '+x)]:[]),
+      'GitHub mapping: '+(info.integrations||[]).filter(x=>x.provider==='GitHub').map(x=>x.item+' ('+x.source+')').join(''),
+      'GitLab mapping: '+(info.integrations||[]).filter(x=>x.provider==='GitLab').map(x=>x.item+' ('+x.source+')').join('')
+    ];
+    arcDiagnosticText=details.join('\n');
+    el('arcDetails').textContent=ready?'':arcDiagnosticText;
     list.replaceChildren();
     const names=Array.isArray(info.itemNames)?info.itemNames:[];
     for(const entry of (info.integrations||[])){
