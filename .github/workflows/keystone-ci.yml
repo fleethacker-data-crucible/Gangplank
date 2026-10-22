@@ -18,3 +18,4 @@ jobs:
           & .\tests\SmartSave.Tests.ps1
           & .\tests\Workspace.Tests.ps1
           & .\tests\WebHost.Tests.ps1
+          & .\tests\ArcIntegration.Tests.ps1
