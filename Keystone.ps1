@@ -11,13 +11,14 @@ Import-Module (Join-Path $here "Keystone.psm1") -Force -Global
 Initialize-Keystone -LogLevel "INFO"
 
 Show-KeystoneBanner
-$arcOk = Import-KeystoneArcSession
-if ($arcOk) {
-    Write-Host "[+] ARC loaded" -ForegroundColor Green
-    $r = Find-KeystoneArcRoot
-    if ($r) { Write-Host "    $r" -ForegroundColor DarkGray }
+# Use same-process ARC CAC/TOTP authentication as the browser host.
+$arcAuth = Initialize-KeystoneArcAuthentication
+if ($arcAuth.Unlocked) {
+    Write-Host '[+] ARC ready for GitHub and GitLab credentials.' -ForegroundColor Green
+} elseif ($arcAuth.Loaded) {
+    Write-Host '[!] ARC loaded but locked. Only configured environment tokens can be used.' -ForegroundColor Yellow
 } else {
-    Write-Host "[!] ARC not found - env tokens only" -ForegroundColor Yellow
+    Write-Host '[!] ARC not available. Set ARC_PATH or use approved environment tokens.' -ForegroundColor Yellow
 }
 $cfg = Get-KeystoneConfig
 Write-Host "    gitmil -> $($cfg.ArcItems.GitLab) | github -> $($cfg.ArcItems.GitHub)" -ForegroundColor DarkGray
