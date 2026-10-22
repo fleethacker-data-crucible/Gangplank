@@ -27,6 +27,14 @@ try {
     $csrf = $Matches[1]
     if ($csrf -eq '__KEYSTONE_CSRF__' -or $csrf.Length -lt 20) { throw 'CSRF token not generated.' }
     $status = Invoke-RestMethod -Uri ($url + 'api/status') -TimeoutSec 3
+    $integration = Invoke-RestMethod -Uri ($url + 'api/integrations') -TimeoutSec 3
+    if ($null -eq $integration.arcLoaded -or @($integration.integrations).Count -lt 2) {
+        throw 'Localhost ARC integrations status endpoint is missing provider metadata.'
+    }
+    $publicJson = $integration | ConvertTo-Json -Depth 6
+    if ($publicJson -match 'Authorization:|Bearer\s+[A-Za-z0-9]+') {
+        throw 'Integrations endpoint leaked authorization text.'
+    }
     if ($status.connected) { throw 'Fresh workspace unexpectedly has a remote session.' }
     $failedAsExpected = $false
     try {
