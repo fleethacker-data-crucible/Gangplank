@@ -2,15 +2,12 @@ name: Prune safely merged branches
 on:
   push:
     branches: [main]
-  pull_request:
-    types: [closed]
   workflow_dispatch:
 permissions:
   contents: write
   pull-requests: read
 jobs:
   prune:
-    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - name: Remove only fully merged unchanged same-repository branches
