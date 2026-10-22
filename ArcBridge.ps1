@@ -243,26 +243,43 @@ function Initialize-KeystoneArcAuthentication {
     }
 }
 
+function Convert-KeystoneArcVaultRows {
+    # ARC sometimes returns an ArrayList with an extra unary-comma wrapper.
+    # Flatten collections before selecting by Service (not $list.Service).
+    [CmdletBinding()]
+    param($InputObject)
+    $queue = New-Object System.Collections.Queue
+    $results = New-Object System.Collections.Generic.List[object]
+    if ($null -ne $InputObject) { $queue.Enqueue($InputObject) }
+    while ($queue.Count -gt 0) {
+        $item = $queue.Dequeue()
+        if ($null -eq $item) { continue }
+        if ($item -is [System.Collections.IList] -and -not ($item -is [string])) {
+            foreach ($child in $item) { if ($null -ne $child) { $queue.Enqueue($child) } }
+        } elseif ($item.PSObject.Properties.Name -contains 'Service') {
+            [void]$results.Add($item)
+        }
+    }
+    return @($results.ToArray())
+}
+
 function Get-KeystoneArcServiceNames {
     [CmdletBinding()]
     param()
     if (-not (Test-KeystoneArcVaultUnlocked)) { return @() }
-    $command = Get-Command Get-PmVaultNameCatalog -ErrorAction SilentlyContinue
-    if (-not $command) { return @() }
-    try {
-        $catalog = Get-PmVaultNameCatalog
-        $names = New-Object System.Collections.Generic.List[string]
-        foreach ($row in $catalog) {
-            if ($row -is [System.Collections.IList] -and -not ($row -is [string])) {
-                foreach ($nested in $row) {
-                    if ($nested -and $nested.Service) { [void]$names.Add([string]$nested.Service) }
-                }
-            } elseif ($row -and $row.Service) {
-                [void]$names.Add([string]$row.Service)
-            }
-        }
-        return @($names.ToArray() | Sort-Object -Unique)
-    } catch { return @() }
+    $catalog = $null
+    if (Get-Command Get-PmVaultNameCatalog -ErrorAction SilentlyContinue) {
+        try { $catalog = Get-PmVaultNameCatalog } catch { }
+    }
+    if ($null -eq $catalog -and (Get-Command Get-LiveVault -ErrorAction SilentlyContinue)) {
+        try { $catalog = Get-LiveVault } catch { }
+    }
+    $names = New-Object System.Collections.Generic.List[string]
+    foreach ($row in (Convert-KeystoneArcVaultRows -InputObject $catalog)) {
+        $name = [string]$row.Service
+        if (-not [string]::IsNullOrWhiteSpace($name)) { [void]$names.Add($name) }
+    }
+    return @($names.ToArray() | Sort-Object -Unique)
 }
 
 function Get-KeystoneArcConnectionStatus {
@@ -334,15 +351,16 @@ function Get-KeystoneArcSecretByName {
     if (Get-Command Find-VaultRows -ErrorAction SilentlyContinue) {
         try {
             $hits = Find-VaultRows -Name $ServiceName
-            foreach ($hit in $hits) {
-                if ($hit -and [string]$hit.Service -eq $ServiceName) { $row = $hit; break }
+            foreach ($hit in (Convert-KeystoneArcVaultRows -InputObject $hits)) {
+                if ([string]$hit.Service -eq $ServiceName) { $row = $hit; break }
             }
         } catch { }
     }
     if (-not $row -and (Get-Command Get-LiveVault -ErrorAction SilentlyContinue)) {
         try {
-            foreach ($hit in (Get-LiveVault)) {
-                if ($hit -and [string]$hit.Service -eq $ServiceName) { $row = $hit; break }
+            $hits = Get-LiveVault
+            foreach ($hit in (Convert-KeystoneArcVaultRows -InputObject $hits)) {
+                if ([string]$hit.Service -eq $ServiceName) { $row = $hit; break }
             }
         } catch { }
     }
