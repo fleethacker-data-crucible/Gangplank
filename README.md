@@ -8,6 +8,10 @@ Browser-first, no-Git-training development workspace built for Windows PowerShel
 Double-click Launch-Keystone.bat for the browser UI. For the classic text menu run Launch-Keystone.bat -Cli. Or run Start-KeystoneWeb.ps1 from an approved PowerShell session.
 The server binds to http://localhost:8769/. Press Ctrl+C in its PowerShell window to stop. If HttpListener requires a URL reservation, work with your IT administrator.
 
+**Restricted PowerShell launch compatibility:** The batch file uses the same process-scoped `-STA -NoProfile -ExecutionPolicy Bypass` startup switches as ARC and Cascade. This applies only to the launched process and does not modify your device's execution-policy settings or override enforced Group Policy, application control, or IT authorization requirements.
+
+For troubleshooting, run `Launch-Keystone.bat -NoBrowser` to start the host without opening a browser. To choose a port, run `Launch-Keystone.bat -NoBrowser 8770`, then open `http://localhost:8770/`. A PowerShell script-policy error is different from an HttpListener access-denied/URL-reservation error; the latter requires an IT-approved configuration rather than changing PowerShell launch flags.
+
 ## Connect → Download → Edit → Smart Save
 1. Paste a GitHub or GitLab project URL and connect using your configured credentials.
 2. Click **Start my safe workspace**. Keystone creates an isolated work branch and downloads a fresh snapshot into a new folder. Existing local work is never overwritten.
