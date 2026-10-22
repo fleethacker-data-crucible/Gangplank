@@ -7,14 +7,16 @@
   exposes Git/AI tokens through the browser. Ctrl+C stops the host.
 #>
 [CmdletBinding()]
-param([ValidateRange(1025,65535)][int]$Port = 8769, [switch]$NoBrowser, [switch]$SkipArcUnlock)
+param([ValidateRange(1025,65535)][int]$Port = 8769, [switch]$NoBrowser, [switch]$SkipArcUnlock, [switch]$LocalDev)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 Import-Module (Join-Path $root 'Keystone.psm1') -Force
 Initialize-Keystone
 # Import ARC ONCE and perform its normal CAC/TOTP unlock before serving any
 # browser requests. The browser never starts an ARC authentication prompt.
-$arcState = Initialize-KeystoneArcAuthentication -SkipUnlock:$SkipArcUnlock
+# LocalDev deliberately does not import pm.ps1 or open the real ARC vault.
+$arcState = if ($LocalDev) { [pscustomobject]@{ Unlocked = $false } } else { Initialize-KeystoneArcAuthentication -SkipUnlock:$SkipArcUnlock }
+if ($LocalDev) { Write-Host '[LOCAL DEV] ARC is not imported; CAC/TOTP and vault operations remain disabled.' -ForegroundColor Yellow }
 if (-not $arcState.Unlocked) {
     Write-Host '[!] ARC is not unlocked. Keystone can still use approved environment tokens.' -ForegroundColor Yellow
     Write-Host '[!] To use ARC, restart Keystone and complete the CAC/TOTP steps in THIS console.' -ForegroundColor DarkGray
