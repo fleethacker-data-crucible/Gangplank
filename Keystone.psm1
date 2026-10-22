@@ -42,24 +42,36 @@ function Initialize-Keystone {
 }
 
 function Get-KeystoneToken {
-    param([ValidateSet("GitLab","GitHub")][string]$Provider)
-    $envName = if ($Provider -eq "GitHub") { "GITHUB_TOKEN" } else { "GITLAB_TOKEN" }
-    if (Test-Path "env:$envName") {
-        $v = (Get-Item "env:$envName").Value
-        if (-not [string]::IsNullOrWhiteSpace($v)) {
-            Write-KeystoneLog -Level INFO -Message "Token from env:$envName"
-            return $v.Trim()
-        }
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][ValidateSet('GitHub','GitLab')][string]$Provider)
+    $envName = if ($Provider -eq 'GitHub') { 'GITHUB_TOKEN' } else { 'GITLAB_TOKEN' }
+    $existing = [Environment]::GetEnvironmentVariable($envName)
+    if (-not [string]::IsNullOrWhiteSpace($existing)) {
+        Write-KeystoneLog -Level INFO -Message "Using approved environment credentials for $Provider."
+        return $existing.Trim()
     }
-    $item = Get-KeystoneArcItemName -Provider $Provider
-    Write-KeystoneLog -Level INFO -Message "Resolving ARC Service name '$item' for $Provider"
-    $tok = Get-KeystoneArcSecretByName -ServiceName $item
-    if ($tok) {
-        Write-KeystoneLog -Level INFO -Message "Token from ARC Service '$item' (len=$($tok.Length))"
-        return $tok
+
+    $name = Get-KeystoneArcItemName -Provider $Provider
+    $status = Get-KeystoneArcConnectionStatus
+    if (-not $status.arcFound -and -not $status.arcLoaded) {
+        throw "ARC_NOT_FOUND|ARC was not found. Set ARC_PATH to the folder containing pm.ps1, or configure $envName."
     }
-    Write-KeystoneLog -Level WARN -Message "No token for $Provider (env or ARC Service '$item')"
-    return $null
+    if (-not $status.arcLoaded) {
+        throw "ARC_UNAVAILABLE|ARC was discovered but could not be loaded. Inspect the Keystone host console and ARC installation."
+    }
+    if (-not $status.arcUnlocked) {
+        throw 'ARC_LOCKED|ARC was found but the vault is locked. Restart Keystone and complete ARC CAC + TOTP authentication in its PowerShell window.'
+    }
+    $catalogNames = @($status.itemNames)
+    if ($catalogNames.Count -gt 0 -and $name -notin $catalogNames) {
+        throw "ARC_ITEM_MISSING|ARC vault has no item named '$name' for $Provider. Select an existing service in Keystone Integrations."
+    }
+    $token = Get-KeystoneArcSecretByName -ServiceName $name
+    if (-not $token) {
+        throw "ARC_ITEM_UNREADABLE|ARC item '$name' for $Provider was missing, empty, or could not be decrypted. Check it in ARC."
+    }
+    Write-KeystoneLog -Level INFO -Message "Credential source for $Provider: ARC item '$name' (value not logged)."
+    return $token
 }
 
 function Open-KeystoneRepository {
@@ -80,8 +92,20 @@ function Open-KeystoneRepository {
 
     $prov = New-KeystoneProvider -Provider $parsed.Provider -BaseUrl $parsed.BaseUrl -Token $Token
     $project = $null
-    try { $project = $prov.ResolveProject($parsed.ProjectPath) } catch {
-        Write-KeystoneLog -Level WARN -Message "ResolveProject: $($_.Exception.Message)"
+    try {
+        $project = $prov.ResolveProject($parsed.ProjectPath)
+        if (-not $project) { throw 'Empty provider response.' }
+    } catch {
+        $message = [string]$_.Exception.Message
+        # Do not pass raw API responses/headers to the web browser.
+        if ($message -match '\b401\b|unauthorized|bad credentials') {
+            throw "GIT_AUTH_FAILED|$($parsed.Provider) rejected the credential. Check the ARC item and token permissions."
+        } elseif ($message -match '\b403\b|forbidden|resource not accessible') {
+            throw "GIT_PERMISSION_DENIED|$($parsed.Provider) denied access. Verify repository membership, SSO authorization, and token scopes."
+        } elseif ($message -match '\b404\b|not found') {
+            throw "GIT_REPOSITORY_NOT_FOUND|Repository not found or not visible to this credential. Check the URL and repository access."
+        }
+        throw "GIT_CONNECTION_FAILED|Cannot verify repository access. Inspect the Keystone host diagnostics and check the approved network endpoint."
     }
     $default = "main"
     try { $default = $prov.GetDefaultBranch($parsed.ProjectPath) } catch { }
@@ -233,6 +257,13 @@ Export-ModuleMember -Function @(
     "Resolve-KeystoneProviderFromUrl",
     "New-KeystoneProvider",
     "Import-KeystoneArcSession",
+    "Initialize-KeystoneArcAuthentication",
+    "Test-KeystoneArcVaultUnlocked",
+    "Test-KeystoneArcHelpersAvailable",
+    "Get-KeystoneArcConnectionStatus",
+    "Get-KeystoneArcServiceNames",
+    "Set-KeystoneArcItemName",
+    "Get-KeystoneLocalArcMappings",
     "Find-KeystoneArcRoot",
     "Get-KeystoneArcSecretByName",
     "Get-KeystoneConfig",
