@@ -57,7 +57,8 @@ function Get-KeystoneToken {
         throw "ARC_NOT_FOUND|ARC was not found. Set ARC_PATH to the folder containing pm.ps1, or configure $envName."
     }
     if (-not $status.arcLoaded) {
-        throw "ARC_UNAVAILABLE|ARC was discovered but could not be loaded. Inspect the Keystone host console and ARC installation."
+        $reason = if ($status.message) { [string]$status.message } else { 'ARC module could not be loaded.' }
+        throw "ARC_UNAVAILABLE|$reason"
     }
     if (-not $status.arcUnlocked) {
         throw 'ARC_LOCKED|ARC was found but the vault is locked. Restart Keystone and complete ARC CAC + TOTP authentication in its PowerShell window.'
@@ -261,6 +262,10 @@ Export-ModuleMember -Function @(
     "Test-KeystoneArcVaultUnlocked",
     "Test-KeystoneArcHelpersAvailable",
     "Get-KeystoneArcConnectionStatus",
+    "Get-KeystoneArcRequiredFiles",
+    "Get-KeystoneArcMissingFiles",
+    "Get-KeystoneArcHelperDiagnostics",
+    "Convert-KeystoneArcVaultRows",
     "Get-KeystoneArcServiceNames",
     "Set-KeystoneArcItemName",
     "Get-KeystoneLocalArcMappings",
