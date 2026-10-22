@@ -19,3 +19,5 @@ jobs:
           & .\tests\Workspace.Tests.ps1
           & .\tests\WebHost.Tests.ps1
           & .\tests\ArcIntegration.Tests.ps1
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\ArcCoreOnly.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Arc core-only compatibility tests failed.' }
