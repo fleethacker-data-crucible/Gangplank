@@ -104,52 +104,15 @@ function Get-KeystoneEnvArcItem {
 # Item NAMES only. Never commit or persist actual token values.
 function Get-KeystoneLocalArcMappings {
     $out = @{}
+    if (-not $script:KeystoneConfigPath) { Initialize-KeystoneConfig }
     $root = Split-Path $script:KeystoneConfigPath -Parent
-    if (-not $root) { $root = Join-Path (Split-Path $PSScriptRoot -Parent) 'config' }
     $path = Join-Path $root 'arc-items.local.json'
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $out }
     try {
         $saved = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
         foreach ($key in @('GitHub','GitLab','GenAi','Advana')) {
             $property = $saved.PSObject.Properties[$key]
-            if ($property -and $property.Value -is [string] -and $property.Value -match '^[a-zA-Z0-9_. -]{1,100}
-    param(
-        [ValidateSet("GitLab","GitHub","GenAi","Advana")]
-        [string]$Provider
-    )
-
-    # 1) Env overrides
-    $fromEnv = Get-KeystoneEnvArcItem -Purpose $Provider
-    if ($fromEnv) {
-        Write-KeystoneLog -Level DEBUG -Message "ARC item name from env for $Provider"
-        return $fromEnv
-    }
-
-    # 2) Per-workstation item-name mappings (ignored by Git)
-    $localMapping = Get-KeystoneLocalArcMappings
-    if ($localMapping.ContainsKey($Provider)) { return [string]$localMapping[$Provider] }
-
-    # 3) Config ArcItems
-    $cfg = Get-KeystoneConfig
-    if ($cfg.ArcItems) {
-        $prop = $cfg.ArcItems.PSObject.Properties[$Provider]
-        if ($prop -and -not [string]::IsNullOrWhiteSpace([string]$prop.Value)) {
-            return [string]$prop.Value.Trim()
-        }
-    }
-
-    # 4) Canonical hard-coded fallback
-    if ($script:KeystoneArcCanonical.ContainsKey($Provider)) {
-        return $script:KeystoneArcCanonical[$Provider]
-    }
-    throw "No canonical ARC Service name for purpose '$Provider'"
-}
-
-function Get-KeystoneArcCanonicalMap {
-    # Names only - for diagnostics / integrators
-    return $script:KeystoneArcCanonical.Clone()
-}
-) {
+            if ($property -and $property.Value -is [string] -and $property.Value -match '^[a-zA-Z0-9_. -]{1,100}$') {
                 $out[$key] = [string]$property.Value
             }
         }
@@ -165,40 +128,7 @@ function Set-KeystoneArcItemName {
         [Parameter(Mandatory)][ValidateSet('GitHub','GitLab','GenAi','Advana')][string]$Provider,
         [Parameter(Mandatory)][string]$ServiceName
     )
-    if ($ServiceName -cnotmatch '^[a-zA-Z0-9_. -]{1,100}
-    param(
-        [ValidateSet("GitLab","GitHub","GenAi","Advana")]
-        [string]$Provider
-    )
-
-    # 1) Env overrides
-    $fromEnv = Get-KeystoneEnvArcItem -Purpose $Provider
-    if ($fromEnv) {
-        Write-KeystoneLog -Level DEBUG -Message "ARC item name from env for $Provider"
-        return $fromEnv
-    }
-
-    # 2) Config ArcItems
-    $cfg = Get-KeystoneConfig
-    if ($cfg.ArcItems) {
-        $prop = $cfg.ArcItems.PSObject.Properties[$Provider]
-        if ($prop -and -not [string]::IsNullOrWhiteSpace([string]$prop.Value)) {
-            return [string]$prop.Value.Trim()
-        }
-    }
-
-    # 3) Canonical hard-coded fallback
-    if ($script:KeystoneArcCanonical.ContainsKey($Provider)) {
-        return $script:KeystoneArcCanonical[$Provider]
-    }
-    throw "No canonical ARC Service name for purpose '$Provider'"
-}
-
-function Get-KeystoneArcCanonicalMap {
-    # Names only - for diagnostics / integrators
-    return $script:KeystoneArcCanonical.Clone()
-}
-) {
+    if ($ServiceName -cnotmatch '^[a-zA-Z0-9_. -]{1,100}$') {
         throw 'ARC item name may contain letters, digits, spaces, dots, dashes and underscores, up to 100 characters.'
     }
     if (-not $script:KeystoneConfigPath) { Initialize-KeystoneConfig }
@@ -229,7 +159,11 @@ function Get-KeystoneArcItemName {
         return $fromEnv
     }
 
-    # 2) Config ArcItems
+    # 2) Per-workstation item-name mappings (ignored by Git)
+    $localMapping = Get-KeystoneLocalArcMappings
+    if ($localMapping.ContainsKey($Provider)) { return [string]$localMapping[$Provider] }
+
+    # 3) Config ArcItems
     $cfg = Get-KeystoneConfig
     if ($cfg.ArcItems) {
         $prop = $cfg.ArcItems.PSObject.Properties[$Provider]
@@ -238,7 +172,7 @@ function Get-KeystoneArcItemName {
         }
     }
 
-    # 3) Canonical hard-coded fallback
+    # 4) Canonical hard-coded fallback
     if ($script:KeystoneArcCanonical.ContainsKey($Provider)) {
         return $script:KeystoneArcCanonical[$Provider]
     }
