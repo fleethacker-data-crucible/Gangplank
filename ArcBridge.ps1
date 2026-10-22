@@ -9,6 +9,8 @@ $script:KeystoneArcLoaded = $false
 $script:KeystoneArcRoot = $null
 $script:KeystoneArcModule = $null
 $script:KeystoneArcLastError = ''
+$script:KeystoneArcErrorCode = ''
+$script:KeystoneArcMissingModules = @()
 
 function Find-KeystoneArcRoot {
     [CmdletBinding()]
@@ -45,17 +47,80 @@ function Find-KeystoneArcRoot {
     return $null
 }
 
+function Get-KeystoneArcRequiredFiles {
+    [CmdletBinding()]
+    param([string]$ArcRoot)
+    # Read ARC's declared library names. Different ARC releases can ship
+    # different sets: never insist on Keystone's preferred STARK version.
+    if (-not $ArcRoot) {
+        # Fixed current-ARC reference, useful for regression tests only.
+        return @(
+            'lib/00-logging.ps1','lib/00-core.ps1','lib/01-storage.ps1',
+            'lib/02-cac.ps1','lib/03-totp-core.ps1','lib/03-totp-recovery.ps1',
+            'lib/03-totp-setup.ps1','lib/04-wincred.ps1','lib/05-update.ps1',
+            'lib/06-ui.ps1','lib/07-cli.ps1','lib/08-gui.ps1',
+            'lib/09-integrity.ps1','lib/10-stark.ps1'
+        )
+    }
+    $pmPath = Join-Path $ArcRoot 'pm.ps1'
+    if (-not (Test-Path -LiteralPath $pmPath -PathType Leaf)) { return @() }
+    try {
+        $source = [IO.File]::ReadAllText($pmPath)
+        $list = [regex]::Match($source, '(?s)\$libOrder\s*=\s*@\((.*?)\)')
+        if (-not $list.Success) { return @() }
+        $files = New-Object System.Collections.Generic.List[string]
+        foreach ($m in [regex]::Matches($list.Groups[1].Value, "'([A-Za-z0-9._-]+\.ps1)'")) {
+            [void]$files.Add(('lib/' + $m.Groups[1].Value))
+        }
+        return @($files.ToArray())
+    } catch { return @() }
+}
+
+function Get-KeystoneArcMissingFiles {
+    [CmdletBinding()]
+    param([string]$ArcRoot)
+    if (-not $ArcRoot) { return @() }
+    $missing = New-Object System.Collections.Generic.List[string]
+    foreach ($name in (Get-KeystoneArcRequiredFiles -ArcRoot $ArcRoot)) {
+        if (-not (Test-Path -LiteralPath (Join-Path $ArcRoot $name) -PathType Leaf)) {
+            [void]$missing.Add($name)
+        }
+    }
+    return @($missing.ToArray())
+}
+
 function Test-KeystoneArcHelpersAvailable {
-    return [bool](Get-Command Get-PmStarkApiKey -ErrorAction SilentlyContinue) -and
-           [bool](Get-Command Ensure-VaultUnlocked -ErrorAction SilentlyContinue)
+    [CmdletBinding()]
+    param()
+    $unlock = [bool](Get-Command Ensure-VaultUnlocked -ErrorAction SilentlyContinue)
+    $stark = [bool](Get-Command Get-PmStarkApiKey -ErrorAction SilentlyContinue)
+    $finder = [bool](Get-Command Find-VaultRows -ErrorAction SilentlyContinue)
+    $vault = [bool](Get-Command Get-LiveVault -ErrorAction SilentlyContinue)
+    $decrypt = [bool](Get-Command Unprotect-SecretText -ErrorAction SilentlyContinue)
+    # Older ARC builds may lack the optional STARK helper, yet retain all
+    # vault APIs needed to decrypt an item. Do not require STARK by name.
+    return ($unlock -and ($stark -or ($decrypt -and ($finder -or $vault))))
+}
+
+function Get-KeystoneArcHelperDiagnostics {
+    return [pscustomobject]@{
+        unlock = [bool](Get-Command Ensure-VaultUnlocked -ErrorAction SilentlyContinue)
+        stark = [bool](Get-Command Get-PmStarkApiKey -ErrorAction SilentlyContinue)
+        find = [bool](Get-Command Find-VaultRows -ErrorAction SilentlyContinue)
+        vault = [bool](Get-Command Get-LiveVault -ErrorAction SilentlyContinue)
+        decrypt = [bool](Get-Command Unprotect-SecretText -ErrorAction SilentlyContinue)
+    }
 }
 
 function Import-KeystoneArcSession {
     [CmdletBinding()]
     param([switch]$Quiet)
-    # Do not reload an ARC module: doing so resets its in-memory authentication.
+    # Never source pm.ps1 again once the ARC functions have been loaded;
+    # reloading resets the vault's CAC/TOTP in-memory state.
     if (Test-KeystoneArcHelpersAvailable) {
         $script:KeystoneArcLoaded = $true
+        $script:KeystoneArcErrorCode = ''
+        $script:KeystoneArcLastError = ''
         if (-not $script:KeystoneArcModule) {
             $command = Get-Command Ensure-VaultUnlocked -ErrorAction SilentlyContinue
             if ($command -and $command.Module) { $script:KeystoneArcModule = $command.Module }
@@ -63,37 +128,60 @@ function Import-KeystoneArcSession {
         return $true
     }
     if (Get-Module -Name KeystoneArc -ErrorAction SilentlyContinue) {
-        $script:KeystoneArcLastError = 'ARC module exists but expected functions are not exported.'
+        $script:KeystoneArcErrorCode = 'ARC_HELPERS_UNAVAILABLE'
+        $script:KeystoneArcLastError = 'ARC module was loaded, but required vault helpers are missing. Verify ARC installation and restart Keystone.'
         return $false
     }
     $arcRoot = Find-KeystoneArcRoot
     if (-not $arcRoot) {
-        $script:KeystoneArcLastError = 'ARC pm.ps1 was not found next to Keystone or in ARC_PATH.'
+        $script:KeystoneArcErrorCode = 'ARC_NOT_FOUND'
+        $script:KeystoneArcLastError = 'ARC pm.ps1 was not found. Set ARC_PATH to the folder containing pm.ps1.'
+        if (-not $Quiet) { Write-Warning $script:KeystoneArcLastError }
+        return $false
+    }
+    $script:KeystoneArcRoot = $arcRoot
+    $script:KeystoneArcMissingModules = @(Get-KeystoneArcMissingFiles -ArcRoot $arcRoot)
+    if ($script:KeystoneArcMissingModules.Count -gt 0) {
+        $script:KeystoneArcErrorCode = 'ARC_MISSING_MODULES'
+        $script:KeystoneArcLastError = 'ARC installation is incomplete. Missing libraries: ' + ($script:KeystoneArcMissingModules -join ', ') + '. Update the full ARC repository rather than copying pm.ps1 alone.'
         if (-not $Quiet) { Write-Warning $script:KeystoneArcLastError }
         return $false
     }
     try {
         $pm = Join-Path $arcRoot 'pm.ps1'
+        # Like Cascade, import all of ARC's commands from a single dynamic module.
+        # A child PowerShell process cannot inherit ARC's unlocked session.
         $module = New-Module -Name KeystoneArc -ScriptBlock {
             param([string]$PmPath)
             $ErrorActionPreference = 'Continue'
             . $PmPath
             Export-ModuleMember -Function * -Alias * -ErrorAction SilentlyContinue
         } -ArgumentList $pm
-        Import-Module -ModuleInfo $module -Global -WarningAction SilentlyContinue
+        Import-Module -ModuleInfo $module -Global -ErrorAction Stop -WarningAction SilentlyContinue
+        $script:KeystoneArcModule = $module
         if (-not (Test-KeystoneArcHelpersAvailable)) {
-            $script:KeystoneArcLastError = 'ARC loaded, but Get-PmStarkApiKey/Ensure-VaultUnlocked were unavailable.'
+            $script:KeystoneArcErrorCode = 'ARC_HELPERS_UNAVAILABLE'
+            $script:KeystoneArcLastError = 'ARC imported but required helpers are missing. Check Arc lib modules and use the diagnostics in Keystone Integrations.'
+            if (-not $Quiet) { Write-Warning $script:KeystoneArcLastError }
             return $false
         }
-        $script:KeystoneArcRoot = $arcRoot
-        $script:KeystoneArcModule = $module
         $script:KeystoneArcLoaded = $true
+        $script:KeystoneArcErrorCode = ''
         $script:KeystoneArcLastError = ''
         if (-not $Quiet) { Write-Host '[+] ARC module loaded into Keystone host process.' -ForegroundColor Green }
         return $true
     } catch {
-        # Log exception class only; ARC exceptions can include operational details.
-        $script:KeystoneArcLastError = 'ARC import failed (' + $_.Exception.GetType().Name + ').'
+        # ARC's loader throws "ARC load incomplete (N error(s))" if a
+        # library cannot initialize. Classify it without forwarding raw error
+        # messages, tokens, or vault data to the browser.
+        $kind = $_.Exception.GetType().Name
+        if ($_.Exception.Message -match 'ARC load incomplete') {
+            $script:KeystoneArcErrorCode = 'ARC_LIBRARY_INITIALIZATION_FAILED'
+            $script:KeystoneArcLastError = 'ARC pm.ps1 reported one or more library initialization failures. Open ARC itself and inspect its local error log, then restart Keystone.'
+        } else {
+            $script:KeystoneArcErrorCode = 'ARC_IMPORT_EXCEPTION'
+            $script:KeystoneArcLastError = 'ARC import failed (' + $kind + '). Open ARC directly to inspect its local diagnostics. Keystone did not modify the vault.'
+        }
         if (-not $Quiet) { Write-Warning $script:KeystoneArcLastError }
         return $false
     }
@@ -155,26 +243,43 @@ function Initialize-KeystoneArcAuthentication {
     }
 }
 
+function Convert-KeystoneArcVaultRows {
+    # ARC sometimes returns an ArrayList with an extra unary-comma wrapper.
+    # Flatten collections before selecting by Service (not $list.Service).
+    [CmdletBinding()]
+    param($InputObject)
+    $queue = New-Object System.Collections.Queue
+    $results = New-Object System.Collections.Generic.List[object]
+    if ($null -ne $InputObject) { $queue.Enqueue($InputObject) }
+    while ($queue.Count -gt 0) {
+        $item = $queue.Dequeue()
+        if ($null -eq $item) { continue }
+        if ($item -is [System.Collections.IList] -and -not ($item -is [string])) {
+            foreach ($child in $item) { if ($null -ne $child) { $queue.Enqueue($child) } }
+        } elseif ($item.PSObject.Properties.Name -contains 'Service') {
+            [void]$results.Add($item)
+        }
+    }
+    return @($results.ToArray())
+}
+
 function Get-KeystoneArcServiceNames {
     [CmdletBinding()]
     param()
     if (-not (Test-KeystoneArcVaultUnlocked)) { return @() }
-    $command = Get-Command Get-PmVaultNameCatalog -ErrorAction SilentlyContinue
-    if (-not $command) { return @() }
-    try {
-        $catalog = Get-PmVaultNameCatalog
-        $names = New-Object System.Collections.Generic.List[string]
-        foreach ($row in $catalog) {
-            if ($row -is [System.Collections.IList] -and -not ($row -is [string])) {
-                foreach ($nested in $row) {
-                    if ($nested -and $nested.Service) { [void]$names.Add([string]$nested.Service) }
-                }
-            } elseif ($row -and $row.Service) {
-                [void]$names.Add([string]$row.Service)
-            }
-        }
-        return @($names.ToArray() | Sort-Object -Unique)
-    } catch { return @() }
+    $catalog = $null
+    if (Get-Command Get-PmVaultNameCatalog -ErrorAction SilentlyContinue) {
+        try { $catalog = Get-PmVaultNameCatalog } catch { }
+    }
+    if ($null -eq $catalog -and (Get-Command Get-LiveVault -ErrorAction SilentlyContinue)) {
+        try { $catalog = Get-LiveVault } catch { }
+    }
+    $names = New-Object System.Collections.Generic.List[string]
+    foreach ($row in (Convert-KeystoneArcVaultRows -InputObject $catalog)) {
+        $name = [string]$row.Service
+        if (-not [string]::IsNullOrWhiteSpace($name)) { [void]$names.Add($name) }
+    }
+    return @($names.ToArray() | Sort-Object -Unique)
 }
 
 function Get-KeystoneArcConnectionStatus {
@@ -210,10 +315,14 @@ function Get-KeystoneArcConnectionStatus {
         arcLoaded = [bool]$loaded
         arcUnlocked = [bool]$unlocked
         arcPath = $(if ($root) { $root } else { '' })
-        message = $(if (-not $root) { 'ARC not found. Set ARC_PATH to the folder containing pm.ps1.' }
-                    elseif (-not $loaded) { 'ARC found but not loaded.' }
-                    elseif (-not $unlocked) { 'ARC locked. Restart Keystone and authenticate with CAC + TOTP in its console.' }
-                    else { 'ARC is unlocked.' })
+        code = $(if ($loaded) { '' } elseif ($script:KeystoneArcErrorCode) { $script:KeystoneArcErrorCode } else { 'ARC_NOT_LOADED' })
+        missingModules = @($script:KeystoneArcMissingModules)
+        helpers = Get-KeystoneArcHelperDiagnostics
+        message = $(if ($loaded -and $unlocked) { 'ARC is unlocked.' }
+                    elseif ($loaded) { 'ARC loaded but locked. Restart Keystone and complete CAC + TOTP in its console.' }
+                    elseif ($script:KeystoneArcLastError) { $script:KeystoneArcLastError }
+                    elseif (-not $root) { 'ARC pm.ps1 not found. Set ARC_PATH to the ARC project folder.' }
+                    else { 'ARC was located but could not be loaded. Check the Keystone console and ARC installation.' })
         integrations = @($bindings)
         # Only service names, never usernames, passwords or API keys.
         itemNames = @($names)
@@ -223,20 +332,63 @@ function Get-KeystoneArcConnectionStatus {
 function Get-KeystoneArcSecretByName {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ServiceName)
-    # Prevent CAC/TOTP dialogs inside HttpListener request handlers.
-    if (-not (Test-KeystoneArcVaultUnlocked)) {
-        return $null
-    }
-    $key = $null
-    try {
-        $key = Get-PmStarkApiKey -VaultName $ServiceName
-        if ($key -is [string] -and -not [string]::IsNullOrWhiteSpace($key)) {
-            return $key.Trim()
+    # Never prompt for CAC/TOTP as a side effect of a browser request.
+    if (-not (Test-KeystoneArcVaultUnlocked)) { return $null }
+    if ($ServiceName.Length -gt 100) { return $null }
+
+    if (Get-Command Get-PmStarkApiKey -ErrorAction SilentlyContinue) {
+        try {
+            $key = Get-PmStarkApiKey -VaultName $ServiceName
+            if ($key -is [string] -and -not [string]::IsNullOrWhiteSpace($key)) {
+                return $key.Trim()
+            }
+        } catch {
+            # Fall back to the core ARC vault APIs if this optional helper
+            # is unavailable for a particular item or ARC release.
         }
-    } catch {
-        # The caller uses the catalog/status for a nonsecret error message.
-        return $null
-    } finally { $key = $null }
+    }
+    $row = $null
+    if (Get-Command Find-VaultRows -ErrorAction SilentlyContinue) {
+        try {
+            $hits = Find-VaultRows -Name $ServiceName
+            foreach ($hit in (Convert-KeystoneArcVaultRows -InputObject $hits)) {
+                if ([string]$hit.Service -eq $ServiceName) { $row = $hit; break }
+            }
+        } catch { }
+    }
+    if (-not $row -and (Get-Command Get-LiveVault -ErrorAction SilentlyContinue)) {
+        try {
+            $hits = Get-LiveVault
+            foreach ($hit in (Convert-KeystoneArcVaultRows -InputObject $hits)) {
+                if ([string]$hit.Service -eq $ServiceName) { $row = $hit; break }
+            }
+        } catch { }
+    }
+    if (-not $row) { return $null }
+    $protected = [string]$row.Secret
+    if ([string]::IsNullOrWhiteSpace($protected)) { return $null }
+    if (Get-Command Unprotect-SecretText -ErrorAction SilentlyContinue) {
+        try {
+            $plain = Unprotect-SecretText -Protected $protected
+            if ($plain -is [string] -and -not [string]::IsNullOrWhiteSpace($plain)) {
+                return $plain.Trim()
+            }
+        } catch { }
+    }
+    # Core ARC compatibility: legacy DPAPI SecureString payloads.
+    try {
+        $secure = ConvertTo-SecureString $protected -ErrorAction Stop
+        $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+        try {
+            $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
+            if (-not [string]::IsNullOrWhiteSpace($plain)) { return $plain.Trim() }
+        } finally {
+            if ($ptr -ne [IntPtr]::Zero) {
+                [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
+            }
+        }
+    } catch { }
+    # Never silently return encrypted blob content as a token.
     return $null
 }
 

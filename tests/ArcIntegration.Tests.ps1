@@ -13,6 +13,13 @@ try {
     [void](New-Item -ItemType Directory -Path $temp -Force)
     $pm = @'
 $script:PmState = @{ VaultUnlocked = $false }
+# Mimic the real ARC dependency manifest; test missing library diagnosis.
+$libOrder = @(
+    '00-logging.ps1','00-core.ps1','01-storage.ps1','02-cac.ps1',
+    '03-totp-core.ps1','03-totp-recovery.ps1','03-totp-setup.ps1',
+    '04-wincred.ps1','05-update.ps1','06-ui.ps1','07-cli.ps1',
+    '08-gui.ps1','09-integrity.ps1','10-stark.ps1'
+)
 function Ensure-VaultUnlocked {
     $global:FakeArcUnlockCalls += 1
     $script:PmState.VaultUnlocked = $true
@@ -39,11 +46,23 @@ function Get-PmVaultNameCatalog {
 }
 '@
     [IO.File]::WriteAllText((Join-Path $temp 'pm.ps1'),$pm)
+    # ARC's actual pm.ps1 requires a complete lib/ directory. Verify that
+    # Keystone reports incomplete installations instead of a vague status.
     $env:ARC_PATH = $temp
-    Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
-    $global:FakeArcUnlockCalls = 0
     Import-Module (Join-Path $root 'Keystone.psm1') -Force -WarningAction SilentlyContinue
     Initialize-Keystone
+    Assert (-not (Import-KeystoneArcSession -Quiet)) 'Incomplete ARC installation must be rejected'
+    $incomplete = Get-KeystoneArcConnectionStatus
+    Assert ($incomplete.code -eq 'ARC_MISSING_MODULES') 'Missing libs must be diagnosed'
+    Assert ($incomplete.message -match 'Missing libraries') 'Missing libs message should be actionable'
+    foreach ($name in (Get-KeystoneArcRequiredFiles)) {
+        $full = Join-Path $temp $name
+        $parent = Split-Path $full -Parent
+        if (-not (Test-Path -LiteralPath $parent)) { [void](New-Item -ItemType Directory -Path $parent -Force) }
+        [IO.File]::WriteAllText($full, '# fake library fixture')
+    }
+    Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
+    $global:FakeArcUnlockCalls = 0
     Assert ((Find-KeystoneArcRoot) -eq $temp) 'ARC_PATH discovery'
     Assert (Import-KeystoneArcSession -Quiet) 'ARC dynamic module import'
     Assert (-not (Test-KeystoneArcVaultUnlocked)) 'ARC should begin locked'

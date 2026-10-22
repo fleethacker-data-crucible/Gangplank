@@ -40,6 +40,10 @@ Your explicit chat text and project/branch name go to the selected AI provider. 
 5. If the ARC item name differs, select it in Integrations and click **Use this Arc item**. Only the service name is saved in `config/arc-items.local.json` (gitignored).
 6. Then go back to **Overview**, enter your repository URL and click **Connect project**.
 
+**If Integrations says "ARC found but not loaded":** Keystone located `pm.ps1`, but ARC's libraries or exported vault functions could not initialize. This is **not** a GitHub token or browser-port error. Update Keystone and open **Integrations → Copy safe diagnostics**. Its diagnostic code distinguishes `ARC_MISSING_MODULES` (specific absent files), `ARC_LIBRARY_INITIALIZATION_FAILED` (ARC itself failed to initialize), `ARC_HELPERS_UNAVAILABLE` (functions missing), and `ARC_IMPORT_EXCEPTION`. The copy contains no secrets, only booleans, mapped service names and safe module filenames. For missing files, update the **complete ARC repository**, including `lib/`; do not copy only `pm.ps1`. For initialization failures, run ARC's own approved launcher and inspect its local error logs; Keystone does not modify or bypass the vault.
+
+Older ARC installations may expose `Ensure-VaultUnlocked`, `Find-VaultRows` / `Get-LiveVault`, and `Unprotect-SecretText` without `Get-PmStarkApiKey`. Keystone supports the core ARC API as a fallback. The web server never unlocks ARC from a request handler.
+
 If Connect fails, Keystone distinguishes a missing ARC installation, locked vault, missing mapped item, and upstream 401/403/404 errors. A 401 indicates rejected credentials; 403 commonly means permissions or SSO/token-scope restrictions; 404 may mean a bad URL or unavailable repository access. Keystone does not return Git API response bodies or secrets to the browser.
 
 For an environment-token-only session, the same startup path works without unlocking ARC. Enterprise application-control policies and CAC authentication remain unchanged.
