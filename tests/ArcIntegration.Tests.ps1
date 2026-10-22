@@ -13,6 +13,13 @@ try {
     [void](New-Item -ItemType Directory -Path $temp -Force)
     $pm = @'
 $script:PmState = @{ VaultUnlocked = $false }
+# Mimic the real ARC dependency manifest; test missing library diagnosis.
+$libOrder = @(
+    '00-logging.ps1','00-core.ps1','01-storage.ps1','02-cac.ps1',
+    '03-totp-core.ps1','03-totp-recovery.ps1','03-totp-setup.ps1',
+    '04-wincred.ps1','05-update.ps1','06-ui.ps1','07-cli.ps1',
+    '08-gui.ps1','09-integrity.ps1','10-stark.ps1'
+)
 function Ensure-VaultUnlocked {
     $global:FakeArcUnlockCalls += 1
     $script:PmState.VaultUnlocked = $true
