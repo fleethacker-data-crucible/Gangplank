@@ -70,7 +70,7 @@ function Get-KeystoneToken {
     if (-not $token) {
         throw "ARC_ITEM_UNREADABLE|ARC item '$name' for $Provider was missing, empty, or could not be decrypted. Check it in ARC."
     }
-    Write-KeystoneLog -Level INFO -Message "Credential source for $Provider: ARC item '$name' (value not logged)."
+    Write-KeystoneLog -Level INFO -Message "Credential source for $($Provider): ARC item '$name' (value not logged)."
     return $token
 }
 
