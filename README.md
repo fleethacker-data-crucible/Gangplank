@@ -29,6 +29,21 @@ Default endpoint: https://api.genai.mil/v1/chat/completions . Default model: gem
 Set GENAI_TOKEN or KEYSTONE_AI_TOKEN in the PowerShell launch environment, or authenticate ARC and unlock the genapi item. Additional approved AI hosts may be configured with KEYSTONE_AI_ALLOWED_HOSTS.
 Your explicit chat text and project/branch name go to the selected AI provider. AI commit-title refinement sends filenames and statuses only. Source code is never sent to AI automatically.
 
+## ARC integration (GitHub, GitLab and GenAI)
+
+**Keystone now loads ARC once in its own PowerShell process and performs the normal CAC + TOTP unlock before launching the browser.** It does not share unlock state with a separately opened ARC application. Follow the authentication prompts in the Keystone PowerShell window at startup; if ARC is cancelled, the browser still opens but can only use approved environment credentials.
+
+1. Store the GitHub PAT as an ARC item named `github` or the GitLab PAT as `gitmil` (GenAI: `genapi`). These are defaults, not requirements.
+2. Keep the ARC repository next to Keystone under `Projects\\arc`, or set `ARC_PATH` to the folder containing `pm.ps1` before launching Keystone. No separate Arc browser port is involved.
+3. Start Keystone with `Launch-Keystone.bat` and complete the normal ARC unlock in that PowerShell console.
+4. Open **Integrations** in Keystone's browser GUI. It reports ARC discovery, authentication, and each provider's mapped item status without revealing tokens.
+5. If the ARC item name differs, select it in Integrations and click **Use this Arc item**. Only the service name is saved in `config/arc-items.local.json` (gitignored).
+6. Then go back to **Overview**, enter your repository URL and click **Connect project**.
+
+If Connect fails, Keystone distinguishes a missing ARC installation, locked vault, missing mapped item, and upstream 401/403/404 errors. A 401 indicates rejected credentials; 403 commonly means permissions or SSO/token-scope restrictions; 404 may mean a bad URL or unavailable repository access. Keystone does not return Git API response bodies or secrets to the browser.
+
+For an environment-token-only session, the same startup path works without unlocking ARC. Enterprise application-control policies and CAC authentication remain unchanged.
+
 ## Credentials and trust
 GitHub credential: GITHUB_TOKEN or ARC github. GitLab: GITLAB_TOKEN or ARC gitmil.
 Only HTTPS github.com, web.git.mil and administrator-approved KEYSTONE_GITLAB_ALLOWED_HOSTS are permitted for repository connections.

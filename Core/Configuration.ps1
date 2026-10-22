@@ -101,6 +101,51 @@ function Get-KeystoneEnvArcItem {
     return $null
 }
 
+# Item NAMES only. Never commit or persist actual token values.
+function Get-KeystoneLocalArcMappings {
+    $out = @{}
+    if (-not $script:KeystoneConfigPath) { Initialize-KeystoneConfig }
+    $root = Split-Path $script:KeystoneConfigPath -Parent
+    $path = Join-Path $root 'arc-items.local.json'
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $out }
+    try {
+        $saved = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($key in @('GitHub','GitLab','GenAi','Advana')) {
+            $property = $saved.PSObject.Properties[$key]
+            if ($property -and $property.Value -is [string] -and $property.Value -match '^[a-zA-Z0-9_. -]{1,100}$') {
+                $out[$key] = [string]$property.Value
+            }
+        }
+    } catch {
+        Write-KeystoneLog -Level WARN -Message 'Local ARC item name mapping could not be read.'
+    }
+    return $out
+}
+
+function Set-KeystoneArcItemName {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateSet('GitHub','GitLab','GenAi','Advana')][string]$Provider,
+        [Parameter(Mandatory)][string]$ServiceName
+    )
+    if ($ServiceName -cnotmatch '^[a-zA-Z0-9_. -]{1,100}$') {
+        throw 'ARC item name may contain letters, digits, spaces, dots, dashes and underscores, up to 100 characters.'
+    }
+    if (-not $script:KeystoneConfigPath) { Initialize-KeystoneConfig }
+    $mappings = Get-KeystoneLocalArcMappings
+    $mappings[$Provider] = $ServiceName
+    $folder = Split-Path $script:KeystoneConfigPath -Parent
+    $file = Join-Path $folder 'arc-items.local.json'
+    $tmp = Join-Path $folder ('arc-items-' + [guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        $mappings | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $tmp -Encoding UTF8 -ErrorAction Stop
+        Move-Item -LiteralPath $tmp -Destination $file -Force -ErrorAction Stop
+    } finally {
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+    }
+    return $ServiceName
+}
+
 function Get-KeystoneArcItemName {
     param(
         [ValidateSet("GitLab","GitHub","GenAi","Advana")]
@@ -114,7 +159,11 @@ function Get-KeystoneArcItemName {
         return $fromEnv
     }
 
-    # 2) Config ArcItems
+    # 2) Per-workstation item-name mappings (ignored by Git)
+    $localMapping = Get-KeystoneLocalArcMappings
+    if ($localMapping.ContainsKey($Provider)) { return [string]$localMapping[$Provider] }
+
+    # 3) Config ArcItems
     $cfg = Get-KeystoneConfig
     if ($cfg.ArcItems) {
         $prop = $cfg.ArcItems.PSObject.Properties[$Provider]
@@ -123,7 +172,7 @@ function Get-KeystoneArcItemName {
         }
     }
 
-    # 3) Canonical hard-coded fallback
+    # 4) Canonical hard-coded fallback
     if ($script:KeystoneArcCanonical.ContainsKey($Provider)) {
         return $script:KeystoneArcCanonical[$Provider]
     }
