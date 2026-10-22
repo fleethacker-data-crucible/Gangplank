@@ -48,15 +48,32 @@ function Find-KeystoneArcRoot {
 }
 
 function Get-KeystoneArcRequiredFiles {
-    # These libraries are dot-sourced by ARC's own pm.ps1.
-    # Report missing filenames, not filesystem contents or secret data.
-    return @(
-        'lib/00-logging.ps1','lib/00-core.ps1','lib/01-storage.ps1',
-        'lib/02-cac.ps1','lib/03-totp-core.ps1','lib/03-totp-recovery.ps1',
-        'lib/03-totp-setup.ps1','lib/04-wincred.ps1','lib/05-update.ps1',
-        'lib/06-ui.ps1','lib/07-cli.ps1','lib/08-gui.ps1',
-        'lib/09-integrity.ps1','lib/10-stark.ps1'
-    )
+    [CmdletBinding()]
+    param([string]$ArcRoot)
+    # Read ARC's declared library names. Different ARC releases can ship
+    # different sets: never insist on Keystone's preferred STARK version.
+    if (-not $ArcRoot) {
+        # Fixed current-ARC reference, useful for regression tests only.
+        return @(
+            'lib/00-logging.ps1','lib/00-core.ps1','lib/01-storage.ps1',
+            'lib/02-cac.ps1','lib/03-totp-core.ps1','lib/03-totp-recovery.ps1',
+            'lib/03-totp-setup.ps1','lib/04-wincred.ps1','lib/05-update.ps1',
+            'lib/06-ui.ps1','lib/07-cli.ps1','lib/08-gui.ps1',
+            'lib/09-integrity.ps1','lib/10-stark.ps1'
+        )
+    }
+    $pmPath = Join-Path $ArcRoot 'pm.ps1'
+    if (-not (Test-Path -LiteralPath $pmPath -PathType Leaf)) { return @() }
+    try {
+        $source = [IO.File]::ReadAllText($pmPath)
+        $list = [regex]::Match($source, '(?s)\$libOrder\s*=\s*@\((.*?)\)')
+        if (-not $list.Success) { return @() }
+        $files = New-Object System.Collections.Generic.List[string]
+        foreach ($m in [regex]::Matches($list.Groups[1].Value, "'([A-Za-z0-9._-]+\.ps1)'")) {
+            [void]$files.Add(('lib/' + $m.Groups[1].Value))
+        }
+        return @($files.ToArray())
+    } catch { return @() }
 }
 
 function Get-KeystoneArcMissingFiles {
@@ -64,7 +81,7 @@ function Get-KeystoneArcMissingFiles {
     param([string]$ArcRoot)
     if (-not $ArcRoot) { return @() }
     $missing = New-Object System.Collections.Generic.List[string]
-    foreach ($name in (Get-KeystoneArcRequiredFiles)) {
+    foreach ($name in (Get-KeystoneArcRequiredFiles -ArcRoot $ArcRoot)) {
         if (-not (Test-Path -LiteralPath (Join-Path $ArcRoot $name) -PathType Leaf)) {
             [void]$missing.Add($name)
         }
