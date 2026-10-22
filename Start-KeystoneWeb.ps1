@@ -7,11 +7,18 @@
   exposes Git/AI tokens through the browser. Ctrl+C stops the host.
 #>
 [CmdletBinding()]
-param([ValidateRange(1025,65535)][int]$Port = 8769, [switch]$NoBrowser)
+param([ValidateRange(1025,65535)][int]$Port = 8769, [switch]$NoBrowser, [switch]$SkipArcUnlock)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 Import-Module (Join-Path $root 'Keystone.psm1') -Force
 Initialize-Keystone
+# Import ARC ONCE and perform its normal CAC/TOTP unlock before serving any
+# browser requests. The browser never starts an ARC authentication prompt.
+$arcState = Initialize-KeystoneArcAuthentication -SkipUnlock:$SkipArcUnlock
+if (-not $arcState.Unlocked) {
+    Write-Host '[!] ARC is not unlocked. Keystone can still use approved environment tokens.' -ForegroundColor Yellow
+    Write-Host '[!] To use ARC, restart Keystone and complete the CAC/TOTP steps in THIS console.' -ForegroundColor DarkGray
+}
 $session = $null
 $buffer = New-Object byte[] 32
 $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -64,6 +71,7 @@ Write-Host ''
 Write-Host '  KEYSTONE  |  Enterprise Workspace' -ForegroundColor Cyan
 Write-Host "  Browser: $prefix" -ForegroundColor Green
 Write-Host '  Localhost only. Ctrl+C to stop. Repository secrets remain server-side.' -ForegroundColor DarkGray
+Write-Host '  ARC: see Integrations in the browser for per-provider credential status.' -ForegroundColor DarkGray
 if (-not $NoBrowser) {
     try { Start-Process $prefix | Out-Null }
     catch { Write-Host "Open this URL manually: $prefix" -ForegroundColor Yellow }
@@ -102,6 +110,22 @@ try {
                     ai = [bool]($env:KEYSTONE_AI_TOKEN -or $env:GENAI_TOKEN)
                     canReview = [bool]($session -and $session.LastSaveMessage -and -not $session.LastReviewUrl)
                 }
+            }
+            elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/integrations') {
+                $integration = Get-KeystoneArcConnectionStatus
+                Send-KeystoneWebJson -Response $res -Value $integration
+            }
+            elseif ($req.HttpMethod -eq 'POST' -and $path -eq '/api/integrations/map') {
+                $body = Read-KeystoneWebBody -Request $req
+                $provider = [string]$body.provider
+                $item = [string]$body.item
+                if ($provider -notin @('GitHub','GitLab','GenAi')) { throw 'Unsupported credential provider.' }
+                $names = @(Get-KeystoneArcServiceNames)
+                if ($names.Count -gt 0 -and $item -notin $names) {
+                    throw 'Select a service name that exists in the unlocked ARC catalog.'
+                }
+                [void](Set-KeystoneArcItemName -Provider $provider -ServiceName $item)
+                Send-KeystoneWebJson -Response $res -Value (Get-KeystoneArcConnectionStatus)
             }
             elseif ($req.HttpMethod -eq 'POST' -and $path -eq '/api/connect') {
                 $body = Read-KeystoneWebBody -Request $req
