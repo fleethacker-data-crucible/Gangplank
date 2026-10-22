@@ -39,11 +39,23 @@ function Get-PmVaultNameCatalog {
 }
 '@
     [IO.File]::WriteAllText((Join-Path $temp 'pm.ps1'),$pm)
+    # ARC's actual pm.ps1 requires a complete lib/ directory. Verify that
+    # Keystone reports incomplete installations instead of a vague status.
     $env:ARC_PATH = $temp
-    Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
-    $global:FakeArcUnlockCalls = 0
     Import-Module (Join-Path $root 'Keystone.psm1') -Force -WarningAction SilentlyContinue
     Initialize-Keystone
+    Assert (-not (Import-KeystoneArcSession -Quiet)) 'Incomplete ARC installation must be rejected'
+    $incomplete = Get-KeystoneArcConnectionStatus
+    Assert ($incomplete.code -eq 'ARC_MISSING_MODULES') 'Missing libs must be diagnosed'
+    Assert ($incomplete.message -match 'Missing libraries') 'Missing libs message should be actionable'
+    foreach ($name in (Get-KeystoneArcRequiredFiles)) {
+        $full = Join-Path $temp $name
+        $parent = Split-Path $full -Parent
+        if (-not (Test-Path -LiteralPath $parent)) { [void](New-Item -ItemType Directory -Path $parent -Force) }
+        [IO.File]::WriteAllText($full, '# fake library fixture')
+    }
+    Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
+    $global:FakeArcUnlockCalls = 0
     Assert ((Find-KeystoneArcRoot) -eq $temp) 'ARC_PATH discovery'
     Assert (Import-KeystoneArcSession -Quiet) 'ARC dynamic module import'
     Assert (-not (Test-KeystoneArcVaultUnlocked)) 'ARC should begin locked'
