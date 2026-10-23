@@ -18,6 +18,7 @@ if (-not $script:KeystoneRoot) {
 . (Join-Path $script:KeystoneRoot "Core\SmartSave.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Workspace.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Sentinel.ps1")
+. (Join-Path $script:KeystoneRoot "Core\RepositoryInsights.ps1")
 . (Join-Path $script:KeystoneRoot "Core\AI.ps1")
 . (Join-Path $script:KeystoneRoot "ArcBridge.ps1")
 . (Join-Path $script:KeystoneRoot "Providers\GitProviderBase.ps1")

@@ -18,6 +18,7 @@ jobs:
           & .\tests\SmartSave.Tests.ps1
           & .\tests\Workspace.Tests.ps1
           & .\tests\Sentinel.Tests.ps1
+          & .\tests\RepositoryInsights.Tests.ps1
           & .\tests\WebHost.Tests.ps1
           & .\tests\ArcIntegration.Tests.ps1
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\ArcCoreOnly.Tests.ps1
