@@ -137,7 +137,8 @@ function Invoke-KeystoneWorkspaceSave {
     param(
         [Parameter(Mandatory)]$Session,
         [Parameter(Mandatory)][string[]]$SelectedPaths,
-        [string]$Message
+        [string]$Message,
+        [switch]$PublicConfirmed
     )
     $preview = Get-KeystoneWorkspacePreview -Session $Session
     if ($preview.RemoteChanged) { throw 'The project changed online. No files were uploaded. Download a fresh workspace and reconcile your edits.' }
@@ -156,8 +157,13 @@ function Invoke-KeystoneWorkspaceSave {
         $codes = @($sentinel.Findings | Where-Object { $_.Severity -in @('Block','Review') } | ForEach-Object Code | Select-Object -Unique)
         throw ('Sentinel blocked publication: ' + ($codes -join ', '))
     }
-    if ($sentinel.RequiresPublicConfirmation -and $env:KEYSTONE_ALLOW_PUBLIC_PUBLISH -ne '1') {
-        throw 'Sentinel blocks public publishing by default. Administrator approval and KEYSTONE_ALLOW_PUBLIC_PUBLISH=1 required.'
+    if ($sentinel.RequiresPublicConfirmation) {
+        if ($env:KEYSTONE_ALLOW_PUBLIC_PUBLISH -ne '1') {
+            throw 'Sentinel blocks public publishing by default. Administrator approval and KEYSTONE_ALLOW_PUBLIC_PUBLISH=1 required.'
+        }
+        if (-not $PublicConfirmed) {
+            throw 'Public repository detected. Explicit public-publish confirmation is required.'
+        }
     }
     $added = @($paths | Where-Object { $available[$_].Kind -eq 'New' })
     $modified = @($paths | Where-Object { $available[$_].Kind -eq 'Modified' })
