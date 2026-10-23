@@ -113,6 +113,18 @@ try {
                     canReview = [bool]($session -and $session.LastSaveMessage -and -not $session.LastReviewUrl)
                 }
             }
+            elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/sentinel') {
+                if (-not $session) { throw 'Connect a project first.' }
+                $destination = Get-KeystoneSentinelDestination -Session $session
+                $findings = @()
+                if ($session.LocalPath -and $session.BaselineSha) {
+                    $preview = Get-KeystoneWorkspacePreview -Session $session
+                    $paths = @($preview.Changes | Where-Object { $_.Kind -ne 'Deleted' } | ForEach-Object Path)
+                    $report = Test-KeystoneSentinelPublication -Session $session -Paths $paths
+                    $findings = @($report.Findings)
+                }
+                Send-KeystoneWebJson -Response $res -Value @{ destination = $destination; findings = $findings }
+            }
             elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/integrations') {
                 $integration = Get-KeystoneArcConnectionStatus
                 Send-KeystoneWebJson -Response $res -Value $integration
