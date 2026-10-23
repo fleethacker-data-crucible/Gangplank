@@ -19,7 +19,11 @@ jobs:
           & .\tests\Workspace.Tests.ps1
           & .\tests\Sentinel.Tests.ps1
           & .\tests\RepositoryInsights.Tests.ps1
+          & .\tests\RepositoryIntegrity.Tests.ps1
           & .\tests\WebHost.Tests.ps1
           & .\tests\ArcIntegration.Tests.ps1
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\ArcCoreOnly.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Arc core-only compatibility tests failed.' }
+      - name: Browser JavaScript and markup integrity
+        shell: pwsh
+        run: node tests/BrowserSyntax.Tests.cjs
