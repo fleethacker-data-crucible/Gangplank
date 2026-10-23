@@ -113,6 +113,30 @@ try {
                     canReview = [bool]($session -and $session.LastSaveMessage -and -not $session.LastReviewUrl)
                 }
             }
+            elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/branches') {
+                if (-not $session) { throw 'Connect a project first.' }
+                Send-KeystoneWebJson -Response $res -Value @{ branches = @(Get-KeystoneRepositoryBranches -Session $session); defaultBranch=$session.DefaultBranch }
+            }
+            elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/history') {
+                if (-not $session) { throw 'Connect a project first.' }
+                $selected = [string]$req.QueryString['branch']
+                Send-KeystoneWebJson -Response $res -Value @{ commits = @(Get-KeystoneRepositoryHistory -Session $session -Branch $selected); branch=$selected }
+            }
+            elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/compare') {
+                if (-not $session) { throw 'Connect a project first.' }
+                $base = [string]$req.QueryString['base']
+                $head = [string]$req.QueryString['head']
+                if (-not $base -or -not $head) { throw 'Choose two branches to compare.' }
+                Send-KeystoneWebJson -Response $res -Value (Get-KeystoneRepositoryComparison -Session $session -Base $base -Head $head)
+            }
+            elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/reviews') {
+                if (-not $session) { throw 'Connect a project first.' }
+                Send-KeystoneWebJson -Response $res -Value @{ reviews = @(Get-KeystoneRepositoryReviews -Session $session) }
+            }
+            elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/insights') {
+                if (-not $session) { throw 'Connect a project first.' }
+                Send-KeystoneWebJson -Response $res -Value (Get-KeystoneRepositoryInsights -Session $session)
+            }
             elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/sentinel') {
                 if (-not $session) { throw 'Connect a project first.' }
                 $destination = Get-KeystoneSentinelDestination -Session $session
