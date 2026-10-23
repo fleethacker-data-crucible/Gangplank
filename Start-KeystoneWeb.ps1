@@ -147,7 +147,7 @@ try {
                     $report = Test-KeystoneSentinelPublication -Session $session -Paths $paths
                     $findings = @($report.Findings)
                 }
-                Send-KeystoneWebJson -Response $res -Value @{ destination = $destination; findings = $findings }
+                Send-KeystoneWebJson -Response $res -Value @{ destination = $destination; findings = $findings; publicPublishingEnabled = ($env:KEYSTONE_ALLOW_PUBLIC_PUBLISH -eq '1') }
             }
             elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/integrations') {
                 $integration = Get-KeystoneArcConnectionStatus
@@ -225,7 +225,8 @@ try {
                 $body = Read-KeystoneWebBody -Request $req
                 $selected = [string[]]@($body.paths)
                 $message = if ($body.message) { [string]$body.message } else { '' }
-                $saved = Invoke-KeystoneWorkspaceSave -Session $session -SelectedPaths $selected -Message $message
+                $publicConfirmed = ($body.publicConfirmed -eq $true)
+                $saved = Invoke-KeystoneWorkspaceSave -Session $session -SelectedPaths $selected -Message $message -PublicConfirmed:$publicConfirmed
                 $session | Add-Member -MemberType NoteProperty -Name LastSaveMessage -Value $saved.Message -Force
                 $session | Add-Member -MemberType NoteProperty -Name LastSavedFiles -Value $selected -Force
                 Send-KeystoneWebJson -Response $res -Value $saved

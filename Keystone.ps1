@@ -139,7 +139,18 @@ while ($true) {
                     Wait-KeystoneEnter
                     continue
                 }
-                $saved = Invoke-KeystoneWorkspaceSave -Session $session -SelectedPaths @($selected | ForEach-Object Path)
+                # Plain-language public destination acknowledgement is separate from the general save prompt.
+                $destination = Get-KeystoneSentinelDestination -Session $session
+                $publicConfirmed = $false
+                if ($destination.Public) {
+                    if ($env:KEYSTONE_ALLOW_PUBLIC_PUBLISH -ne '1') {
+                        throw 'Public repository publishing is disabled by Keystone policy.'
+                    }
+                    Write-Host 'WARNING: This repository is PUBLIC. Anyone may read uploaded files and commit history.' -ForegroundColor Yellow
+                    $publicConfirmed = ((Read-Host 'Type PUBLIC to confirm you have authorization for release') -ceq 'PUBLIC')
+                    if (-not $publicConfirmed) { Write-Host 'Publication cancelled.'; continue }
+                }
+                $saved = Invoke-KeystoneWorkspaceSave -Session $session -SelectedPaths @($selected | ForEach-Object Path) -PublicConfirmed:$publicConfirmed
                 Write-Host ("Saved {0} files: {1}" -f $saved.FileCount,$saved.Message) -ForegroundColor Green
                 Write-Host $saved.Url -ForegroundColor Cyan
                 Wait-KeystoneEnter
