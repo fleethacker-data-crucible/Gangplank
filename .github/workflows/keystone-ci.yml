@@ -1,0 +1,23 @@
+name: Keystone PowerShell checks
+on:
+  push:
+    branches: [main, 'feature/**', 'fix/**']
+  pull_request:
+    branches: [main]
+jobs:
+  test:
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Offline PowerShell 5.1 validation
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\tests\SmartSave.Tests.ps1
+          & .\tests\Workspace.Tests.ps1
+          & .\tests\WebHost.Tests.ps1
+          & .\tests\ArcIntegration.Tests.ps1
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\ArcCoreOnly.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Arc core-only compatibility tests failed.' }
