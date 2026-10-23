@@ -149,6 +149,16 @@ function Invoke-KeystoneWorkspaceSave {
         if (-not $available.ContainsKey($p)) { throw "File is not a pending change: $p" }
         if ($available[$p].Blocked) { throw "File is excluded or too large: $p" }
     }
+    # Fail closed before any remote write; publication is not public-release authorization.
+    $scanPaths = @($paths | Where-Object { $available[$_].Kind -ne 'Deleted' })
+    $sentinel = Test-KeystoneSentinelPublication -Session $Session -Paths $scanPaths
+    if (-not $sentinel.Allowed) {
+        $codes = @($sentinel.Findings | Where-Object { $_.Severity -in @('Block','Review') } | ForEach-Object Code | Select-Object -Unique)
+        throw ('Sentinel blocked publication: ' + ($codes -join ', '))
+    }
+    if ($sentinel.RequiresPublicConfirmation -and $env:KEYSTONE_ALLOW_PUBLIC_PUBLISH -ne '1') {
+        throw 'Sentinel blocks public publishing by default. Administrator approval and KEYSTONE_ALLOW_PUBLIC_PUBLISH=1 required.'
+    }
     $added = @($paths | Where-Object { $available[$_].Kind -eq 'New' })
     $modified = @($paths | Where-Object { $available[$_].Kind -eq 'Modified' })
     $deleted = @($paths | Where-Object { $available[$_].Kind -eq 'Deleted' })
