@@ -113,6 +113,30 @@ try {
                     canReview = [bool]($session -and $session.LastSaveMessage -and -not $session.LastReviewUrl)
                 }
             }
+            elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/branches') {
+                if (-not $session) { throw 'Connect a project first.' }
+                Send-KeystoneWebJson -Response $res -Value @{ branches = @(Get-KeystoneRepositoryBranches -Session $session); defaultBranch=$session.DefaultBranch }
+            }
+            elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/history') {
+                if (-not $session) { throw 'Connect a project first.' }
+                $selected = [string]$req.QueryString['branch']
+                Send-KeystoneWebJson -Response $res -Value @{ commits = @(Get-KeystoneRepositoryHistory -Session $session -Branch $selected); branch=$selected }
+            }
+            elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/compare') {
+                if (-not $session) { throw 'Connect a project first.' }
+                $base = [string]$req.QueryString['base']
+                $head = [string]$req.QueryString['head']
+                if (-not $base -or -not $head) { throw 'Choose two branches to compare.' }
+                Send-KeystoneWebJson -Response $res -Value (Get-KeystoneRepositoryComparison -Session $session -Base $base -Head $head)
+            }
+            elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/reviews') {
+                if (-not $session) { throw 'Connect a project first.' }
+                Send-KeystoneWebJson -Response $res -Value @{ reviews = @(Get-KeystoneRepositoryReviews -Session $session) }
+            }
+            elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/insights') {
+                if (-not $session) { throw 'Connect a project first.' }
+                Send-KeystoneWebJson -Response $res -Value (Get-KeystoneRepositoryInsights -Session $session)
+            }
             elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/sentinel') {
                 if (-not $session) { throw 'Connect a project first.' }
                 $destination = Get-KeystoneSentinelDestination -Session $session
@@ -123,7 +147,7 @@ try {
                     $report = Test-KeystoneSentinelPublication -Session $session -Paths $paths
                     $findings = @($report.Findings)
                 }
-                Send-KeystoneWebJson -Response $res -Value @{ destination = $destination; findings = $findings }
+                Send-KeystoneWebJson -Response $res -Value @{ destination = $destination; findings = $findings; publicPublishingEnabled = ($env:KEYSTONE_ALLOW_PUBLIC_PUBLISH -eq '1') }
             }
             elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/integrations') {
                 $integration = Get-KeystoneArcConnectionStatus
@@ -201,7 +225,8 @@ try {
                 $body = Read-KeystoneWebBody -Request $req
                 $selected = [string[]]@($body.paths)
                 $message = if ($body.message) { [string]$body.message } else { '' }
-                $saved = Invoke-KeystoneWorkspaceSave -Session $session -SelectedPaths $selected -Message $message
+                $publicConfirmed = ($body.publicConfirmed -eq $true)
+                $saved = Invoke-KeystoneWorkspaceSave -Session $session -SelectedPaths $selected -Message $message -PublicConfirmed:$publicConfirmed
                 $session | Add-Member -MemberType NoteProperty -Name LastSaveMessage -Value $saved.Message -Force
                 $session | Add-Member -MemberType NoteProperty -Name LastSavedFiles -Value $selected -Force
                 Send-KeystoneWebJson -Response $res -Value $saved
