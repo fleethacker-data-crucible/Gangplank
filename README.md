@@ -65,3 +65,7 @@ Windows PowerShell 5.1: run tests/SmartSave.Tests.ps1 and tests/Workspace.Tests.
 
 ## Source layout
 Start-KeystoneWeb.ps1 hosts the browser API; web/index.html is the UI; Core/Workspace.ps1 provides the safe save workflow; Core/SmartSave.ps1 generates titles; Core/AI.ps1 handles approved AI streaming; Providers/ contains native GitHub and GitLab REST adapters; ArcBridge.ps1 integrates ARC; Keystone.ps1 is the CLI.
+
+
+## Recovery / repository insight interface
+The recovery branch restores the existing application and adds live, read-only provider-backed branches, recent commits, comparisons, open reviews, and simple recommendations. These features operate through existing PowerShell 5.1 GitHub/GitLab REST adapters. The UI uses plain-language labels and hover descriptions; read-only comparison is **not** merge or conflict resolution. The AI panel is still advisory and does not execute commands. Full Git workflows and a new frontend technology stack require separate implementation and workstation verification.
