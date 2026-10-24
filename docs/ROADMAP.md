@@ -1,7 +1,7 @@
 # Keystone roadmap
 
 Browser-first Git workspace for people who don't use Git. Built to the shared
-[`TechStack`](../TechStack) used by ARC, Cascade and Synapse. Last updated 2026-10-24.
+[`TechStack`](../TechStack) used by ARC, Cascade and Synapse. Last updated 2026-10-24 (host refactor).
 Supersedes `docs/ENTERPRISE-ROADMAP.md`.
 
 **Where work happens.** Most development is done off-workstation (cloud sessions and
@@ -17,18 +17,22 @@ needs a CAC, the real web.git.mil instance or workstation application control is
 | Review fixes (2026-10-24) | No environment switch can put the production host in LocalDev; CSP nonce independent of the CSRF token; provider response bodies stay in the local log; executable bits preserved on GitHub saves; 401/network errors no longer reported as "remote changed"; branch names encoded in ref paths |
 | ARC 5 | Bridge uses ARC 5's `lib\Arc.ps1` contract (`Unlock-ArcVaultInteractive`, `Get-ArcSecret`, `Get-ArcItemNames`); ARC 3/4 `pm.ps1` kept as fallback; ARC 5 `pm.ps1` stub ignored. Tested against the real ARC 5 engine (software profile, temp data folder) |
 | Host routes | Branches, history, compare, reviews, insights and Sentinel routes work (their functions were never exported); a test now fails if the host calls an unexported function |
+| Credentials | ARC is opt-in (Credentials setting or `KEYSTONE_ARC_PATH`), never auto-detected. Tokens can be entered once in the UI and are sealed with Windows DPAPI; environment variables still work |
+| Host (roadmap 1) | TcpListener on 127.0.0.1, one-time launch link to an `HttpOnly; SameSite=Strict` cookie, client header, loopback Host/Origin, same-user peer check, limits, manifest-only static files, CSP without inline code |
+| Sessions (2) | Project, work branch and download baseline saved under `work\.keystone` and restored on restart |
+| Jobs (3) | Connect, start, download, save, review and AI run in background runspaces; one workspace job at a time; the UI polls progress |
+| Providers (4) | One transport for GitHub, GitLab and AI: coded errors, GET-only retry with `Retry-After`, no token on cross-host redirects, UTF-8 bodies, GitHub empty-repo 409 handled |
+| LocalDev and e2e (5) | Synthetic GitHub (`dev/fake-github.mjs`), `Launch-LocalDev.bat`, and an end-to-end test that drives the real host through connect, start, Smart Save, review, stale branch and restart |
+| Audit (6) | `Logs\audit.jsonl` for every remote write and credential/ARC change, shown in the UI |
+| CI (7) | Hygiene job (5.1 parse, non-ASCII without BOM, tracked logs/credentials), pinned actions, concurrency, 5.1 suites, e2e under Windows PowerShell 5.1 |
 
-## Next — host and plumbing (off-workstation)
+## Next — host follow-ups (off-workstation)
 
 | # | Item | Notes |
 |---|---|---|
-| 1 | TcpListener host on `127.0.0.1` | Per TechStack; removes the HttpListener URL-reservation failure mode. Follow ARC `lib/server/Http.ps1`: one-time launch nonce in the URL fragment → `HttpOnly; SameSite=Strict` cookie + `X-Keystone-Client` header, loopback Host/Origin checks, same-user peer check, header/body limits and timeouts, port fallback |
-| 2 | Session state survives a restart | Today project, work branch and download baseline live only in memory: closing the window strands unsaved work. Persist non-secret state (project, branch, baseline SHA, file hash map) under `work\` |
-| 3 | Background jobs | Download, save and AI stream block every other request today. Job model like Cascade's `JobManager` (start → poll `/api/jobs/{id}` → cancel), PS 5.1 runspaces, one exclusive job per kind |
-| 4 | Provider hardening | Stable error codes (`AUTH_REJECTED`, `FORBIDDEN`, `NOT_FOUND`, `RATE_LIMITED`, `NETWORK`, as Cascade), bounded retry with `Retry-After` on reads only, `Link`/`X-Next-Page` pagination everywhere, no redirect following with a token attached, GitLab parity with the GitHub error handling |
-| 5 | Synthetic provider for LocalDev and e2e | Node fake of the GitHub/GitLab endpoints Keystone uses (pattern: Cascade `tests/fakes/fake-github.mjs`). LocalDev becomes fully usable with fictional repos; "Test mode" banner as in ARC |
-| 6 | Write audit log | Every remote write (branch, commit, review) appended to a local JSONL audit with time, project, branch, files and commit, never contents (Cascade `WriteGateway` pattern) |
-| 7 | CI hygiene job | Copy ARC's: parse every `.ps1` under 5.1, block non-ASCII `.ps1` without BOM, logs, transcripts and vault files; pin actions by SHA; add `concurrency` |
+| 4b | Pagination by `Link` / `X-Next-Page` | Branch lists page by count today (GitHub until a short page; GitLab up to 50 pages of 100) |
+| 5b | Synthetic GitLab | The synthetic server covers GitHub; GitLab paths are covered by unit tests only |
+| 6b | Job cancel in the UI | The API supports `POST /api/jobs/{id}/cancel`; the UI has no cancel button yet |
 
 ## Next — UI rebuild (off-workstation)
 
@@ -59,10 +63,10 @@ or a release zip is required.
 
 | # | Item | Notes |
 |---|---|---|
-| W1 | CAC unlock through Keystone's console | Launch-Keystone.bat → ARC 5 `Unlock-ArcVaultInteractive` with the card. Depends on ARC's own CAC testing (planned at the end of ARC's polish phase). Keystone adds no CAC code of its own |
+| W1 | CAC unlock through Keystone's console | When ARC is ready: turn ARC on in Credentials, restart, and unlock with the card (ARC 5 `Unlock-ArcVaultInteractive`). Depends on ARC's own CAC testing (planned at the end of ARC's polish phase). Keystone adds no CAC code of its own |
 | W2 | web.git.mil end to end | Connect, start a workspace, Smart Save, create a merge request against a sandbox project; confirm GitLab paging and per-file commit guards |
 | W3 | Host under application control | Confirm the launcher and (after item 1) the TcpListener host run on the managed workstation with Edge |
-| W4 | Runner account | The self-hosted runner should run as a dedicated account with no ARC vault; it currently finds ARC in the user profile |
+| W4 | Runner account | The self-hosted runner should run as a dedicated account with no ARC vault. Keystone no longer auto-detects ARC, so tests can no longer pick it up, but the account still holds it |
 | W5 | Signed release | Code-sign scripts if application control requires it |
 
 ## Shared with sibling products

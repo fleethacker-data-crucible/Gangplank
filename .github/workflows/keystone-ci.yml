@@ -1,37 +1,86 @@
-name: Keystone PowerShell checks
+name: Keystone checks
+# Runs on the self-hosted Windows build PC. Tests use temp folders, LocalDev and a
+# synthetic GitHub only: no credentials, no ARC vault, no network services.
 on:
   push:
     branches: [main, 'feature/**', 'fix/**']
   pull_request:
     branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: keystone-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  hygiene:
+    name: Repo hygiene
     runs-on: [self-hosted, Windows, X64]
-    permissions:
-      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - name: Offline PowerShell 5.1 validation
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - name: Block logs, workspaces, local settings and non-ASCII PowerShell without BOM
+        shell: powershell
+        run: |
+          $fail = $false
+          $bad = @(git ls-files '*.log' '*.jsonl' 'Logs/*' 'work/*' 'work-localdev/*' 'config/*local*.json' 'node_modules/*' '*/node_modules/*')
+          if ($bad.Count) { Write-Host '::error::Tracked logs, workspaces or local settings:'; $bad; $fail = $true }
+          $creds = @(git ls-files | Where-Object { $_ -match '(^|/)(credentials\.json|session\.json|\.env)$' })
+          if ($creds.Count) { Write-Host '::error::Credential or session files committed:'; $creds; $fail = $true }
+          $nonAscii = @(git ls-files '*.ps1' '*.psm1' | Where-Object { $b = [IO.File]::ReadAllBytes($_); -not ($b.Length -ge 3 -and $b[0] -eq 0xEF -and $b[1] -eq 0xBB) -and ($b | Where-Object { $_ -gt 127 } | Select-Object -First 1) })
+          if ($nonAscii.Count) { Write-Host '::error::PowerShell files with non-ASCII text and no BOM (Windows PowerShell 5.1 misreads them):'; $nonAscii; $fail = $true }
+          if ($fail) { exit 1 }
+      - name: Parse every PowerShell file under Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $bad = 0
+          Get-ChildItem -Recurse -Include *.ps1,*.psm1 | Where-Object { $_.FullName -notmatch '\\node_modules\\' } | ForEach-Object {
+            $t = $null; $e = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$t, [ref]$e)
+            # Provider class files reference types from GitProviderBase.ps1; that is resolved when the module loads.
+            foreach ($err in @($e | Where-Object { $_.ErrorId -ne 'TypeNotFound' })) { $bad++; Write-Host ("::error file={0},line={1}::{2}" -f $err.Extent.File, $err.Extent.StartLineNumber, $err.Message) }
+          }
+          if ($bad) { exit 1 }
+          Import-Module .\Keystone.psm1 -Force -WarningAction SilentlyContinue
+          Write-Host ('Module loads under {0}: {1} functions' -f $PSVersionTable.PSVersion, (Get-Module Keystone).ExportedFunctions.Count)
+
+  powershell:
+    name: Windows PowerShell 5.1 tests
+    runs-on: [self-hosted, Windows, X64]
+    needs: [hygiene]
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - name: Offline module tests
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          & .\tests\SmartSave.Tests.ps1
-          & .\tests\Workspace.Tests.ps1
-          & .\tests\ProviderSafety.Tests.ps1
-          & .\tests\Sentinel.Tests.ps1
-          & .\tests\RepositoryInsights.Tests.ps1
-          & .\tests\RepositoryIntegrity.Tests.ps1
-          & .\tests\WebHost.Tests.ps1
-          & .\tests\ArcIntegration.Tests.ps1
-          # ARC 5 tests run in their own processes: ARC's engine loads once per process.
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Arc5Contract.Tests.ps1
-          if ($LASTEXITCODE -ne 0) { throw 'ARC 5 contract tests failed.' }
-          # Uses the real ARC 5 engine in a temp data folder when an ARC checkout is
-          # available (KEYSTONE_TEST_ARC_PATH); otherwise prints SKIP.
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Arc5Real.Tests.ps1
-          if ($LASTEXITCODE -ne 0) { throw 'Real ARC 5 integration tests failed.' }
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\ArcCoreOnly.Tests.ps1
-          if ($LASTEXITCODE -ne 0) { throw 'Arc core-only compatibility tests failed.' }
-      - name: Browser JavaScript and markup integrity
-        shell: pwsh
-        run: node tests/BrowserSyntax.Tests.cjs
+          # Each suite in its own process: ARC's engine and the module load once per process.
+          foreach ($t in @('SmartSave','Workspace','ProviderSafety','Credentials','Sentinel','RepositoryInsights','RepositoryIntegrity','ArcIntegration','ArcCoreOnly','Arc5Contract','Arc5Real','WebHost')) {
+            Write-Host "== $t"
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\tests\$t.Tests.ps1"
+            if ($LASTEXITCODE -ne 0) { throw "$t tests failed." }
+          }
+
+  e2e:
+    name: Host end to end (synthetic GitHub)
+    runs-on: [self-hosted, Windows, X64]
+    needs: [hygiene]
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - name: Browser markup and JavaScript
+        shell: powershell
+        run: |
+          node --version; if ($LASTEXITCODE -ne 0) { Write-Host '::error::node not found for the runner account'; exit 1 }
+          node tests/BrowserSyntax.Tests.cjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Synthetic GitHub server
+        shell: powershell
+        run: |
+          node --test dev/fake-github.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Real host under Windows PowerShell 5.1 against the synthetic GitHub
+        shell: powershell
+        env:
+          KEYSTONE_PWSH: powershell.exe
+        run: |
+          node --test tests/e2e/host.e2e.mjs
+          exit $LASTEXITCODE

@@ -1,22 +1,35 @@
-# KEYSTONE — local development (no CAC)
+# Keystone LocalDev
 
-Run `Launch-LocalDev.bat` from this repository on your **personal Windows PC** after checking out the feature branch. Do not use on a managed system to defeat organizational security policy.
+LocalDev runs the **real** Keystone host in test mode against a synthetic GitHub
+(`dev/fake-github.mjs`), so you can develop and try the whole flow with fictional
+repositories. Use it on a development PC only. It is not a way around ARC,
+CAC or any authorization on a managed system.
 
-## What it does
+## Start
 
-- Prerequisite: Windows PowerShell 5.1; no CAC needed.
-- Startup: Passes -LocalDev so the host does not import Arc or request an unlock. The GUI remains available, including local diagnostics.
-- Boundary: Remote GitHub/GitLab operations and AI still require authorized provider credentials. This is not a simulated Git provider.
-- Diagnostics / manual check: `powershell.exe -NoProfile -File Start-KeystoneWeb.ps1 -LocalDev -NoBrowser`.
+Double-click **Launch-LocalDev.bat** (needs Node.js 18+ on the development PC).
 
-## Workflow
+- Starts the synthetic GitHub on `http://127.0.0.1:8791` with the fictional repo
+  `keystone-demo/sample` (also `keystone-demo/public-site` and an empty repo).
+- Starts Keystone with `-LocalDev -DevGitHubUrl ...`: no ARC import, no unlock
+  prompts, a **Test mode** banner, and a fake `GITHUB_TOKEN` for that process only.
+- Workspaces go to `work-localdev\` (ignored by Git). The repo URL field is prefilled.
 
-```powershell
-git fetch origin
-git switch feature/local-dev-no-cac-launcher
-.\Launch-LocalDev.bat
-```
+Without Node, the host still starts in LocalDev with no provider.
 
-The original production launcher and authentication checks remain unchanged. Mock, local, or offline sessions are **not** authenticated Navy sessions, and must not contain CUI, real credentials, classified material, or production personal data.
+Manual: `powershell -File dev\Start-LocalDev.ps1 [-Port 8769] [-FakePort 8791] [-NoBrowser]`,
+or `node dev/fake-github.mjs 8791` and `Start-KeystoneWeb.ps1 -LocalDev -DevGitHubUrl http://127.0.0.1:8791/`.
 
-When stable, remove `Launch-LocalDev.bat` (and the ARC mock files where applicable) from the release branch. Do not deploy them as a means of avoiding CAC or authorization for live systems.
+## Synthetic GitHub controls (test only)
+
+`POST /__fake/reset`, `GET /__fake/state` (call log, including whether a token
+reached the archive redirect), `POST /__fake/fail {method, pathContains, status,
+times, retryAfter}` to inject 429/5xx, and `POST /__fake/advance {branch}` to
+simulate a teammate pushing.
+
+## Boundaries
+
+- LocalDev is only ever the explicit `-LocalDev` switch; no environment variable turns it on.
+- `-DevGitHubUrl` is refused without `-LocalDev` and accepts only `http://127.0.0.1` / `localhost`.
+- Fictional data only: never real credentials, CUI, classified material or personal data.
+- Production is started with `Launch-Keystone.bat`; do not ship `dev\` or `Launch-LocalDev.bat` in a release.
