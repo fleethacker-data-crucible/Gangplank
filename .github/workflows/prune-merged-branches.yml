@@ -8,15 +8,14 @@ permissions:
   pull-requests: read
 jobs:
   prune:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64]
     steps:
       - name: Remove only fully merged unchanged same-repository branches
         env:
           GH_REPOSITORY: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
-        shell: bash
+        shell: python
         run: |
-          python3 - <<'PY'
           import json,os,urllib.request,urllib.parse,urllib.error
           repo=os.environ['GH_REPOSITORY']
           token=os.environ['GH_TOKEN']
@@ -62,4 +61,3 @@ jobs:
               ref='/git/refs/heads/'+urllib.parse.quote(name,safe='/')
               api(ref,'DELETE')
               print('DELETED safely merged branch:',name)
-          PY
