@@ -15,7 +15,7 @@ $required=@(
  'tests/ArcIntegration.Tests.ps1','tests/ArcCoreOnly.Tests.ps1',
  'tests/Arc5Contract.Tests.ps1','tests/Arc5Real.Tests.ps1','tests/ProviderSafety.Tests.ps1',
  'tests/Sentinel.Tests.ps1','tests/RepositoryInsights.Tests.ps1',
- 'tests/BrowserSyntax.Tests.cjs','web/index.html','web/app.js','web/app.css',
+ 'tests/BrowserSyntax.Tests.cjs','web/index.html','web/app.js','web/app.css','web/logo.svg','docs/keystone-logo.svg',
  'Core/HttpClient.ps1','Core/Credentials.ps1','Core/Audit.ps1',
  'Server/Http.ps1','Server/Routes.ps1','Server/Jobs.ps1','Server/JobWork.ps1','Server/Session.ps1','Server/WebHost.ps1',
  'dev/fake-github.mjs','dev/fake-github.test.mjs','dev/Start-LocalDev.ps1','tests/e2e/host.e2e.mjs','tests/e2e/browser.e2e.mjs','tests/Credentials.Tests.ps1',

@@ -19,7 +19,7 @@ $script:KeystoneHttp = @{
     Port = 0; Listener = $null; Stream = $null; Client = $null; Responded = $false
     Nonce = $null; NonceExpires = [datetime]::MinValue
     SessionToken = $null; ClientSecret = $null; StopRequested = $false
-    UiRoot = ''; Manifest = @('index.html','app.js','app.css')
+    UiRoot = ''; Manifest = @('index.html','app.js','app.css','logo.svg')
     Csp = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     PeerCheck = 'unknown'
     MaxBody = 1048576

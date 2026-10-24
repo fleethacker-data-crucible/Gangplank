@@ -1,3 +1,5 @@
+<p><img src="docs/keystone-logo.svg" alt="" width="72" height="72"></p>
+
 # Keystone Workspace
 
 Browser-first workspace for working on GitHub and GitLab projects without learning Git. Windows PowerShell 5.1 and a browser; no git.exe, Node or Python on the workstation. Built to the shared [TechStack](TechStack).
