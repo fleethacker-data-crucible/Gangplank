@@ -16,13 +16,13 @@ if (-not (Test-Path -LiteralPath (Join-Path (Join-Path $arc 'lib') 'Arc.ps1') -P
 $arc = [IO.Path]::GetFullPath($arc)
 $data = Join-Path ([IO.Path]::GetTempPath()) ('keystone-arc5-real-test-' + [guid]::NewGuid().ToString('N'))
 $saved = @{}
-foreach ($n in @('ARC_PATH','ARC_ROOT','ARC_HOME','ARC_DATA','ARC_TEST_MODE','GITHUB_TOKEN','GITLAB_TOKEN','KEYSTONE_ARC_ITEM_GitHub','KEYSTONE_ARC_ITEM_GitLab')) {
+foreach ($n in @('ARC_PATH','ARC_ROOT','ARC_HOME','KEYSTONE_ARC_PATH','ARC_DATA','ARC_TEST_MODE','GITHUB_TOKEN','GITLAB_TOKEN','KEYSTONE_ARC_ITEM_GitHub','KEYSTONE_ARC_ITEM_GitLab')) {
     $saved[$n] = [Environment]::GetEnvironmentVariable($n)
     [Environment]::SetEnvironmentVariable($n,$null)
 }
 try {
     [void](New-Item -ItemType Directory -Path $data -Force)
-    $env:ARC_PATH = $arc
+    $env:KEYSTONE_ARC_PATH = $arc
     $env:ARC_DATA = $data
     $env:ARC_TEST_MODE = '1'
     Import-Module (Join-Path $root 'Keystone.psm1') -Force -WarningAction SilentlyContinue

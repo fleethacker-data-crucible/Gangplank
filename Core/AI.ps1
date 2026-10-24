@@ -19,12 +19,8 @@ function Get-KeystoneAiConfiguration {
 }
 
 function Get-KeystoneAiToken {
-    if ($env:KEYSTONE_AI_TOKEN) { return $env:KEYSTONE_AI_TOKEN.Trim() }
-    if ($env:GENAI_TOKEN) { return $env:GENAI_TOKEN.Trim() }
-    try {
-        $name = Get-KeystoneArcItemName -Provider GenAi
-        return Get-KeystoneArcSecretByName -ServiceName $name
-    } catch { return $null }
+    # Environment (KEYSTONE_AI_TOKEN, GENAI_TOKEN), Keystone's store, or configured ARC.
+    try { return (Resolve-KeystoneCredential -Provider GenAi).Value } catch { return $null }
 }
 
 function New-KeystoneAiPayload {
