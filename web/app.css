@@ -6,3 +6,6 @@
 .ended{position:fixed;inset:0;background:rgba(5,10,18,.86);display:flex;align-items:center;justify-content:center;z-index:10}.ended .panel{max-width:520px}
 .credRow{display:grid;grid-template-columns:120px 1fr;gap:10px;align-items:start;padding:10px 0;border-top:1px solid var(--line)}.credRow:first-child{border-top:0}
 .credRow .actions{margin-top:6px}.progress{color:var(--muted);font-size:.85em}
+
+/* The hidden attribute must always win over display rules (e.g. .ended{display:flex}). */
+[hidden]{display:none!important}

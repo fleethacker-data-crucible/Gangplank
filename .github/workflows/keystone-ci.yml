@@ -85,3 +85,15 @@ jobs:
         run: |
           .\.github\ci-run.ps1 -Title 'Host e2e' -Command 'node --test tests/e2e/host.e2e.mjs'
           exit $LASTEXITCODE
+      - name: UI in a real browser (Edge, Playwright installed to the runner temp folder)
+        shell: powershell
+        env:
+          KEYSTONE_PWSH: powershell.exe
+          KEYSTONE_BROWSER_CHANNEL: msedge
+        run: |
+          $pw = Join-Path $env:RUNNER_TEMP 'keystone-pw'
+          .\.github\ci-run.ps1 -Title 'Install Playwright' -Command "npm install --prefix `"$pw`" playwright@1.63.0 --no-audit --no-fund --silent"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:KEYSTONE_PLAYWRIGHT = Join-Path $pw 'node_modules\playwright'
+          .\.github\ci-run.ps1 -Title 'Browser e2e' -Command 'node --test tests/e2e/browser.e2e.mjs'
+          exit $LASTEXITCODE
