@@ -405,7 +405,11 @@ function Start-KeystoneHttpServer {
             } catch {
                 Write-KeystoneLog -Level WARN -Message ("Connection failed: {0}" -f $_.Exception.GetType().Name)
             } finally {
-                if ($client) { try { $client.Close() } catch { } }
+                if ($client) {
+                    # Finish sending (FIN) before closing, so clients see a clean end of response.
+                    try { $client.Client.Shutdown([Net.Sockets.SocketShutdown]::Send) } catch { }
+                    try { $client.Close() } catch { }
+                }
                 $script:KeystoneHttp.Client = $null; $script:KeystoneHttp.Stream = $null
             }
         }
