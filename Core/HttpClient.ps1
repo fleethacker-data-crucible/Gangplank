@@ -11,6 +11,8 @@
 $script:KeystoneHttpTransport = $null    # test seam: { param($Request) ... returns response }
 $script:KeystoneHttpSleep = { param([int]$Milliseconds) Start-Sleep -Milliseconds $Milliseconds }
 $script:KeystoneHttpMaxRetryWaitMs = 10000
+# Set by the HTTP loop while answering a request: one attempt, short timeout.
+$script:KeystoneHttpInteractive = $false
 
 function Get-KeystoneProviderErrorCode {
     param([int]$Status,[hashtable]$Headers = @{})
@@ -45,6 +47,8 @@ function Invoke-KeystoneHttpOnce {
     $req.Timeout = $Request.TimeoutSec * 1000
     $req.ReadWriteTimeout = $Request.TimeoutSec * 1000
     $req.UserAgent = 'Keystone'
+    # .NET Framework sends "Expect: 100-continue" on POST by default; some proxies answer 417.
+    try { $req.ServicePoint.Expect100Continue = $false } catch { }
     foreach ($k in $Request.Headers.Keys) {
         $v = [string]$Request.Headers[$k]
         switch ($k.ToLowerInvariant()) {
@@ -60,8 +64,14 @@ function Invoke-KeystoneHttpOnce {
         # Bodies are always UTF-8 bytes; say so, or servers may assume ISO-8859-1.
         if ($Request.Body -isnot [byte[]] -and $req.ContentType -notmatch 'charset=') { $req.ContentType = $req.ContentType + '; charset=utf-8' }
         $req.ContentLength = $bytes.Length
-        $stream = $req.GetRequestStream()
-        try { $stream.Write($bytes,0,$bytes.Length) } finally { $stream.Dispose() }
+        try {
+            $stream = $req.GetRequestStream()
+            try { $stream.Write($bytes,0,$bytes.Length) } finally { $stream.Dispose() }
+        } catch {
+            # Could not even send (offline, DNS, proxy): a network failure, not a crash.
+            $inner = $_.Exception; while ($inner.InnerException) { $inner = $inner.InnerException }
+            return [pscustomobject]@{ Status = 0; Headers = @{}; Text = ''; File = $null; NetworkError = $inner.GetType().Name }
+        }
     } elseif ($Request.Method -in @('POST','PUT','PATCH')) {
         $req.ContentLength = 0
     }
@@ -111,9 +121,20 @@ function Invoke-KeystoneHttpRequest {
     $idempotent = $Method -in @('GET','HEAD')
     if ($MaxAttempts -le 0) { $MaxAttempts = if ($idempotent) { 3 } else { 1 } }
     if (-not $idempotent) { $MaxAttempts = 1 }
+    if ($script:KeystoneHttpInteractive) { $MaxAttempts = 1; $TimeoutSec = [Math]::Min($TimeoutSec,20) }
     $request = [pscustomobject]@{ Method = $Method; Uri = $Uri; Headers = $Headers; Body = $Body; OutFile = $OutFile; TimeoutSec = $TimeoutSec }
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         $response = Invoke-KeystoneHttpOnce -Request $request
+        # API reads follow redirects on the SAME host only (GitHub uses 301/307 for
+        # renamed or transferred repositories). Other hosts never get the token.
+        $hops = 0
+        while ($idempotent -and -not $OutFile -and $hops -lt 3 -and $response.Status -in @(301,302,307,308) -and $response.Headers['location']) {
+            $next = [uri]::new([uri]$request.Uri,[string]$response.Headers['location'])
+            if ($next.Authority -ne ([uri]$request.Uri).Authority -or $next.Scheme -ne ([uri]$request.Uri).Scheme) { break }
+            $request.Uri = $next.AbsoluteUri
+            $response = Invoke-KeystoneHttpOnce -Request $request
+            $hops++
+        }
         $retryable = ($response.Status -eq 0) -or ($response.Status -in @(429,502,503,504))
         if (-not $retryable -or $attempt -eq $MaxAttempts) { return $response }
         $wait = Get-KeystoneRetryDelayMs -Headers $response.Headers -Attempt $attempt

@@ -51,9 +51,15 @@ try {
     $r = Invoke-WebRequest -Uri ($base + '/api/session') -Method Post -ContentType 'application/json' -Body ('{"nonce":"' + $nonce + '"}') -WebSession $web -UseBasicParsing -TimeoutSec 5
     Assert ($r.StatusCode -eq 200) 'Launch nonce exchange failed.'
     Assert ([string]$r.Headers['Set-Cookie'] -match 'HttpOnly; SameSite=Strict') 'Session cookie flags missing.'
-    $status = Invoke-RestMethod -Uri ($base + '/api/status') -Headers @{ 'X-Keystone-Client' = 'keystone-ui/1' } -WebSession $web -TimeoutSec 5
+    $client = [string](($r.Content | ConvertFrom-Json).client)
+    Assert ($client.Length -ge 40) 'Session must return a per-session client secret.'
+    $guessed = $false
+    try { Invoke-RestMethod -Uri ($base + '/api/status') -Headers @{ 'X-Keystone-Client' = 'keystone-ui/1' } -WebSession $web -TimeoutSec 5 | Out-Null }
+    catch { $guessed = ([int]$_.Exception.Response.StatusCode -eq 401) }
+    Assert $guessed 'A replayed cookie without the client secret must be refused.'
+    $status = Invoke-RestMethod -Uri ($base + '/api/status') -Headers @{ 'X-Keystone-Client' = $client } -WebSession $web -TimeoutSec 5
     Assert ($status.localDev -eq $true -and $status.connected -eq $false) 'Fresh LocalDev status wrong.'
-    $integration = Invoke-RestMethod -Uri ($base + '/api/integrations') -Headers @{ 'X-Keystone-Client' = 'keystone-ui/1' } -WebSession $web -TimeoutSec 5
+    $integration = Invoke-RestMethod -Uri ($base + '/api/integrations') -Headers @{ 'X-Keystone-Client' = $client } -WebSession $web -TimeoutSec 5
     Assert (@($integration.credentials).Count -eq 3) 'Credential status missing providers.'
     Assert (-not $integration.arc.enabled) 'ARC must be off unless configured.'
 
@@ -63,7 +69,7 @@ try {
     Assert $replay 'Launch nonce must work only once.'
 
     $badOrigin = $false
-    try { Invoke-RestMethod -Uri ($base + '/api/status') -Headers @{ 'X-Keystone-Client' = 'keystone-ui/1'; Origin = 'http://evil.example' } -WebSession $web -TimeoutSec 5 | Out-Null }
+    try { Invoke-RestMethod -Uri ($base + '/api/status') -Headers @{ 'X-Keystone-Client' = $client; Origin = 'http://evil.example' } -WebSession $web -TimeoutSec 5 | Out-Null }
     catch { $badOrigin = ([int]$_.Exception.Response.StatusCode -eq 400) }
     Assert $badOrigin 'Foreign Origin must be refused.'
     Write-Host 'TcpListener host, launch link, session cookie and request gate passed.' -ForegroundColor Green

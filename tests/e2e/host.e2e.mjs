@@ -55,8 +55,9 @@ after(async () => {
 });
 
 let cookie = '';
+let client = '';
 async function call(h, method, p, body, extra = {}) {
-  const headers = { 'X-Keystone-Client': 'keystone-ui/1', ...(cookie ? { Cookie: cookie } : {}), ...extra };
+  const headers = { 'X-Keystone-Client': client, ...(cookie ? { Cookie: cookie } : {}), ...extra };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const r = await fetch(h.base + p, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const text = await r.text();
@@ -96,16 +97,27 @@ test('session bootstrap and request gate', async () => {
   const set = r.headers.get('set-cookie');
   assert.match(set, /keystone_session=[^;]+; HttpOnly; SameSite=Strict/);
   cookie = set.split(';')[0];
+  client = r.json.client;
+  assert.ok(client && client.length >= 40, 'Session must return a per-session client secret');
+  assert.ok(!set.includes(client), 'The client secret must not be in the cookie');
   r = await call(h, 'POST', '/api/session', { nonce: h.nonce });
   assert.equal(r.status, 401, 'The launch nonce must work only once');
-  r = await call(h, 'GET', '/api/status', undefined, { 'X-Keystone-Client': 'other' });
-  assert.equal(r.status, 401, 'Missing client header must be refused');
+  // Browsers send localhost cookies to every port: a cookie replayed by another local
+  // server (without the tab's secret) must not work.
+  r = await call(h, 'GET', '/api/status', undefined, { 'X-Keystone-Client': 'keystone-ui/1' });
+  assert.equal(r.status, 401, 'Cookie with a guessed client header must be refused');
+  r = await call(h, 'GET', '/api/status', undefined, { 'X-Keystone-Client': '' });
+  assert.equal(r.status, 401, 'Missing client secret must be refused');
+  const savedCookie = cookie; cookie = '';
+  r = await call(h, 'GET', '/api/status');
+  assert.equal(r.status, 401, 'Client secret without the cookie must be refused');
+  cookie = savedCookie;
   r = await call(h, 'GET', '/api/status', undefined, { Origin: 'http://evil.example' });
   assert.equal(r.status, 400, 'Foreign Origin must be refused');
   // fetch() cannot forge Host; a raw request can (as a DNS-rebinding page would).
   const port = Number(new URL(h.base).port);
   const raw = await new Promise((resolve, reject) => {
-    const sock = net.connect(port, '127.0.0.1', () => sock.write(`GET /api/status HTTP/1.1\r\nHost: evil.example:${port}\r\nX-Keystone-Client: keystone-ui/1\r\nCookie: ${cookie}\r\n\r\n`));
+    const sock = net.connect(port, '127.0.0.1', () => sock.write(`GET /api/status HTTP/1.1\r\nHost: evil.example:${port}\r\nX-Keystone-Client: ${client}\r\nCookie: ${cookie}\r\n\r\n`));
     let data = ''; sock.on('data', (d) => (data += d)); sock.on('end', () => resolve(data)); sock.on('error', reject);
   });
   assert.match(raw, /^HTTP\/1\.1 400 /, 'Foreign Host (DNS rebinding) must be refused');
@@ -187,6 +199,7 @@ test('session survives a restart', async () => {
   cookie = '';
   const r1 = await call(host, 'POST', '/api/session', { nonce: host.nonce });
   cookie = r1.headers.get('set-cookie').split(';')[0];
+  client = r1.json.client;
   const after = (await call(host, 'GET', '/api/status')).json;
   assert.equal(after.connected, true, 'Restored session should reconnect with the environment token');
   assert.equal(after.project, before.project);
@@ -206,9 +219,34 @@ test('jobs never overlap and bad jobs are clean', async () => {
   assert.equal(b.json.error, 'BUSY');
   const r = await call(host, 'GET', '/api/jobs/job-000000000000');
   assert.equal(r.status, 404);
-  for (let i = 0; i < 100; i++) {
+  // Cancel: the job must reach a final state, and the group must free up afterwards.
+  await call(host, 'POST', `/api/jobs/${a.json.job}/cancel`, {});
+  let final = '';
+  for (let i = 0; i < 150; i++) {
     const j = await call(host, 'GET', `/api/jobs/${a.json.job}`);
+    if (!['running', 'cancelling'].includes(j.json.state)) { final = j.json.state; break; }
+    await new Promise((res) => setTimeout(res, 200));
+  }
+  assert.ok(['cancelled', 'succeeded', 'failed'].includes(final), 'A cancelled job must finish, got ' + final);
+  const c = await call(host, 'POST', '/api/download', { branch: 'main' });
+  assert.equal(c.status, 202, 'A new job must be allowed once the cancelled one has ended');
+  for (let i = 0; i < 150; i++) {
+    const j = await call(host, 'GET', `/api/jobs/${c.json.job}`);
     if (j.json.state !== 'running') break;
     await new Promise((res) => setTimeout(res, 200));
   }
+});
+
+test('a disconnect during a job is not undone by the job', async () => {
+  const s = await call(host, 'POST', '/api/download', { branch: 'main' });
+  assert.equal(s.status, 202);
+  const d = await call(host, 'POST', '/api/disconnect', {});
+  assert.equal(d.status, 200);
+  for (let i = 0; i < 150; i++) {
+    const j = await call(host, 'GET', `/api/jobs/${s.json.job}`);
+    if (j.json.state !== 'running') { if (j.json.state === 'succeeded') assert.equal(j.json.result.stale, true, 'Stale result should be marked'); break; }
+    await new Promise((res) => setTimeout(res, 200));
+  }
+  const st = await call(host, 'GET', '/api/status');
+  assert.equal(st.json.connected, false, 'Disconnect must stick');
 });

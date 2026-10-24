@@ -98,8 +98,43 @@ class KeystoneFakeGitHub : GitHubProvider {
     try { [void]$gh.InvokeApi('GET','repos/team/demo') } catch { $msg = [string]$_.Exception.Message }
     Assert ($msg -match '^NETWORK\|') "Network failure should be NETWORK: $msg"
     Assert ((Get-KeystoneSafeUrl 'https://h.example/p/a?token=secret') -eq 'https://h.example/p/a') 'Safe URL must drop the query'
+    # Same-host redirects are followed for reads (renamed repos); other hosts never get the token.
+    $script:Seen.Clear(); $script:Plan.Clear()
+    $script:Plan.Enqueue((Reply 301 '' @{ location = 'https://api.github.com/repositories/42' })); $script:Plan.Enqueue((Reply 200 '{"full_name":"team/renamed"}'))
+    Assert (($gh.InvokeApi('GET','repos/team/old')).full_name -eq 'team/renamed') 'Same-host redirect not followed'
+    Assert ($script:Seen[1].Headers['Authorization'] -eq 'Bearer tok-123') 'Same-host redirect should keep auth'
+    $script:Seen.Clear(); $script:Plan.Clear()
+    $script:Plan.Enqueue((Reply 302 '' @{ location = 'https://elsewhere.example/x' }))
+    $msg = ''
+    try { [void]$gh.InvokeApi('GET','repos/team/x') } catch { $msg = [string]$_.Exception.Message }
+    Assert ($script:Seen.Count -eq 1) 'A redirect to another host must not be followed with the token'
+    Assert ($msg -match '^HTTP_302\|') "Cross-host API redirect should fail, got: $msg"
+
+    # Requests answered on the HTTP loop fail fast: one attempt, short timeout.
+    $script:Seen.Clear(); $script:Plan.Clear(); $script:Plan.Enqueue((Reply 502)); $script:Plan.Enqueue((Reply 200 '{}'))
+    $script:KeystoneHttpInteractive = $true
+    try { try { [void]$gh.InvokeApi('GET','repos/team/demo') } catch { } } finally { $script:KeystoneHttpInteractive = $false }
+    Assert ($script:Seen.Count -eq 1) 'Interactive reads must not retry'
+    Assert ($script:Seen[0].TimeoutSec -le 20) 'Interactive reads must use a short timeout'
+    $script:Plan.Clear()
+
     $script:KeystoneHttpTransport = $null
     $script:KeystoneHttpSleep = { param([int]$Milliseconds) Start-Sleep -Milliseconds $Milliseconds }
+
+    # --- Session snapshots and restore -----------------------------------------
+    $live = [pscustomobject]@{ Provider = 'GitHub'; BaseUrl = 'https://github.com'; ProjectPath = 'team/demo'; DefaultBranch = 'main'; BaselineMap = @{ 'a.txt' = 'h1' } }
+    $snap = ConvertTo-KeystoneSessionSnapshot $live
+    $snap.BaselineMap['b.txt'] = 'h2'
+    Assert (-not $live.BaselineMap.ContainsKey('b.txt')) 'Snapshots must copy the baseline map, not share it across threads'
+    $sessDir = Join-Path ([IO.Path]::GetTempPath()) ('keystone-sess-' + [guid]::NewGuid().ToString('N'))
+    try {
+        Save-KeystoneSessionState -WorkRoot $sessDir -Session $live
+        Assert ($null -ne (Read-KeystoneSessionState -WorkRoot $sessDir)) 'A github.com session should restore'
+        $devLike = [pscustomobject]@{ Provider = 'GitHub'; BaseUrl = 'http://127.0.0.1:8791'; ProjectPath = 'keystone-demo/sample'; DefaultBranch = 'main'; BaselineMap = @{} }
+        Save-KeystoneSessionState -WorkRoot $sessDir -Session $devLike
+        $script:KeystoneDevGitHubUrl = $null
+        Assert ($null -eq (Read-KeystoneSessionState -WorkRoot $sessDir)) 'A LocalDev session must never restore in a normal run'
+    } finally { Remove-Item -LiteralPath $sessDir -Recurse -Force -ErrorAction SilentlyContinue }
 
     # --- GetPathModes walks only the needed directories ------------------------
     $trees = @{

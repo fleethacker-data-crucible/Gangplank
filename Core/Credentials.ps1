@@ -191,6 +191,8 @@ function Set-KeystoneArcSettings {
     if ($Enabled) {
         if (-not $clean) { throw 'BAD_REQUEST|Enter the ARC folder path to enable ARC.' }
         if (-not [IO.Path]::IsPathRooted($clean)) { throw 'BAD_REQUEST|Enter the full ARC folder path, for example C:\Users\you\Projects\arc.' }
+        # Local folders only: ARC code is loaded at startup, never from a network share.
+        if ($clean -match '^(\\\\|//)') { throw 'BAD_REQUEST|ARC must be in a local folder, not a network share.' }
         if (-not (Get-KeystoneArcFlavor -ArcRoot $clean)) { throw 'BAD_REQUEST|No ARC installation found there (expected lib\Arc.ps1).' }
     }
     $settings = Get-KeystoneLocalSettings
@@ -250,13 +252,16 @@ function Get-KeystoneCredentialStatus {
             $arcItem = Get-KeystoneArcItemName -Provider $p
             $arcReady = [bool]($arcStatus.arcUnlocked -and (@($arcStatus.itemNames) -contains $arcItem))
         }
-        $source = if ($env) { 'environment' } elseif ($stored.ContainsKey($p)) { 'stored' } elseif ($arcReady) { 'arc' } else { 'none' }
+        # A saved entry that cannot be unsealed (other account, damaged file) is not "ready".
+        $storedOk = ($stored.ContainsKey($p) -and $null -ne (Get-KeystoneStoredCredential -Provider $p))
+        $source = if ($env) { 'environment' } elseif ($storedOk) { 'stored' } elseif ($arcReady) { 'arc' } else { 'none' }
         [pscustomobject]@{
             provider = $p
             configured = ($source -ne 'none')
             source = $source
             environmentVariable = $(if ($env) { $env.Name } else { $script:KeystoneCredentialEnv[$p][0] })
             storedAt = $(if ($stored.ContainsKey($p)) { $stored[$p].Saved } else { '' })
+            storedUnreadable = ($stored.ContainsKey($p) -and -not $storedOk)
             arcItem = $(if ($arcItem) { $arcItem } else { '' })
             arcItemFound = $arcReady
         }
