@@ -52,13 +52,14 @@ jobs:
       - name: Offline module tests
         shell: powershell
         run: |
-          $ErrorActionPreference = 'Stop'
+          $failed = $false
           # Each suite in its own process: ARC's engine and the module load once per process.
           foreach ($t in @('SmartSave','Workspace','ProviderSafety','Credentials','Sentinel','RepositoryInsights','RepositoryIntegrity','ArcIntegration','ArcCoreOnly','Arc5Contract','Arc5Real','WebHost')) {
             Write-Host "== $t"
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\tests\$t.Tests.ps1"
-            if ($LASTEXITCODE -ne 0) { throw "$t tests failed." }
+            .\.github\ci-run.ps1 -Title "$t tests" -Command "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\$t.Tests.ps1"
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
           }
+          if ($failed) { exit 1 }
 
   e2e:
     name: Host end to end (synthetic GitHub)
@@ -70,17 +71,17 @@ jobs:
         shell: powershell
         run: |
           node --version; if ($LASTEXITCODE -ne 0) { Write-Host '::error::node not found for the runner account'; exit 1 }
-          node tests/BrowserSyntax.Tests.cjs
+          .\.github\ci-run.ps1 -Title 'Browser syntax' -Command 'node tests/BrowserSyntax.Tests.cjs'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Synthetic GitHub server
         shell: powershell
         run: |
-          node --test dev/fake-github.test.mjs
+          .\.github\ci-run.ps1 -Title 'Synthetic GitHub' -Command 'node --test dev/fake-github.test.mjs'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Real host under Windows PowerShell 5.1 against the synthetic GitHub
         shell: powershell
         env:
           KEYSTONE_PWSH: powershell.exe
         run: |
-          node --test tests/e2e/host.e2e.mjs
+          .\.github\ci-run.ps1 -Title 'Host e2e' -Command 'node --test tests/e2e/host.e2e.mjs'
           exit $LASTEXITCODE
