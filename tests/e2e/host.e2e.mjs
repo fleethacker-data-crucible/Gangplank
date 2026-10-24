@@ -81,12 +81,14 @@ test('session bootstrap and request gate', async () => {
   let r = await call(h, 'GET', '/api/status');
   assert.equal(r.status, 401, 'API without a session must be refused');
   r = await fetch(h.base + '/');
+  await r.text(); // always drain bodies: undici asserts if the server closes while a body is unread
   assert.equal(r.status, 200);
   const csp = r.headers.get('content-security-policy');
   assert.match(csp, /script-src 'self'/); assert.doesNotMatch(csp, /unsafe-inline/);
   assert.equal(r.headers.get('x-frame-options'), 'DENY');
-  assert.equal((await fetch(h.base + '/app.js')).status, 200);
-  assert.equal((await fetch(h.base + '/Keystone.psm1')).status, 404, 'Only manifest files are served');
+  const getStatus = async (u) => { const x = await fetch(u); await x.text(); return x.status; };
+  assert.equal(await getStatus(h.base + '/app.js'), 200);
+  assert.equal(await getStatus(h.base + '/Keystone.psm1'), 404, 'Only manifest files are served');
   r = await call(h, 'POST', '/api/session', { nonce: 'wrong-wrong-wrong-wrong-wrong' });
   assert.equal(r.status, 401, 'A wrong launch nonce must be refused');
   r = await call(h, 'POST', '/api/session', { nonce: h.nonce });
@@ -170,7 +172,7 @@ test('connect, start, edit, Smart Save, review', async () => {
   assert.doesNotMatch(JSON.stringify(r.json), new RegExp(fake.token), 'Audit leaked the token');
 
   // A teammate pushes to the work branch: saving must stop.
-  await fetch(fake.url + '/__fake/advance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ branch, path: 'teammate.txt', content: 'hi' }) });
+  await (await fetch(fake.url + '/__fake/advance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ branch, path: 'teammate.txt', content: 'hi' }) })).text();
   fs.appendFileSync(path.join(folder, 'notes.md'), 'More.\n');
   r = await call(h, 'GET', '/api/preview');
   assert.equal(r.json.remoteChanged, true, 'Remote change must be detected');

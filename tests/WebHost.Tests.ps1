@@ -26,9 +26,12 @@ try {
     $launch = $null
     for ($i = 0; $i -lt 120 -and -not $launch; $i++) {
         Start-Sleep -Milliseconds 250
-        if ($process.HasExited) { throw "Keystone host exited early: $([IO.File]::ReadAllText($out))" }
+        if ($process.HasExited) { throw "Keystone host exited early (exit $($process.ExitCode)). See $out." }
         if (Test-Path -LiteralPath $out) {
-            $m = [regex]::Match([IO.File]::ReadAllText($out),'Open: (http://127\.0\.0\.1:(\d+)/#k=([A-Za-z0-9_-]+))')
+            # The host still has this file open for writing: read with shared access.
+            $fs = [IO.File]::Open($out,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+            try { $text = (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Dispose() }
+            $m = [regex]::Match($text,'Open: (http://127\.0\.0\.1:(\d+)/#k=([A-Za-z0-9_-]+))')
             if ($m.Success) { $launch = $m }
         }
     }
