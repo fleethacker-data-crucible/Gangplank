@@ -18,12 +18,11 @@
 $script:KeystoneHttp = @{
     Port = 0; Listener = $null; Stream = $null; Client = $null; Responded = $false
     Nonce = $null; NonceExpires = [datetime]::MinValue
-    SessionToken = $null; StopRequested = $false
+    SessionToken = $null; ClientSecret = $null; StopRequested = $false
     UiRoot = ''; Manifest = @('index.html','app.js','app.css')
     Csp = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     PeerCheck = 'unknown'
     MaxBody = 1048576
-    ClientHeader = 'keystone-ui/1'
 }
 
 function New-KeystoneRandomToken {
@@ -61,6 +60,10 @@ function Use-KeystoneLaunchNonce {
     if (-not (Test-KeystoneStringsEqual $Nonce $script:KeystoneHttp.Nonce)) { return $null }
     $script:KeystoneHttp.Nonce = $null
     $script:KeystoneHttp.SessionToken = New-KeystoneRandomToken
+    # Second secret, returned once in the response body and kept by the page in
+    # sessionStorage (per origin, so per port). Browsers send localhost cookies to
+    # every port, so the cookie alone could be replayed by another local server.
+    $script:KeystoneHttp.ClientSecret = New-KeystoneRandomToken
     return $script:KeystoneHttp.SessionToken
 }
 
@@ -141,7 +144,8 @@ function Test-KeystonePeerIsCurrentUser {
         $ownerPid = [KeystonePeer]::GetOwningPid($peerPort, $script:KeystoneHttp.Port)
         if ($ownerPid -le 0) { return $null }
         $sid = [KeystonePeer]::GetProcessUserSid($ownerPid)
-        if ([string]::IsNullOrEmpty($sid)) { return $null }
+        # A process we cannot open is, for a normal user, another account's process.
+        if ([string]::IsNullOrEmpty($sid)) { return $false }
         return ($sid -eq [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
     } catch { return $null }
 }
@@ -301,7 +305,8 @@ function Invoke-KeystoneServerRequest {
         catch { Send-KeystoneError 400 'BAD_REQUEST' 'Body is not valid JSON.'; return }
     }
     if ($Req.Path -eq '/api/health' -and $Req.Method -eq 'GET') {
-        Send-KeystoneJson -Object @{ ok = $true; app = 'keystone'; session = (Test-KeystoneSessionCookie $Req) }
+        $sent = ''; if ($Req.Headers.ContainsKey('X-Keystone-Client')) { $sent = $Req.Headers['X-Keystone-Client'] }
+        Send-KeystoneJson -Object @{ ok = $true; app = 'keystone'; session = ((Test-KeystoneSessionCookie $Req) -and (Test-KeystoneStringsEqual $sent $script:KeystoneHttp.ClientSecret)) }
         return
     }
     if ($Req.Path -eq '/api/session' -and $Req.Method -eq 'POST') {
@@ -312,11 +317,11 @@ function Invoke-KeystoneServerRequest {
             Send-KeystoneError 401 'SESSION' 'This launch link has expired. Use the link in the Keystone window, or restart Keystone.'
             return
         }
-        Send-KeystoneJson -Object @{ ok = $true } -ExtraHeaders @("Set-Cookie: keystone_session=$tok; HttpOnly; SameSite=Strict; Path=/")
+        Send-KeystoneJson -Object @{ ok = $true; client = $script:KeystoneHttp.ClientSecret } -ExtraHeaders @("Set-Cookie: keystone_session=$tok; HttpOnly; SameSite=Strict; Path=/")
         return
     }
     $client = ''; if ($Req.Headers.ContainsKey('X-Keystone-Client')) { $client = $Req.Headers['X-Keystone-Client'] }
-    if ($client -cne $script:KeystoneHttp.ClientHeader) { Send-KeystoneError 401 'SESSION' 'Missing client header.'; return }
+    if (-not (Test-KeystoneStringsEqual $client $script:KeystoneHttp.ClientSecret)) { Send-KeystoneError 401 'SESSION' 'Session ended. Use the link in the Keystone window (press L there for a new one).'; return }
     if (-not (Test-KeystoneSessionCookie $Req)) { Send-KeystoneError 401 'SESSION' 'Session ended. Use the link in the Keystone window, or restart Keystone.'; return }
     Invoke-KeystoneRoute -Req $Req
 }

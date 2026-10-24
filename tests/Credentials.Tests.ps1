@@ -40,6 +40,8 @@ try {
         Assert ((Get-Code { Set-KeystoneArcSettings -Enabled $true -Path '' }) -eq 'BAD_REQUEST') 'Enabling needs a path'
         Assert ((Get-Code { Set-KeystoneArcSettings -Enabled $true -Path 'relative\arc' }) -eq 'BAD_REQUEST') 'Relative path must be rejected'
         Assert ((Get-Code { Set-KeystoneArcSettings -Enabled $true -Path (Join-Path $Temp 'nowhere') }) -eq 'BAD_REQUEST') 'Folder without ARC must be rejected'
+        Assert ((Get-Code { Set-KeystoneArcSettings -Enabled $true -Path '\\fileserver\share\arc' }) -eq 'BAD_REQUEST') 'ARC on a network share must be rejected'
+        Assert ((Get-Code { Set-KeystoneArcSettings -Enabled $true -Path '//fileserver/share/arc' }) -eq 'BAD_REQUEST') 'ARC on a network share must be rejected (slashes)'
         [void](Set-KeystoneArcSettings -Enabled $true -Path $arc)
         Assert ((Get-KeystoneConfiguredArcPath) -eq $arc) 'Configured ARC path not returned'
         Assert ((Find-KeystoneArcRoot) -eq [IO.Path]::GetFullPath($arc)) 'Configured ARC not found'
@@ -87,6 +89,8 @@ try {
         $raw.Items.GitHub.Protected = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('not sealed'))
         [IO.File]::WriteAllText((Get-KeystoneCredentialStorePath), ($raw | ConvertTo-Json -Depth 5))
         Assert ($null -eq (Get-KeystoneStoredCredential -Provider GitHub)) 'Tampered store must not yield a token'
+        $bad = @((Get-KeystoneCredentialStatus).credentials | Where-Object { $_.provider -eq 'GitHub' })[0]
+        Assert (-not $bad.configured -and $bad.storedUnreadable) 'An unreadable saved token must not be reported as ready'
 
         Assert (Remove-KeystoneStoredCredential -Provider GitHub) 'Remove should report success'
         Assert ((Get-Code { Resolve-KeystoneCredential -Provider GitHub }) -eq 'CREDENTIAL_MISSING') 'Removed token still resolved'

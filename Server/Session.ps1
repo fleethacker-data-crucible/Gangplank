@@ -37,7 +37,8 @@ function ConvertTo-KeystoneSessionSnapshot {
         $p = $Session.PSObject.Properties[$f]
         $snap[$f] = $(if ($p) { $p.Value } else { $null })
     }
-    if ($snap.BaselineMap -isnot [hashtable]) { $snap.BaselineMap = ConvertTo-KeystoneHashtable $snap.BaselineMap }
+    # A copy, never the live table: jobs run on other threads.
+    $snap.BaselineMap = (ConvertTo-KeystoneHashtable $snap.BaselineMap).Clone()
     $snap.Branches = @($snap.Branches)
     $snap.LastSavedFiles = @($snap.LastSavedFiles)
     return $snap
@@ -104,7 +105,15 @@ function Read-KeystoneSessionState {
             $snap[$f] = $(if ($p) { $p.Value } else { $null })
         }
         $snap.BaselineMap = ConvertTo-KeystoneHashtable $snap.BaselineMap
-        if (-not $snap.Provider -or -not $snap.ProjectPath) { return $null }
+        if (-not $snap.Provider -or -not $snap.ProjectPath -or -not $snap.BaseUrl) { return $null }
+        # Re-check the saved address exactly as a typed URL would be checked, so a
+        # session saved in LocalDev (http://127.0.0.1:...) can never send a real
+        # token anywhere in a normal run.
+        try { Assert-KeystoneTrustedRepositoryUrl -Url (([string]$snap.BaseUrl).TrimEnd('/') + '/' + [string]$snap.ProjectPath) }
+        catch {
+            Write-KeystoneLog -Level WARN -Message 'Saved session points at a host that is not allowed now; it was not restored.'
+            return $null
+        }
         if ($snap.LocalPath -and -not (Test-Path -LiteralPath $snap.LocalPath -PathType Container)) {
             $snap.LocalPath = $null; $snap.BaselineSha = $null; $snap.BaselineMap = @{}
         }

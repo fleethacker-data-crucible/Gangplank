@@ -11,6 +11,7 @@ $script:KeystoneApp = @{
     Restored = $null       # snapshot from a previous run, waiting for a token
     WorkRoot = ''
     LocalDev = $false
+    Generation = 0         # bumped on connect/disconnect; stale job results are dropped
 }
 
 function Initialize-KeystoneApp {
@@ -46,16 +47,33 @@ function Get-KeystoneLiveSession {
 }
 
 function Set-KeystoneAppSession {
-    param($Snapshot)
+    param($Snapshot,[string]$Token)
     if (-not $Snapshot) {
         $script:KeystoneApp.Session = $null
         $script:KeystoneApp.Restored = $null
     } else {
-        $token = (Resolve-KeystoneCredential -Provider $Snapshot.Provider).Value
-        $script:KeystoneApp.Session = New-KeystoneSessionFromSnapshot -Snapshot $Snapshot -Token $token
+        if (-not $Token) { $Token = (Resolve-KeystoneCredential -Provider $Snapshot.Provider).Value }
+        $script:KeystoneApp.Session = New-KeystoneSessionFromSnapshot -Snapshot $Snapshot -Token $Token
         $script:KeystoneApp.Restored = $null
     }
-    Save-KeystoneSessionState -WorkRoot $script:KeystoneApp.WorkRoot -Session $script:KeystoneApp.Session
+    # Saving state is best effort (antivirus, sync clients): never fail the request for it.
+    try { Save-KeystoneSessionState -WorkRoot $script:KeystoneApp.WorkRoot -Session $script:KeystoneApp.Session }
+    catch { Write-KeystoneLog -Level WARN -Message "Session state could not be saved: $($_.Exception.Message)" }
+}
+
+function Update-KeystoneSessionCredential {
+    # After a token is saved or removed, rebuild the live provider so quick reads use it.
+    param([string]$Provider)
+    $s = $script:KeystoneApp.Session
+    if (-not $s -or $s.Provider -ne $Provider) { return }
+    try {
+        $token = (Resolve-KeystoneCredential -Provider $Provider).Value
+        $script:KeystoneApp.Session = New-KeystoneSessionFromSnapshot -Snapshot (ConvertTo-KeystoneSessionSnapshot $s) -Token $token
+    } catch {
+        # No credential any more: keep the work as a restorable snapshot.
+        $script:KeystoneApp.Restored = ConvertTo-KeystoneSessionSnapshot $s
+        $script:KeystoneApp.Session = $null
+    }
 }
 
 function Get-KeystoneErrorStatus {
@@ -84,6 +102,13 @@ function Get-KeystoneBodyValue {
     return $null
 }
 
+function Get-KeystoneJobContext {
+    # Main-thread context for a workspace job: which session generation it belongs
+    # to, and the token to reuse when its result is applied.
+    param([string]$Token,[string]$Kind)
+    return @{ Generation = $script:KeystoneApp.Generation; Token = $Token; Kind = $Kind }
+}
+
 function Get-KeystoneJobArguments {
     # Snapshot + token for workspace jobs; the token never leaves this process.
     param([Parameter(Mandatory)]$Session)
@@ -98,7 +123,15 @@ function Get-KeystoneJobArguments {
 # Job completion handlers (main thread). Plain module scriptblocks.
 $script:KeystoneOnSessionJob = {
     param($Result,$Context)
-    Set-KeystoneAppSession -Snapshot $Result.Session
+    if ($Context.Kind -eq 'connect') {
+        $script:KeystoneApp.Generation++
+    } elseif ($Context.Generation -ne $script:KeystoneApp.Generation) {
+        # The user disconnected or connected elsewhere while this ran: report the
+        # result, but do not resurrect the old session.
+        Write-KeystoneLog -Level INFO -Message "Result of a $($Context.Kind) job for a previous session was not applied."
+        return [ordered]@{ stale = $true; saved = $(if ($Result.ContainsKey('Saved')) { $Result.Saved } else { $null }) }
+    }
+    Set-KeystoneAppSession -Snapshot $Result.Session -Token $Context.Token
     $s = $script:KeystoneApp.Session
     # Explicit lower-case fields (PowerShell hashtables are case-insensitive).
     return [ordered]@{
@@ -112,9 +145,9 @@ $script:KeystoneOnSessionJob = {
 $script:KeystoneOnReviewJob = {
     param($Result,$Context)
     $s = $script:KeystoneApp.Session
-    if ($s) {
+    if ($s -and $Context.Generation -eq $script:KeystoneApp.Generation) {
         $s | Add-Member -MemberType NoteProperty -Name LastReviewUrl -Value $Result.Url -Force
-        Save-KeystoneSessionState -WorkRoot $script:KeystoneApp.WorkRoot -Session $s
+        try { Save-KeystoneSessionState -WorkRoot $script:KeystoneApp.WorkRoot -Session $s } catch { Write-KeystoneLog -Level WARN -Message 'Session state could not be saved.' }
     }
     return @{ url = $Result.Url; title = $Result.Title }
 }
@@ -126,12 +159,17 @@ function Send-KeystoneJobStarted {
 
 function Invoke-KeystoneRoute {
     param($Req)
+    # Requests answered on the HTTP loop must fail fast (one attempt, short
+    # timeout) so a network outage cannot freeze the UI; jobs keep full retries.
+    $script:KeystoneHttpInteractive = $true
     try {
         Invoke-KeystoneRouteCore -Req $Req
     } catch {
         $parts = Split-KeystoneCodedMessage -Message $_.Exception.Message
         Write-KeystoneLog -Level WARN -Message ("{0} {1} failed: {2}" -f $Req.Method, $Req.Path, $parts.Code)
         if (-not $script:KeystoneHttp.Responded) { Send-KeystoneError (Get-KeystoneErrorStatus $parts.Code) $parts.Code $parts.Message }
+    } finally {
+        $script:KeystoneHttpInteractive = $false
     }
 }
 
@@ -183,11 +221,14 @@ function Invoke-KeystoneRouteCore {
         $token = [string](Get-KeystoneBodyValue $Req 'token')
         [void](Set-KeystoneStoredCredential -Provider $provider -Token $token)
         $token = $null
+        Update-KeystoneSessionCredential -Provider $provider
         Send-KeystoneJson -Object (Get-KeystoneCredentialStatus)
         return
     }
     if ($m -eq 'POST' -and $p -eq '/api/credentials/remove') {
-        [void](Remove-KeystoneStoredCredential -Provider ([string](Get-KeystoneBodyValue $Req 'provider')))
+        $provider = [string](Get-KeystoneBodyValue $Req 'provider')
+        [void](Remove-KeystoneStoredCredential -Provider $provider)
+        Update-KeystoneSessionCredential -Provider $provider
         Send-KeystoneJson -Object (Get-KeystoneCredentialStatus)
         return
     }
@@ -223,18 +264,20 @@ function Invoke-KeystoneRouteCore {
         Assert-KeystoneTrustedRepositoryUrl -Url $url
         $parsed = Parse-KeystoneRepoUrl -Url $url
         $token = (Resolve-KeystoneCredential -Provider $parsed.Provider).Value
-        $id = Start-KeystoneJob -Kind 'connect' -Group 'workspace' -Function 'Invoke-KeystoneJobConnect' -Arguments @{ Url = $url; Token = $token; DevGitHubUrl = (Get-KeystoneDevProvider) } -OnComplete $script:KeystoneOnSessionJob
+        $id = Start-KeystoneJob -Kind 'connect' -Group 'workspace' -Function 'Invoke-KeystoneJobConnect' -Arguments @{ Url = $url; Token = $token; DevGitHubUrl = (Get-KeystoneDevProvider) } -OnComplete $script:KeystoneOnSessionJob -Context (Get-KeystoneJobContext -Token $token -Kind 'connect')
         Send-KeystoneJobStarted $id
         return
     }
     if ($m -eq 'POST' -and $p -eq '/api/disconnect') {
+        $script:KeystoneApp.Generation++
         Set-KeystoneAppSession -Snapshot $null
         Send-KeystoneJson -Object @{ connected = $false }
         return
     }
     if ($m -eq 'POST' -and $p -eq '/api/start') {
         $session = Get-KeystoneLiveSession -Required
-        $id = Start-KeystoneJob -Kind 'start' -Group 'workspace' -Function 'Invoke-KeystoneJobStart' -Arguments (Get-KeystoneJobArguments $session) -OnComplete $script:KeystoneOnSessionJob
+        $args2 = Get-KeystoneJobArguments $session
+        $id = Start-KeystoneJob -Kind 'start' -Group 'workspace' -Function 'Invoke-KeystoneJobStart' -Arguments $args2 -OnComplete $script:KeystoneOnSessionJob -Context (Get-KeystoneJobContext -Token $args2.Token -Kind 'start')
         Send-KeystoneJobStarted $id
         return
     }
@@ -244,7 +287,7 @@ function Invoke-KeystoneRouteCore {
         if ($branch.Length -gt 200 -or $branch -match '[\x00-\x1f]') { throw 'BAD_REQUEST|Branch name is not valid.' }
         $args2 = Get-KeystoneJobArguments $session
         $args2.Branch = $branch
-        $id = Start-KeystoneJob -Kind 'download' -Group 'workspace' -Function 'Invoke-KeystoneJobDownload' -Arguments $args2 -OnComplete $script:KeystoneOnSessionJob
+        $id = Start-KeystoneJob -Kind 'download' -Group 'workspace' -Function 'Invoke-KeystoneJobDownload' -Arguments $args2 -OnComplete $script:KeystoneOnSessionJob -Context (Get-KeystoneJobContext -Token $args2.Token -Kind 'download')
         Send-KeystoneJobStarted $id
         return
     }
@@ -270,7 +313,7 @@ function Invoke-KeystoneRouteCore {
         $args2.Paths = $paths
         $args2.Message = [string](Get-KeystoneBodyValue $Req 'message')
         $args2.PublicConfirmed = ((Get-KeystoneBodyValue $Req 'publicConfirmed') -eq $true)
-        $id = Start-KeystoneJob -Kind 'save' -Group 'workspace' -Function 'Invoke-KeystoneJobSave' -Arguments $args2 -OnComplete $script:KeystoneOnSessionJob
+        $id = Start-KeystoneJob -Kind 'save' -Group 'workspace' -Function 'Invoke-KeystoneJobSave' -Arguments $args2 -OnComplete $script:KeystoneOnSessionJob -Context (Get-KeystoneJobContext -Token $args2.Token -Kind 'save')
         Send-KeystoneJobStarted $id
         return
     }
@@ -280,7 +323,8 @@ function Invoke-KeystoneRouteCore {
         if ($session.LastBranch -eq $session.DefaultBranch) { throw 'BAD_STATE|Cannot review the default branch against itself.' }
         if (-not $session.LastSaveMessage) { throw 'BAD_STATE|Save your changes before requesting review.' }
         if ($session.LastReviewUrl) { Send-KeystoneJson -Object @{ url = $session.LastReviewUrl; title = 'Review already created'; existing = $true }; return }
-        $id = Start-KeystoneJob -Kind 'review' -Group 'workspace' -Function 'Invoke-KeystoneJobReview' -Arguments (Get-KeystoneJobArguments $session) -OnComplete $script:KeystoneOnReviewJob
+        $args2 = Get-KeystoneJobArguments $session
+        $id = Start-KeystoneJob -Kind 'review' -Group 'workspace' -Function 'Invoke-KeystoneJobReview' -Arguments $args2 -OnComplete $script:KeystoneOnReviewJob -Context (Get-KeystoneJobContext -Token $args2.Token -Kind 'review')
         Send-KeystoneJobStarted $id
         return
     }

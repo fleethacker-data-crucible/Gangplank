@@ -25,7 +25,8 @@ function Start-KeystoneJob {
         [hashtable]$Context = @{}
     )
     foreach ($j in $script:KeystoneJobs.Values) {
-        if ($j.Group -eq $Group -and $j.State -eq 'running') {
+        # A cancelled job may still be inside a blocking request: it stays busy until it ends.
+        if ($j.Group -eq $Group -and $j.State -in @('running','cancelling')) {
             throw "BUSY|Keystone is still working on '$($j.Kind)'. Wait for it to finish."
         }
     }
@@ -73,7 +74,8 @@ function Get-KeystoneJobErrorMessage {
 function Update-KeystoneJobs {
     # Called from the HTTP loop on the main thread: finish completed jobs.
     foreach ($job in @($script:KeystoneJobs.Values)) {
-        if ($job.State -ne 'running' -or -not $job.Handle.IsCompleted) { continue }
+        if ($job.State -notin @('running','cancelling') -or -not $job.Handle -or -not $job.Handle.IsCompleted) { continue }
+        $wasCancelling = ($job.State -eq 'cancelling')
         try {
             $output = $job.PowerShell.EndInvoke($job.Handle)
             if ($job.PowerShell.Streams.Error.Count -gt 0 -and $job.PowerShell.HadErrors -and @($output).Count -eq 0) {
@@ -83,12 +85,18 @@ function Update-KeystoneJobs {
             # OnComplete runs here, on the main thread, with plain data only. It is
             # a plain module scriptblock (no GetNewClosure, which would detach it
             # from the module); per-job values come through Context.
-            if ($job.OnComplete) { $result = & $job.OnComplete $result $job.Context }
+            if ($job.OnComplete) {
+                # The remote work is done (even if a cancel arrived too late to stop it).
+                # A failure applying it locally (state file, credential gone) must not
+                # turn a completed write into "failed".
+                try { $result = & $job.OnComplete $result $job.Context }
+                catch { Write-KeystoneLog -Level WARN -Message "Job $($job.Id) finished but its result could not be applied: $($_.Exception.Message)" }
+            }
             $job.Result = $result
             $job.State = 'succeeded'
         } catch {
             $job.Error = Get-KeystoneJobErrorMessage $_
-            $job.State = $(if ($job.State -eq 'cancelling') { 'cancelled' } else { 'failed' })
+            $job.State = $(if ($wasCancelling) { 'cancelled' } else { 'failed' })
             Write-KeystoneLog -Level WARN -Message "Job $($job.Id) ($($job.Kind)) failed: $($_.Exception.Message)"
         } finally {
             $job.Finished = (Get-Date).ToUniversalTime().ToString('o')
@@ -127,9 +135,15 @@ function Get-KeystoneJobView {
     $job = $script:KeystoneJobs[$Id]
     if (-not $job) { throw 'NOT_FOUND|No such job.' }
     $chunks = @()
-    $count = $job.Shared.Chunks.Count
     if ($After -lt 0) { $After = 0 }
-    if ($After -lt $count) { $chunks = @($job.Shared.Chunks.GetRange($After, $count - $After)) }
+    # Copy under the list's lock: the job may append while we read.
+    $list = $job.Shared.Chunks
+    $count = 0
+    [Threading.Monitor]::Enter($list.SyncRoot)
+    try {
+        $count = $list.Count
+        if ($After -lt $count) { $chunks = @($list.GetRange($After, $count - $After).ToArray()) }
+    } finally { [Threading.Monitor]::Exit($list.SyncRoot) }
     return [ordered]@{
         id = $job.Id; kind = $job.Kind; state = $job.State
         progress = [string]$job.Shared.Progress
