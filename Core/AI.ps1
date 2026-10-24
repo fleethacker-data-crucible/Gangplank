@@ -48,9 +48,9 @@ function New-KeystoneAiPayload {
 
 function Invoke-KeystoneAI {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Question, $Session, [switch]$CommitTitle)
+    param([Parameter(Mandatory)][string]$Question, $Session, [switch]$CommitTitle, [string]$Token)
     $config = Get-KeystoneAiConfiguration
-    $token = Get-KeystoneAiToken
+    $token = if ($Token) { $Token } else { Get-KeystoneAiToken }
     if (-not $token) { throw 'AI not connected. Set KEYSTONE_AI_TOKEN or GENAI_TOKEN, or unlock the ARC genapi item.' }
     $payload = New-KeystoneAiPayload -Question $Question -Session $Session -Model $config.Model -CommitTitle:$CommitTitle
     $response = Invoke-KeystoneHttpRequest -Method POST -Uri $config.Url -Headers @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json' } -Body ($payload | ConvertTo-Json -Depth 8 -Compress) -TimeoutSec 90
@@ -61,26 +61,20 @@ function Invoke-KeystoneAI {
     return $answer
 }
 
-function Send-KeystoneSseEvent {
-    param([Parameter(Mandatory)]$Response,[Parameter(Mandatory)][string]$Event,[string]$Data = '')
-    $payload = @{ event = $Event; text = $Data } | ConvertTo-Json -Compress -Depth 4
-    $bytes = [Text.Encoding]::UTF8.GetBytes(("data: $payload" + [char]10 + [char]10))
-    $Response.OutputStream.Write($bytes,0,$bytes.Length)
-    $Response.OutputStream.Flush()
-}
-
 function Invoke-KeystoneAIStream {
+    # Streams the answer to -OnChunk (one call per text delta). Used from a
+    # background job; the token is passed in from the host's main thread.
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Question, $Session, [Parameter(Mandatory)]$Response)
+    param([Parameter(Mandatory)][string]$Question, $Session, [Parameter(Mandatory)][scriptblock]$OnChunk, [string]$Token)
     $config = Get-KeystoneAiConfiguration
-    $token = Get-KeystoneAiToken
-    if (-not $token) { throw 'AI not connected. Configure an approved AI token or unlock ARC.' }
+    $token = if ($Token) { $Token } else { Get-KeystoneAiToken }
+    if (-not $token) { throw 'AI_NOT_CONFIGURED|AI is not connected. Add a GenAI token in Integrations or set KEYSTONE_AI_TOKEN.' }
     $payload = New-KeystoneAiPayload -Question $Question -Session $Session -Model $config.Model -Stream
     $body = [Text.Encoding]::UTF8.GetBytes(($payload | ConvertTo-Json -Depth 8 -Compress))
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $request = [Net.HttpWebRequest]::Create($config.Url)
     $request.Method = 'POST'
-    $request.ContentType = 'application/json'
+    $request.ContentType = 'application/json; charset=utf-8'
     $request.Accept = 'text/event-stream'
     $request.Headers.Add('Authorization',"Bearer $token")
     $request.Timeout = 90000
@@ -92,9 +86,14 @@ function Invoke-KeystoneAIStream {
     $upstream = $null
     $reader = $null
     try {
-        $upstream = $request.GetResponse()
+        try { $upstream = $request.GetResponse() }
+        catch [Net.WebException] {
+            $status = 0
+            if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+            $code = Get-KeystoneProviderErrorCode -Status $status
+            throw "$code|AI gateway request failed (HTTP $(if ($status) { $status } else { 'no response' }))."
+        }
         $reader = New-Object IO.StreamReader($upstream.GetResponseStream(),[Text.Encoding]::UTF8)
-        Send-KeystoneSseEvent -Response $Response -Event 'start'
         while (-not $reader.EndOfStream) {
             $line = $reader.ReadLine()
             if (-not $line -or -not $line.StartsWith('data:')) { continue }
@@ -103,12 +102,9 @@ function Invoke-KeystoneAIStream {
             try {
                 $delta = $raw | ConvertFrom-Json
                 $part = $delta.choices[0].delta.content
-                if ($part -is [string] -and $part.Length -gt 0) {
-                    Send-KeystoneSseEvent -Response $Response -Event 'chunk' -Data $part
-                }
             } catch { continue }
+            if ($part -is [string] -and $part.Length -gt 0) { & $OnChunk $part }
         }
-        Send-KeystoneSseEvent -Response $Response -Event 'done'
     } finally {
         if ($reader) { $reader.Dispose() }
         if ($upstream) { $upstream.Dispose() }

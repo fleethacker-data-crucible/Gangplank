@@ -168,19 +168,29 @@ class KeystoneFakeGitHub : GitHubProvider {
     }
 }
 
-# --- Launcher hardening (text checks; the host itself needs Windows) -----------
+# --- Host hardening (text checks; behaviour is covered by tests/e2e/host.e2e.mjs) ---
 $host1 = [IO.File]::ReadAllText((Join-Path $root 'Start-KeystoneWeb.ps1'))
-Assert ($host1 -notmatch 'KEYSTONE_LOCAL_DEV') 'No environment variable may switch the production host into LocalDev'
-Assert ($host1 -match 'nonceBytes') 'CSP nonce must use its own random bytes'
-Assert ($host1 -notmatch '\$nonce\s*=\s*\[Convert\]::ToBase64String\(\$csrfBytes\)') 'CSP nonce must not be derived from the CSRF token'
-Assert ($host1 -match 'Get-KeystoneSafeErrorMessage') 'Browser errors must go through the safe error filter'
-# Every Keystone function the host calls must be exported by the module, or the
-# route fails at runtime with "term not recognized".
+$http = [IO.File]::ReadAllText((Join-Path $root 'Server/Http.ps1'))
+$routes = [IO.File]::ReadAllText((Join-Path $root 'Server/Routes.ps1'))
+foreach ($text in @($host1,$http,$routes)) {
+    Assert ($text -notmatch 'KEYSTONE_LOCAL_DEV') 'No environment variable may switch the host into LocalDev'
+}
+Assert ($http -match 'TcpListener') 'Host must use TcpListener (TechStack), not HttpListener'
+Assert ($http -notmatch 'HttpListener') 'HttpListener must be gone'
+Assert ($http -notmatch "unsafe-inline|unsafe-eval") 'CSP must not allow inline script or style'
+Assert ($http -match 'HttpOnly; SameSite=Strict') 'Session cookie must be HttpOnly and SameSite=Strict'
+Assert ($routes -match 'Split-KeystoneCodedMessage') 'Route errors must go through the safe error filter'
+Assert ($routes -notmatch '\$_\.Exception\.Message\s*\}') 'Raw exception text must not be sent to the browser'
+# Every Keystone function the launcher calls must be exported by the module.
 $exported = @((Get-Module Keystone).ExportedFunctions.Keys)
-$hostLocal = @('Send-KeystoneWebJson','Read-KeystoneWebBody','Test-KeystoneWebRequest')
 $calls = @([regex]::Matches($host1,'\b[A-Z][a-z]+-Keystone[A-Za-z]+\b') | ForEach-Object { $_.Value } | Sort-Object -Unique)
-$unexported = @($calls | Where-Object { $_ -notin $exported -and $_ -notin $hostLocal })
-Assert ($unexported.Count -eq 0) ('Host calls functions the module does not export: ' + ($unexported -join ', '))
+$unexported = @($calls | Where-Object { $_ -notin $exported })
+Assert ($unexported.Count -eq 0) ('Launcher calls functions the module does not export: ' + ($unexported -join ', '))
+# Every function the routes call must exist in the module.
+$moduleCommands = @((& (Get-Module Keystone) { Get-Command -Module Keystone -CommandType Function | ForEach-Object Name }))
+$routeCalls = @([regex]::Matches($routes + $http,'\b(?:Get|Set|New|Invoke|Test|Send|Read|Start|Stop|Remove|Save|Use|Split|Initialize|Assert|Parse|Resolve|ConvertTo|Update|Wait|Write)-Keystone[A-Za-z]+\b') | ForEach-Object { $_.Value } | Sort-Object -Unique)
+$missing = @($routeCalls | Where-Object { $_ -notin $moduleCommands -and $_ -notin @('Parse-KeystoneRepoUrl') })
+Assert ($missing.Count -eq 0) ('Routes call functions that do not exist: ' + ($missing -join ', '))
 $ci = [IO.File]::ReadAllText((Join-Path $root '.github/workflows/keystone-ci.yml'))
 Assert ($ci -notmatch 'KEYSTONE_LOCAL_DEV') 'CI must pass -LocalDev explicitly instead of an environment switch'
 Write-Host 'Provider safety, file-mode and launcher hardening checks passed.' -ForegroundColor Green

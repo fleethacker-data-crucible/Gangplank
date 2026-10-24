@@ -57,6 +57,8 @@ function Invoke-KeystoneHttpOnce {
     if ($null -ne $Request.Body) {
         $bytes = if ($Request.Body -is [byte[]]) { $Request.Body } else { [Text.Encoding]::UTF8.GetBytes([string]$Request.Body) }
         if (-not $req.ContentType) { $req.ContentType = 'application/json' }
+        # Bodies are always UTF-8 bytes; say so, or servers may assume ISO-8859-1.
+        if ($Request.Body -isnot [byte[]] -and $req.ContentType -notmatch 'charset=') { $req.ContentType = $req.ContentType + '; charset=utf-8' }
         $req.ContentLength = $bytes.Length
         $stream = $req.GetRequestStream()
         try { $stream.Write($bytes,0,$bytes.Length) } finally { $stream.Dispose() }

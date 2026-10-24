@@ -6,6 +6,8 @@ function Assert-KeystoneTrustedRepositoryUrl {
     param([Parameter(Mandatory)][string]$Url)
     $uri = $null
     if (-not [uri]::TryCreate($Url,[UriKind]::Absolute,[ref]$uri)) { throw 'Enter a complete HTTPS GitHub or GitLab project URL.' }
+    # LocalDev synthetic provider (set only by Start-KeystoneWeb.ps1 -LocalDev).
+    if ((Test-KeystoneDevRepositoryUrl -Url $Url) -and -not $uri.UserInfo -and @($uri.AbsolutePath.Trim('/') -split '/').Count -ge 2) { return }
     if ($uri.Scheme -ne 'https' -or $uri.UserInfo -or $uri.Port -ne 443) { throw 'Only standard HTTPS project URLs without embedded credentials are supported.' }
     $hosts = @('github.com','web.git.mil')
     if ($env:KEYSTONE_GITLAB_ALLOWED_HOSTS) {
@@ -50,6 +52,7 @@ function New-KeystoneWorkBranch {
         $payload = @{ branch = $Name; ref = $base }
         [void]$Session.ProviderObj.InvokeApi('POST',"projects/$project/repository/branches",$payload)
     } else { throw 'Unsupported provider.' }
+    Write-KeystoneAudit -Action 'branch.created' -Data @{ provider = $Session.Provider; project = $Session.ProjectPath; branch = $Name; from = $base; sha = $head }
     $Session.LastBranch = $Name
     $Session.BaselineSha = $null
     $Session.BaselineMap = @{}
@@ -83,7 +86,7 @@ function Test-KeystoneSecretContent {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
-    $file = Get-Item -LiteralPath $Path
+    $file = Get-Item -LiteralPath $Path -Force
     if ($file.Length -gt 5242880) { return $true }
     if ($file.Extension.ToLowerInvariant() -notin @('.txt','.ps1','.psm1','.json','.yaml','.yml','.py','.js','.ts','.cs','.html','.xml','.config','.properties','.md','.sh','.bat','.cmd','.env')) { return $false }
     $text = [IO.File]::ReadAllText($file.FullName)
@@ -113,7 +116,7 @@ function Get-KeystoneWorkspacePreview {
             $size = 0
             if ($kind -ne 'Deleted') {
                 $file = Join-Path $Session.LocalPath ($path.Replace('/',[IO.Path]::DirectorySeparatorChar))
-                if (Test-Path -LiteralPath $file -PathType Leaf) { $size = (Get-Item -LiteralPath $file).Length }
+                if (Test-Path -LiteralPath $file -PathType Leaf) { $size = (Get-Item -LiteralPath $file -Force).Length }
                 if ($size -gt 5242880) { $blocked = $true }
                 elseif (Test-KeystoneSecretContent -Path $file) { $blocked = $true }
             }
@@ -195,7 +198,7 @@ function Invoke-KeystoneWorkspaceSave {
             }
             $full = [IO.Path]::GetFullPath((Join-Path $root ($p.Replace('/',[IO.Path]::DirectorySeparatorChar))))
             if (-not $full.StartsWith(($root + [IO.Path]::DirectorySeparatorChar),[StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe file path.' }
-            $item = Get-Item -LiteralPath $full
+            $item = Get-Item -LiteralPath $full -Force
             if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Linked files are not supported: $p" }
             if ($item.Length -gt 5242880) { throw "File grew beyond 5 MB: $p" }
             if (Test-KeystoneSecretContent -Path $full) { throw "Potential secret detected. File not uploaded: $p" }
@@ -218,7 +221,7 @@ function Invoke-KeystoneWorkspaceSave {
             }
             $full = [IO.Path]::GetFullPath((Join-Path $root ($p.Replace('/',[IO.Path]::DirectorySeparatorChar))))
             if (-not $full.StartsWith(($root + [IO.Path]::DirectorySeparatorChar),[StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe file path.' }
-            $item = Get-Item -LiteralPath $full
+            $item = Get-Item -LiteralPath $full -Force
             if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Linked files are not supported: $p" }
             if ($item.Length -gt 5242880) { throw "File grew beyond 5 MB: $p" }
             if (Test-KeystoneSecretContent -Path $full) { throw "Potential secret detected. File not uploaded: $p" }
@@ -255,6 +258,10 @@ function Invoke-KeystoneWorkspaceSave {
         }
     }
     $Session.BaselineSha = $newHead
+    Write-KeystoneAudit -Action 'commit.created' -Data @{
+        provider = $Session.Provider; project = $Session.ProjectPath; branch = $branch; parent = $head; commit = $newHead
+        message = $Message; added = @($added); modified = @($modified); deleted = @($deleted)
+    }
     return [pscustomobject]@{
         Saved = $true; Commit = $newHead; Message = $Message; FileCount = $paths.Count
         Url = $(if ($Session.Provider -eq 'GitHub') { "https://github.com/$($Session.ProjectPath)/commit/$newHead" } else { "$($Session.BaseUrl)/$($Session.ProjectPath)/-/commit/$newHead" })
