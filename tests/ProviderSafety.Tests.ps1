@@ -124,6 +124,13 @@ Assert ($host1 -notmatch 'KEYSTONE_LOCAL_DEV') 'No environment variable may swit
 Assert ($host1 -match 'nonceBytes') 'CSP nonce must use its own random bytes'
 Assert ($host1 -notmatch '\$nonce\s*=\s*\[Convert\]::ToBase64String\(\$csrfBytes\)') 'CSP nonce must not be derived from the CSRF token'
 Assert ($host1 -match 'Get-KeystoneSafeErrorMessage') 'Browser errors must go through the safe error filter'
+# Every Keystone function the host calls must be exported by the module, or the
+# route fails at runtime with "term not recognized".
+$exported = @((Get-Module Keystone).ExportedFunctions.Keys)
+$hostLocal = @('Send-KeystoneWebJson','Read-KeystoneWebBody','Test-KeystoneWebRequest')
+$calls = @([regex]::Matches($host1,'\b[A-Z][a-z]+-Keystone[A-Za-z]+\b') | ForEach-Object { $_.Value } | Sort-Object -Unique)
+$unexported = @($calls | Where-Object { $_ -notin $exported -and $_ -notin $hostLocal })
+Assert ($unexported.Count -eq 0) ('Host calls functions the module does not export: ' + ($unexported -join ', '))
 $ci = [IO.File]::ReadAllText((Join-Path $root '.github/workflows/keystone-ci.yml'))
 Assert ($ci -notmatch 'KEYSTONE_LOCAL_DEV') 'CI must pass -LocalDev explicitly instead of an environment switch'
 Write-Host 'Provider safety, file-mode and launcher hardening checks passed.' -ForegroundColor Green

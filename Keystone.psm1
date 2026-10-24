@@ -56,7 +56,7 @@ function Get-KeystoneToken {
     $name = Get-KeystoneArcItemName -Provider $Provider
     $status = Get-KeystoneArcConnectionStatus
     if (-not $status.arcFound -and -not $status.arcLoaded) {
-        throw "ARC_NOT_FOUND|ARC was not found. Set ARC_PATH to the folder containing pm.ps1, or configure $envName."
+        throw "ARC_NOT_FOUND|ARC was not found. Set ARC_PATH to the ARC folder (the one containing lib\Arc.ps1), or configure $envName."
     }
     if (-not $status.arcLoaded) {
         $reason = if ($status.message) { [string]$status.message } else { 'ARC module could not be loaded.' }
@@ -298,5 +298,16 @@ Export-ModuleMember -Function @(
     "Get-KeystoneLocalFileMap",
     "Get-KeystoneSafeName",
     "Clear-KeystoneInputBuffer",
-    "Write-KeystoneBreadcrumb"
+    "Write-KeystoneBreadcrumb",
+    # Used by Start-KeystoneWeb.ps1 (tests/ProviderSafety.Tests.ps1 checks the host
+    # only calls exported functions).
+    "Get-KeystoneRepositoryBranches",
+    "Get-KeystoneRepositoryHistory",
+    "Get-KeystoneRepositoryComparison",
+    "Get-KeystoneRepositoryReviews",
+    "Get-KeystoneRepositoryInsights",
+    "Get-KeystoneSentinelDestination",
+    "Test-KeystoneSentinelPublication",
+    "Get-KeystoneSafeErrorMessage",
+    "Get-KeystoneArcFlavor"
 )
