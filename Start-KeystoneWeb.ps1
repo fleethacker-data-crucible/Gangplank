@@ -10,6 +10,8 @@
 param([ValidateRange(1025,65535)][int]$Port = 8769, [switch]$NoBrowser, [switch]$SkipArcUnlock, [switch]$LocalDev)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
+# CI and other unattended runs set KEYSTONE_LOCAL_DEV=1: never import ARC or prompt for CAC/TOTP.
+if ($env:KEYSTONE_LOCAL_DEV -eq '1') { $LocalDev = $true }
 Import-Module (Join-Path $root 'Keystone.psm1') -Force
 Initialize-Keystone
 # Import ARC ONCE and perform its normal CAC/TOTP unlock before serving any
