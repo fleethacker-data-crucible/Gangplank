@@ -30,70 +30,20 @@ class GitHubProvider : GitProviderBase {
         return $h
     }
 
-    [void] EnsureTls() {
-        try {
-            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        } catch { }
-    }
-
     [object] InvokeApi([string]$method, [string]$endpoint, [object]$body, [string]$outFile) {
-        $this.EnsureTls()
         $uri = "$($this.ApiRoot)/$($endpoint.TrimStart('/'))"
-        $headers = $this.GetAuthHeaders($method)
-        Write-KeystoneLog -Level DEBUG -Message "GitHub $method $uri"
-
-        $params = @{
-            Uri             = $uri
-            Method          = $method
-            Headers         = $headers
-            UseBasicParsing = $true
-            ErrorAction     = "Stop"
-        }
+        Write-KeystoneLog -Level DEBUG -Message "GitHub $method $(Get-KeystoneSafeUrl $uri)"
         if (-not [string]::IsNullOrWhiteSpace($outFile)) {
-            $params["OutFile"] = $outFile
-            try {
-                Invoke-WebRequest @params | Out-Null
-                return $true
-            }
-            catch {
-                throw $this.FormatApiError($method, $endpoint, $uri, $_)
-            }
+            [void](Invoke-KeystoneDownload -Provider 'GitHub' -Uri $uri -AuthHeaders $this.GetAuthHeaders('GET') -OutFile $outFile)
+            return $true
         }
+        $payload = $null
         if ($null -ne $body) {
-            if ($body -is [string]) {
-                $params["Body"] = $body
-            }
-            else {
-                $params["Body"] = ($body | ConvertTo-Json -Depth 20 -Compress)
-            }
+            $payload = if ($body -is [string]) { $body } else { ($body | ConvertTo-Json -Depth 20 -Compress) }
         }
-        try {
-            return (Invoke-RestMethod @params)
-        }
-        catch {
-            throw $this.FormatApiError($method, $endpoint, $uri, $_)
-        }
-    }
-
-    [string] FormatApiError([string]$method, [string]$endpoint, [string]$uri, $err) {
-        # The response body goes to the local log only (truncated). The message that
-        # can reach the browser carries the method, endpoint and status, never the body.
-        $status = Get-KeystoneHttpStatus -ErrorRecord $err
-        $bodyText = ''
-        try {
-            if ($err.ErrorDetails -and $err.ErrorDetails.Message) { $bodyText = [string]$err.ErrorDetails.Message }
-            elseif ($err.Exception.Response -and $err.Exception.Response.PSObject.Methods['GetResponseStream']) {
-                $stream = $err.Exception.Response.GetResponseStream()
-                if ($stream) {
-                    $reader = New-Object System.IO.StreamReader($stream)
-                    try { $bodyText = $reader.ReadToEnd() } finally { $reader.Close() }
-                }
-            }
-        } catch { }
-        if ($bodyText.Length -gt 500) { $bodyText = $bodyText.Substring(0,500) + '...' }
-        Write-KeystoneLog -Level ERROR -Message ("GitHub API fail {0} {1} status={2} {3}" -f $method, $uri, $status, $bodyText)
-        $statusText = if ($status) { [string]$status } else { 'no response' }
-        return ("GitHub API {0} {1} failed (HTTP {2})." -f $method, $endpoint, $statusText)
+        $response = Invoke-KeystoneHttpRequest -Method $method -Uri $uri -Headers $this.GetAuthHeaders($method) -Body $payload
+        $endpointPath = ($endpoint.TrimStart('/') -split '\?')[0]
+        return (ConvertFrom-KeystoneApiResponse -Provider 'GitHub' -Method $method -Endpoint $endpointPath -Response $response)
     }
 
     [object] InvokeApi([string]$method, [string]$endpoint) {
@@ -105,22 +55,15 @@ class GitHubProvider : GitProviderBase {
     }
 
     [void] DownloadArchive([string]$projectPath, [string]$ref, [string]$outZip) {
-        $this.EnsureTls()
+        # api.github.com answers with a redirect to codeload.github.com; the token
+        # is sent to the API host only (Invoke-KeystoneDownload).
         $refEnc = [uri]::EscapeDataString($ref)
         $uri = "$($this.ApiRoot)/repos/$projectPath/zipball/$refEnc"
-        Write-KeystoneLog -Level INFO -Message "GitHub zipball $uri"
-        $headers = $this.GetAuthHeaders("GET")
-        try {
-            Invoke-WebRequest -Uri $uri -Headers $headers -OutFile $outZip `
-                -UseBasicParsing -MaximumRedirection 8 -ErrorAction Stop | Out-Null
-            if ((Test-Path -LiteralPath $outZip) -and ((Get-Item -LiteralPath $outZip).Length -gt 0)) {
-                return
-            }
+        Write-KeystoneLog -Level INFO -Message "GitHub zipball $(Get-KeystoneSafeUrl $uri)"
+        [void](Invoke-KeystoneDownload -Provider 'GitHub' -Uri $uri -AuthHeaders $this.GetAuthHeaders('GET') -OutFile $outZip)
+        if (-not (Test-Path -LiteralPath $outZip) -or (Get-Item -LiteralPath $outZip).Length -eq 0) {
+            throw ("NOT_FOUND|GitHub archive for {0} @ '{1}' was empty. Empty repositories have no archive until the first commit." -f $projectPath, $ref)
         }
-        catch {
-            throw ("GitHub archive download failed for {0} @ '{1}'. Empty repos return 404 until first commit. API: {2}" -f $projectPath, $ref, $_.Exception.Message)
-        }
-        throw ("GitHub archive download failed for {0} @ '{1}'" -f $projectPath, $ref)
     }
 
     [object] ResolveProject([string]$projectPath) {
@@ -156,7 +99,7 @@ class GitHubProvider : GitProviderBase {
             $ref = $this.InvokeApi("GET", "repos/$projectPath/git/ref/heads/$refPath")
         }
         catch {
-            if ([string]$_.Exception.Message -match '\(HTTP 404\)') {
+            if ([string]$_.Exception.Message -match '^NOT_FOUND\|') {
                 Write-KeystoneLog -Level DEBUG -Message "GetRefSha($branch): branch not found"
                 return $null
             }

@@ -32,9 +32,9 @@ class KeystoneFakeGitHub : GitHubProvider {
     Assert ($null -ne $script:FakeType) 'Fake provider type must load'
 
     # --- GetRefSha: 404 means "no branch", anything else must surface ---------
-    $p404 = $script:FakeType::new({ param($m,$e,$b) throw 'GitHub API GET x failed (HTTP 404).' })
+    $p404 = $script:FakeType::new({ param($m,$e,$b) throw 'NOT_FOUND|GitHub API GET x failed (HTTP 404).' })
     Assert (-not $p404.GetRefSha('team/demo','missing')) '404 should mean the branch does not exist'
-    $p401 = $script:FakeType::new({ param($m,$e,$b) throw 'GitHub API GET x failed (HTTP 401).' })
+    $p401 = $script:FakeType::new({ param($m,$e,$b) throw 'AUTH_REJECTED|GitHub API GET x failed (HTTP 401).' })
     $threw = $false
     try { [void]$p401.GetRefSha('team/demo','main') } catch { $threw = $true }
     Assert $threw '401 must not be reported as a missing or moved branch'
@@ -50,6 +50,56 @@ class KeystoneFakeGitHub : GitHubProvider {
     Assert ($safe -notmatch 'secret detail') 'Provider response body leaked into browser error'
     Assert ($safe -notmatch "`n") 'Browser error must be a single line'
     Assert ((Get-KeystoneSafeErrorMessage -Message 'ARC_LOCKED|ARC was found but the vault is locked.') -match '^ARC_LOCKED\|') 'Coded errors must keep their code'
+
+    # --- Transport: retries, writes, redirects, coded errors -----------------
+    $script:KeystoneHttpSleep = { param($ms) $script:Slept += $ms }
+    $script:Slept = 0
+    $script:Seen = New-Object System.Collections.Generic.List[object]
+    $script:Plan = New-Object System.Collections.Generic.Queue[object]
+    $script:KeystoneHttpTransport = {
+        param($Request)
+        $script:Seen.Add($Request)
+        return $script:Plan.Dequeue()
+    }
+    function Reply([int]$Status,[string]$Text = '',[hashtable]$Headers = @{}) { [pscustomobject]@{ Status = $Status; Headers = $Headers; Text = $Text; File = $null; NetworkError = $(if ($Status -eq 0) { 'ConnectFailure' } else { '' }) } }
+    $gh = [GitHubProvider]::new('https://api.github.com','tok-123')
+
+    $script:Seen.Clear(); $script:Plan.Enqueue((Reply 429 '{}' @{ 'retry-after' = '2' })); $script:Plan.Enqueue((Reply 502)); $script:Plan.Enqueue((Reply 200 '{"full_name":"team/demo"}'))
+    $repo = $gh.InvokeApi('GET','repos/team/demo')
+    Assert ($repo.full_name -eq 'team/demo') 'GET should succeed after retries'
+    Assert ($script:Seen.Count -eq 3) "GET should be tried 3 times, was $($script:Seen.Count)"
+    Assert ($script:Slept -ge 2000) 'Retry-After was not honoured'
+
+    $script:Seen.Clear(); $script:Plan.Enqueue((Reply 502)); $script:Plan.Enqueue((Reply 200 '{}'))
+    $code = ''
+    try { [void]$gh.InvokeApi('POST','repos/team/demo/git/blobs',@{ content = 'x' }) } catch { $code = ([string]$_.Exception.Message -split '\|')[0] }
+    Assert ($script:Seen.Count -eq 1) 'Writes must never be retried'
+    Assert ($code -eq 'SERVER_ERROR') "502 should map to SERVER_ERROR, got $code"
+    $script:Plan.Clear()
+
+    foreach ($case in @(@(401,'AUTH_REJECTED',@{}),@(403,'FORBIDDEN',@{}),@(403,'RATE_LIMITED',@{ 'x-ratelimit-remaining' = '0' }),@(404,'NOT_FOUND',@{}),@(422,'CONFLICT',@{}))) {
+        $script:Plan.Clear(); $script:Plan.Enqueue((Reply $case[0] '{"message":"provider secret detail"}' $case[2]))
+        $msg = ''
+        try { [void]$gh.InvokeApi('POST','repos/team/demo/pulls',@{}) } catch { $msg = [string]$_.Exception.Message }
+        Assert ($msg -match ('^' + $case[1] + '\|')) ("HTTP $($case[0]) should map to $($case[1]): $msg")
+        Assert ($msg -notmatch 'provider secret detail') 'Response body leaked into the error message'
+    }
+
+    $script:Seen.Clear(); $script:Plan.Clear()
+    $script:Plan.Enqueue((Reply 302 '' @{ location = 'https://codeload.github.com/team/demo/legacy.zip/abc?token=signed' }))
+    $script:Plan.Enqueue([pscustomobject]@{ Status = 200; Headers = @{}; Text = ''; File = 'x.zip'; NetworkError = '' })
+    [void](Invoke-KeystoneDownload -Provider GitHub -Uri 'https://api.github.com/repos/team/demo/zipball/abc' -AuthHeaders $gh.GetAuthHeaders('GET') -OutFile 'x.zip')
+    Assert ($script:Seen[0].Headers['Authorization'] -eq 'Bearer tok-123') 'API host should get the token'
+    Assert (-not $script:Seen[1].Headers.ContainsKey('Authorization')) 'Token must not follow a redirect to another host'
+    Assert ($script:Seen[1].Uri -match '^https://codeload\.github\.com/') 'Redirect target not followed'
+
+    $script:Seen.Clear(); $script:Plan.Clear(); $script:Plan.Enqueue((Reply 0)); $script:Plan.Enqueue((Reply 0)); $script:Plan.Enqueue((Reply 0))
+    $msg = ''
+    try { [void]$gh.InvokeApi('GET','repos/team/demo') } catch { $msg = [string]$_.Exception.Message }
+    Assert ($msg -match '^NETWORK\|') "Network failure should be NETWORK: $msg"
+    Assert ((Get-KeystoneSafeUrl 'https://h.example/p/a?token=secret') -eq 'https://h.example/p/a') 'Safe URL must drop the query'
+    $script:KeystoneHttpTransport = $null
+    $script:KeystoneHttpSleep = { param([int]$Milliseconds) Start-Sleep -Milliseconds $Milliseconds }
 
     # --- GetPathModes walks only the needed directories ------------------------
     $trees = @{
