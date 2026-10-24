@@ -9,8 +9,6 @@ jobs:
     runs-on: [self-hosted, Windows, X64]
     permissions:
       contents: read
-    env:
-      KEYSTONE_LOCAL_DEV: '1'
     steps:
       - uses: actions/checkout@v4
       - name: Offline PowerShell 5.1 validation
@@ -19,6 +17,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & .\tests\SmartSave.Tests.ps1
           & .\tests\Workspace.Tests.ps1
+          & .\tests\ProviderSafety.Tests.ps1
           & .\tests\Sentinel.Tests.ps1
           & .\tests\RepositoryInsights.Tests.ps1
           & .\tests\RepositoryIntegrity.Tests.ps1
