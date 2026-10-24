@@ -18,7 +18,7 @@ $required=@(
  'tests/BrowserSyntax.Tests.cjs','web/index.html','web/app.js','web/app.css',
  'Core/HttpClient.ps1','Core/Credentials.ps1','Core/Audit.ps1',
  'Server/Http.ps1','Server/Routes.ps1','Server/Jobs.ps1','Server/JobWork.ps1','Server/Session.ps1','Server/WebHost.ps1',
- 'dev/fake-github.mjs','dev/fake-github.test.mjs','dev/Start-LocalDev.ps1','tests/e2e/host.e2e.mjs','tests/Credentials.Tests.ps1',
+ 'dev/fake-github.mjs','dev/fake-github.test.mjs','dev/Start-LocalDev.ps1','tests/e2e/host.e2e.mjs','tests/e2e/browser.e2e.mjs','tests/Credentials.Tests.ps1',
  'docs/ROADMAP.md','TechStack'
 )
 $missing=@($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_) -PathType Leaf) })
