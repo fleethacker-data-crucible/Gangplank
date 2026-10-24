@@ -10,3 +10,4 @@ config/*.env
 config/*local*.json
 .DS_Store
 Thumbs.db
+work-localdev/

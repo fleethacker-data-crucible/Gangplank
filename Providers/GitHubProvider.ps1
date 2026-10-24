@@ -99,7 +99,8 @@ class GitHubProvider : GitProviderBase {
             $ref = $this.InvokeApi("GET", "repos/$projectPath/git/ref/heads/$refPath")
         }
         catch {
-            if ([string]$_.Exception.Message -match '^NOT_FOUND\|') {
+            # 404: no such branch. 409: GitHub's answer for a repository with no commits yet.
+            if ([string]$_.Exception.Message -match '^(NOT_FOUND|CONFLICT)\|') {
                 Write-KeystoneLog -Level DEBUG -Message "GetRefSha($branch): branch not found"
                 return $null
             }
@@ -234,7 +235,10 @@ class GitHubProvider : GitProviderBase {
             $this.InvokeApi("POST", "repos/$projectPath/git/refs", $create) | Out-Null
         }
         catch {
-            Write-KeystoneLog -Level WARN -Message "POST ref failed - retrying as a non-forced PATCH: $($_.Exception.Message)"
+            # Only "already exists" (created meanwhile) falls back to a non-forced update;
+            # any other failure (invalid name, permissions) is reported as it is.
+            if ([string]$_.Exception.Message -notmatch '^CONFLICT\|') { throw }
+            Write-KeystoneLog -Level WARN -Message "Branch $branch appeared while saving; updating it without force."
             $this.InvokeApi("PATCH", "repos/$projectPath/git/refs/heads/$refPath", $body) | Out-Null
         }
     }

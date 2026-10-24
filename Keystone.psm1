@@ -27,6 +27,12 @@ if (-not $script:KeystoneRoot) {
 . (Join-Path $script:KeystoneRoot "Providers\GitProviderBase.ps1")
 . (Join-Path $script:KeystoneRoot "Providers\GitLabProvider.ps1")
 . (Join-Path $script:KeystoneRoot "Providers\GitHubProvider.ps1")
+. (Join-Path $script:KeystoneRoot "Server\Session.ps1")
+. (Join-Path $script:KeystoneRoot "Server\Jobs.ps1")
+. (Join-Path $script:KeystoneRoot "Server\JobWork.ps1")
+. (Join-Path $script:KeystoneRoot "Server\Http.ps1")
+. (Join-Path $script:KeystoneRoot "Server\Routes.ps1")
+. (Join-Path $script:KeystoneRoot "Server\WebHost.ps1")
 
 
 function Write-KeystoneBreadcrumb {
@@ -212,11 +218,13 @@ function New-KeystoneMergeRequest {
     if ($Session.Provider -eq 'GitHub') {
         $review = $Session.ProviderObj.CreatePullRequest($Session.ProjectPath,$SourceBranch,$TargetBranch,$Title,$Description)
         Write-KeystoneLog -Level INFO -Message "GitHub pull request created: $($review.html_url)"
+        Write-KeystoneAudit -Action 'review.created' -Data @{ provider = 'GitHub'; project = $Session.ProjectPath; source = $SourceBranch; target = $TargetBranch; url = [string]$review.html_url }
         return $review
     }
     if ($Session.Provider -eq 'GitLab') {
         $review = $Session.ProviderObj.CreateMergeRequest($Session.ProjectPath,$SourceBranch,$TargetBranch,$Title,$Description)
         Write-KeystoneLog -Level INFO -Message "GitLab merge request created: $($review.web_url)"
+        Write-KeystoneAudit -Action 'review.created' -Data @{ provider = 'GitLab'; project = $Session.ProjectPath; source = $SourceBranch; target = $TargetBranch; url = [string]$review.web_url }
         return $review
     }
     throw 'Unknown project provider.'
@@ -268,7 +276,6 @@ Export-ModuleMember -Function @(
     "New-KeystoneAiPayload",
     "Invoke-KeystoneAI",
     "Invoke-KeystoneAIStream",
-    "Send-KeystoneSseEvent",
     "Get-KeystoneWorkspacePreview",
     "Invoke-KeystoneWorkspaceSave",
     "New-KeystoneSmartMessage",
@@ -302,5 +309,6 @@ Export-ModuleMember -Function @(
     "Write-KeystoneAudit",
     "Get-KeystoneAuditEntries",
     "Get-KeystoneHttpStatus",
-    "ConvertTo-KeystoneRefPath"
+    "ConvertTo-KeystoneRefPath",
+    "Start-KeystoneWebHost"
 )
