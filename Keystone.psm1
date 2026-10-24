@@ -13,6 +13,7 @@ if (-not $script:KeystoneRoot) {
 
 . (Join-Path $script:KeystoneRoot "Core\Logging.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Utils.ps1")
+. (Join-Path $script:KeystoneRoot "Core\HttpClient.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Configuration.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Audit.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Credentials.ps1")

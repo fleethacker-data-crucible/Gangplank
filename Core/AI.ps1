@@ -53,7 +53,9 @@ function Invoke-KeystoneAI {
     $token = Get-KeystoneAiToken
     if (-not $token) { throw 'AI not connected. Set KEYSTONE_AI_TOKEN or GENAI_TOKEN, or unlock the ARC genapi item.' }
     $payload = New-KeystoneAiPayload -Question $Question -Session $Session -Model $config.Model -CommitTitle:$CommitTitle
-    $result = Invoke-RestMethod -Method Post -Uri $config.Url -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -Body ($payload | ConvertTo-Json -Depth 8 -Compress) -TimeoutSec 90 -ErrorAction Stop
+    $response = Invoke-KeystoneHttpRequest -Method POST -Uri $config.Url -Headers @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json' } -Body ($payload | ConvertTo-Json -Depth 8 -Compress) -TimeoutSec 90
+    $token = $null
+    $result = ConvertFrom-KeystoneApiResponse -Provider 'AI' -Method POST -Endpoint (Get-KeystoneSafeUrl $config.Url) -Response $response
     $answer = [string]$result.choices[0].message.content
     if (-not $answer) { throw 'AI provider returned an empty answer.' }
     return $answer
