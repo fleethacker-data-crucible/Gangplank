@@ -3,7 +3,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('keystone-arc-core-' + [guid]::NewGuid().ToString('N'))
-$oldArc = $env:ARC_PATH
+$oldArc = $env:KEYSTONE_ARC_PATH
 $oldToken = $env:GITHUB_TOKEN
 function Assert([bool]$ok,[string]$message) { if (-not $ok) { throw "FAILED: $message" } }
 try {
@@ -31,7 +31,7 @@ function Unprotect-SecretText {
 }
 '@
     [IO.File]::WriteAllText((Join-Path $temp 'pm.ps1'),$fake)
-    $env:ARC_PATH = $temp
+    $env:KEYSTONE_ARC_PATH = $temp
     Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
     $global:FakeCoreUnlockCalls = 0
     Import-Module (Join-Path $root 'Keystone.psm1') -Force -WarningAction SilentlyContinue
@@ -58,7 +58,7 @@ function Unprotect-SecretText {
     Assert ($global:FakeCoreUnlockCalls -eq 1) 'HTTP-safe metadata triggered unlock'
     Write-Host 'Core-only ARC fallback and vault row unwrap checks passed.' -ForegroundColor Green
 } finally {
-    if ($oldArc) { $env:ARC_PATH = $oldArc } else { Remove-Item Env:ARC_PATH -ErrorAction SilentlyContinue }
+    if ($oldArc) { $env:KEYSTONE_ARC_PATH = $oldArc } else { Remove-Item Env:KEYSTONE_ARC_PATH -ErrorAction SilentlyContinue }
     if ($oldToken) { $env:GITHUB_TOKEN = $oldToken } else { Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $temp -Force -Recurse -ErrorAction SilentlyContinue
 }

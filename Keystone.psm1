@@ -14,6 +14,8 @@ if (-not $script:KeystoneRoot) {
 . (Join-Path $script:KeystoneRoot "Core\Logging.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Utils.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Configuration.ps1")
+. (Join-Path $script:KeystoneRoot "Core\Audit.ps1")
+. (Join-Path $script:KeystoneRoot "Core\Credentials.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Diff.ps1")
 . (Join-Path $script:KeystoneRoot "Core\SmartSave.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Workspace.ps1")
@@ -44,37 +46,12 @@ function Initialize-Keystone {
 }
 
 function Get-KeystoneToken {
+    # Environment, then Keystone's DPAPI store, then ARC if explicitly configured.
     [CmdletBinding()]
     param([Parameter(Mandatory)][ValidateSet('GitHub','GitLab')][string]$Provider)
-    $envName = if ($Provider -eq 'GitHub') { 'GITHUB_TOKEN' } else { 'GITLAB_TOKEN' }
-    $existing = [Environment]::GetEnvironmentVariable($envName)
-    if (-not [string]::IsNullOrWhiteSpace($existing)) {
-        Write-KeystoneLog -Level INFO -Message "Using approved environment credentials for $Provider."
-        return $existing.Trim()
-    }
-
-    $name = Get-KeystoneArcItemName -Provider $Provider
-    $status = Get-KeystoneArcConnectionStatus
-    if (-not $status.arcFound -and -not $status.arcLoaded) {
-        throw "ARC_NOT_FOUND|ARC was not found. Set ARC_PATH to the ARC folder (the one containing lib\Arc.ps1), or configure $envName."
-    }
-    if (-not $status.arcLoaded) {
-        $reason = if ($status.message) { [string]$status.message } else { 'ARC module could not be loaded.' }
-        throw "ARC_UNAVAILABLE|$reason"
-    }
-    if (-not $status.arcUnlocked) {
-        throw 'ARC_LOCKED|ARC was found but the vault is locked. Restart Keystone and complete ARC CAC + TOTP authentication in its PowerShell window.'
-    }
-    $catalogNames = @($status.itemNames)
-    if ($catalogNames.Count -gt 0 -and $name -notin $catalogNames) {
-        throw "ARC_ITEM_MISSING|ARC vault has no item named '$name' for $Provider. Select an existing service in Keystone Integrations."
-    }
-    $token = Get-KeystoneArcSecretByName -ServiceName $name
-    if (-not $token) {
-        throw "ARC_ITEM_UNREADABLE|ARC item '$name' for $Provider was missing, empty, or could not be decrypted. Check it in ARC."
-    }
-    Write-KeystoneLog -Level INFO -Message "Credential source for $($Provider): ARC item '$name' (value not logged)."
-    return $token
+    $credential = Resolve-KeystoneCredential -Provider $Provider
+    Write-KeystoneLog -Level INFO -Message "Credential source for $($Provider): $($credential.Source) (value not logged)."
+    return $credential.Value
 }
 
 function Open-KeystoneRepository {
@@ -309,5 +286,20 @@ Export-ModuleMember -Function @(
     "Get-KeystoneSentinelDestination",
     "Test-KeystoneSentinelPublication",
     "Get-KeystoneSafeErrorMessage",
-    "Get-KeystoneArcFlavor"
+    "Get-KeystoneArcFlavor",
+    "Get-KeystoneArcCredential",
+    "Resolve-KeystoneCredential",
+    "Get-KeystoneCredentialStatus",
+    "Set-KeystoneStoredCredential",
+    "Remove-KeystoneStoredCredential",
+    "Get-KeystoneStoredCredential",
+    "Test-KeystoneCredentialStoreAvailable",
+    "Get-KeystoneLocalSettings",
+    "Set-KeystoneArcSettings",
+    "Get-KeystoneConfiguredArcPath",
+    "Test-KeystoneArcConfigured",
+    "Write-KeystoneAudit",
+    "Get-KeystoneAuditEntries",
+    "Get-KeystoneHttpStatus",
+    "ConvertTo-KeystoneRefPath"
 )

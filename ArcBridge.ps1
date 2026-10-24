@@ -43,35 +43,17 @@ function Test-KeystoneArc5HelpersAvailable {
 }
 
 function Find-KeystoneArcRoot {
+    # ARC is opt-in: only the path configured in Integrations
+    # (config\keystone.local.json Arc.Enabled + Arc.Path) or KEYSTONE_ARC_PATH.
+    # No search of ARC_PATH, sibling folders or the user profile.
     [CmdletBinding()]
     param()
-    $candidates = New-Object System.Collections.Generic.List[string]
-    foreach ($p in @($env:ARC_PATH,$env:ARC_ROOT,$env:ARC_HOME)) {
-        if (-not [string]::IsNullOrWhiteSpace($p)) {
-            [void]$candidates.Add($p.Trim().Trim('"').Trim("'"))
-        }
-    }
-    # ArcBridge.ps1 lives in Keystone root; ARC normally lives NEXT TO Keystone.
-    $root = $script:KeystoneArcBridgeRoot
-    if (-not $root) { $root = (Get-Location).Path }
+    $configured = Get-KeystoneConfiguredArcPath
+    if (-not $configured) { return $null }
     try {
-        [void]$candidates.Add((Join-Path (Split-Path $root -Parent) 'arc'))
-        [void]$candidates.Add((Join-Path (Split-Path $root -Parent) 'Arc'))
+        $full = [IO.Path]::GetFullPath($configured)
+        if (Get-KeystoneArcFlavor -ArcRoot $full) { return $full }
     } catch { }
-    if ($env:USERPROFILE) {
-        [void]$candidates.Add((Join-Path $env:USERPROFILE 'Projects\arc'))
-        [void]$candidates.Add((Join-Path $env:USERPROFILE 'arc'))
-    }
-    $visited = @{}
-    foreach ($candidate in $candidates) {
-        if (-not $candidate) { continue }
-        try {
-            $full = [IO.Path]::GetFullPath($candidate)
-            if ($visited.ContainsKey($full.ToLowerInvariant())) { continue }
-            $visited[$full.ToLowerInvariant()] = $true
-            if (Get-KeystoneArcFlavor -ArcRoot $full) { return $full }
-        } catch { }
-    }
     return $null
 }
 
@@ -282,6 +264,9 @@ function Test-KeystoneArcVaultUnlocked {
 function Initialize-KeystoneArcAuthentication {
     [CmdletBinding()]
     param([switch]$SkipUnlock,[switch]$Quiet)
+    if (-not (Get-KeystoneConfiguredArcPath)) {
+        return [pscustomobject]@{ Found = $false; Loaded = $false; Unlocked = $false; Configured = $false; Message = 'ARC is not configured.' }
+    }
     if (-not (Import-KeystoneArcSession -Quiet:$Quiet)) {
         return [pscustomobject]@{
             Found = [bool](Find-KeystoneArcRoot); Loaded = $false; Unlocked = $false
@@ -364,6 +349,7 @@ function Get-KeystoneArcServiceNames {
 function Get-KeystoneArcConnectionStatus {
     [CmdletBinding()]
     param()
+    $configured = Get-KeystoneConfiguredArcPath
     $root = Find-KeystoneArcRoot
     $loaded = Test-KeystoneArcHelpersAvailable
     $unlocked = Test-KeystoneArcVaultUnlocked
@@ -395,10 +381,12 @@ function Get-KeystoneArcConnectionStatus {
         arcUnlocked = [bool]$unlocked
         arcPath = $(if ($root) { $root } else { '' })
         arcVersion = $(if ($loaded -and (Test-KeystoneArc5HelpersAvailable)) { '5' } elseif ($loaded) { 'legacy' } elseif ($root) { $(if ((Get-KeystoneArcFlavor -ArcRoot $root) -eq 'v5') { '5' } else { 'legacy' }) } else { '' })
-        code = $(if ($loaded) { '' } elseif ($script:KeystoneArcErrorCode) { $script:KeystoneArcErrorCode } else { 'ARC_NOT_LOADED' })
+        code = $(if (-not $configured) { 'ARC_NOT_CONFIGURED' } elseif ($loaded) { '' } elseif ($script:KeystoneArcErrorCode) { $script:KeystoneArcErrorCode } else { 'ARC_NOT_LOADED' })
         missingModules = @($script:KeystoneArcMissingModules)
         helpers = Get-KeystoneArcHelperDiagnostics
-        message = $(if ($loaded -and $unlocked) { 'ARC is unlocked.' }
+        configured = [bool]$configured
+        message = $(if (-not $configured) { 'ARC is not configured. It is optional: enable it in Integrations with the ARC folder path.' }
+                    elseif ($loaded -and $unlocked) { 'ARC is unlocked.' }
                     elseif ($loaded) { 'ARC loaded but locked. Restart Keystone and complete CAC + TOTP in its console.' }
                     elseif ($script:KeystoneArcLastError) { $script:KeystoneArcLastError }
                     elseif (-not $root) { 'ARC not found. Set ARC_PATH to the ARC folder (the one containing lib\Arc.ps1).' }
@@ -486,4 +474,31 @@ function Get-KeystoneArcSecretByName {
 
 function Test-KeystoneArcAvailable {
     return [bool](Find-KeystoneArcRoot)
+}
+
+function Get-KeystoneArcCredential {
+    # Token for a provider from the configured ARC vault, or a coded error that
+    # says exactly why not. Never prompts: unlock happens at startup only.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][ValidateSet('GitHub','GitLab','GenAi')][string]$Provider)
+    $name = Get-KeystoneArcItemName -Provider $Provider
+    $status = Get-KeystoneArcConnectionStatus
+    if (-not $status.arcFound) { throw "ARC_NOT_FOUND|$($status.message)" }
+    if (-not $status.arcLoaded) {
+        $reason = if ($status.message) { [string]$status.message } else { 'ARC module could not be loaded.' }
+        throw "ARC_UNAVAILABLE|$reason"
+    }
+    if (-not $status.arcUnlocked) {
+        throw 'ARC_LOCKED|ARC is configured but locked. Restart Keystone and complete the ARC unlock in its PowerShell window.'
+    }
+    $catalogNames = @($status.itemNames)
+    if ($catalogNames.Count -gt 0 -and $name -notin $catalogNames) {
+        throw "ARC_ITEM_MISSING|ARC vault has no item named '$name' for $Provider. Choose an existing item in Integrations."
+    }
+    $token = Get-KeystoneArcSecretByName -ServiceName $name
+    if (-not $token) {
+        throw "ARC_ITEM_UNREADABLE|ARC item '$name' for $Provider was missing, empty, ambiguous, or could not be read. Check it in ARC."
+    }
+    Write-KeystoneLog -Level INFO -Message "Credential source for $($Provider): ARC item '$name' (value not logged)."
+    return $token
 }
