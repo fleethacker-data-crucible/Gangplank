@@ -1,0 +1,24 @@
+# Tech stack for local web apps
+
+Local web apps: PowerShell 5.1 serves a browser UI on `127.0.0.1` (Edge/Chrome).
+
+## Use
+
+| Layer | Choice |
+| --- | --- |
+| Launcher | `.bat` → `powershell.exe -File` |
+| Local server | PowerShell 5.1 + `TcpListener` on `127.0.0.1` |
+| UI | React 19 + TypeScript, or Svelte 5 |
+| Styling | Tailwind CSS 4 + shadcn-style (CVA, Radix, Lucide) |
+| Charts / diagrams / motion | Apache ECharts, React Flow, Motion |
+| Browser compute | Rust → WebAssembly |
+| Storage | IndexedDB (data), localStorage (settings) |
+| Offline | Service workers, Web Workers |
+| Encryption | Web Crypto (AES-GCM) in browser; DPAPI from PowerShell for secrets at rest |
+| Native Windows | C# via `Add-Type` (.NET 4.8.1); WinForms/WPF from PowerShell if needed |
+
+## Build rules
+
+- Build off-workstation; ship compiled JS/CSS/WASM only
+- Bundle all deps — no CDNs or runtime network calls
+- No admin, installers, or services on the workstation
