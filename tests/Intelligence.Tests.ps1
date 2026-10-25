@@ -16,7 +16,7 @@ try {
         function Assert([bool]$Condition,[string]$Message) { if (-not $Condition) { throw "FAILED: $Message" } }
         function Get-Code([scriptblock]$Block) { try { $null = & $Block; return '' } catch { return ([string]$_.Exception.Message -split '\|')[0] } }
         Initialize-GangplankLogging -LogDir (Join-Path $Temp 'Logs') -Level ERROR
-        Initialize-GangplankConfig -ConfigPath (Join-Path $Temp 'config/keystone-config.json')
+        Initialize-GangplankConfig -ConfigPath (Join-Path $Temp 'config/gangplank-config.json')
         $script:GangplankAuditPath = Join-Path $Temp 'Logs/audit.jsonl'
 
         # --- endpoint policy ---------------------------------------------------
@@ -82,9 +82,9 @@ try {
         Assert ($cfg.Model -eq 'gpt-4.1' -and $cfg.Url -eq 'https://gateway.example.com/v1/chat/completions') 'Saved setting not used'
         [void](Set-GangplankAiSettings -Endpoint 'https://adb-1.azuredatabricks.net' -Flavor 'databricks' -Model 'claude-sonnet')
         Assert (-not (Get-GangplankAiConfiguration).Streams) 'Databricks answers in one piece (no streaming)'
-        $env:LLM_URL = 'https://cascade-gw.example.com/v1'; $env:LLM_MODEL = 'shared-model'
+        $env:LLM_URL = 'https://halyard-gw.example.com/v1'; $env:LLM_MODEL = 'shared-model'
         $cfg = Get-GangplankAiConfiguration
-        Assert ($cfg.Endpoint -eq 'https://cascade-gw.example.com/v1' -and $cfg.Model -eq 'shared-model') 'Halyard variables (LLM_URL/LLM_MODEL) should be honoured'
+        Assert ($cfg.Endpoint -eq 'https://halyard-gw.example.com/v1' -and $cfg.Model -eq 'shared-model') 'Halyard variables (LLM_URL/LLM_MODEL) should be honoured'
         $env:LLM_URL = $null; $env:LLM_MODEL = $null
         $env:LLM_TOKEN = 'shared-token-123'
         Assert ((Get-GangplankAiToken) -eq 'shared-token-123') 'LLM_TOKEN (Halyard) should be accepted as the GenAI token'

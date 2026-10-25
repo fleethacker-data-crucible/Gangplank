@@ -2,7 +2,7 @@
 # Separate-process smoke test for an older Lazarette with core vault APIs but no STARK.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-arc-core-' + [guid]::NewGuid().ToString('N'))
+$temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-lazarette-core-' + [guid]::NewGuid().ToString('N'))
 $oldArc = $env:GANGPLANK_LAZARETTE_PATH
 $oldToken = $env:GITHUB_TOKEN
 function Assert([bool]$ok,[string]$message) { if (-not $ok) { throw "FAILED: $message" } }
@@ -51,8 +51,8 @@ function Unprotect-SecretText {
     Assert ($token -eq 'core-github-test-token') 'Core Lazarette decryption failed'
     Assert ((Get-GangplankToken -Provider GitHub) -eq 'core-github-test-token') 'Provider did not use core Lazarette token'
     $status = Get-GangplankLazaretteConnectionStatus
-    Assert $status.arcLoaded 'Status says core Lazarette not loaded'
-    Assert $status.arcUnlocked 'Status says core Lazarette locked'
+    Assert $status.lazaretteLoaded 'Status says core Lazarette not loaded'
+    Assert $status.lazaretteUnlocked 'Status says core Lazarette locked'
     Assert ($status.itemNames -contains 'github') 'Browser catalog unavailable'
     $json = $status | ConvertTo-Json -Depth 8
     Assert ($json -notmatch 'core-github-test-token') 'Token leaked in browser metadata'

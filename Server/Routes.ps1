@@ -298,7 +298,7 @@ function Invoke-GangplankRouteCore {
         Send-GangplankJson -Object (Get-GangplankCredentialStatus)
         return
     }
-    if ($m -eq 'POST' -and $p -eq '/api/integrations/arc') {
+    if ($m -eq 'POST' -and $p -eq '/api/integrations/lazarette') {
         $enabled = ((Get-GangplankBodyValue $Req 'enabled') -eq $true)
         [void](Set-GangplankLazaretteSettings -Enabled $enabled -Path ([string](Get-GangplankBodyValue $Req 'path')))
         $status = Get-GangplankCredentialStatus

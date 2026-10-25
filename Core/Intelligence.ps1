@@ -8,7 +8,7 @@
 #    azure       Azure OpenAI (*.openai.azure.com): deployments, api-key header
 #    databricks  Databricks model serving (/serving-endpoints/<name>/invocations)
 #    ollama      local Ollama (/api/tags; chat through its /v1 endpoint)
-#  Settings (non-secret) live in config\keystone.local.json Intelligence; the token
+#  Settings (non-secret) live in config\gangplank.local.json Intelligence; the token
 #  is the GenAi credential (environment, Gangplank's store, or Lazarette).
 #  Environment names shared with Halyard are honoured: LLM_URL / OPENAI_BASE_URL,
 #  LLM_MODEL / OPENAI_MODEL, LLM_TOKEN / OPENAI_API_KEY.

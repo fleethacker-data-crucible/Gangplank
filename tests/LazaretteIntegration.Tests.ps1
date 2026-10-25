@@ -2,10 +2,10 @@
 # Offline Lazarette bridge contract test. Uses a fake pm.ps1: no secrets, CAC, network, or real vault.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-arc-contract-' + [guid]::NewGuid().ToString('N'))
+$temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-lazarette-contract-' + [guid]::NewGuid().ToString('N'))
 $previous = [Environment]::GetEnvironmentVariable('GANGPLANK_LAZARETTE_PATH')
 $previousToken = [Environment]::GetEnvironmentVariable('GITHUB_TOKEN')
-$mapping = Join-Path $root 'config\arc-items.local.json'
+$mapping = Join-Path $root 'config\lazarette-items.local.json'
 $oldMapping = $null
 if (Test-Path -LiteralPath $mapping) { $oldMapping = Get-Content -LiteralPath $mapping -Raw }
 function Assert([bool]$condition,[string]$message) { if (-not $condition) { throw "FAILED: $message" } }
@@ -21,7 +21,7 @@ $libOrder = @(
     '08-gui.ps1','09-integrity.ps1','10-stark.ps1'
 )
 function Ensure-VaultUnlocked {
-    $global:FakeArcUnlockCalls += 1
+    $global:FakeLazaretteUnlockCalls += 1
     $script:PmState.VaultUnlocked = $true
     return $true
 }
@@ -63,31 +63,31 @@ function Get-PmVaultNameCatalog {
         [IO.File]::WriteAllText($full, '# fake library fixture')
     }
     Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
-    $global:FakeArcUnlockCalls = 0
+    $global:FakeLazaretteUnlockCalls = 0
     Assert ((Find-GangplankLazaretteRoot) -eq $temp) 'GANGPLANK_LAZARETTE_PATH discovery'
     Assert (Import-GangplankLazaretteSession -Quiet) 'Lazarette dynamic module import'
     Assert (-not (Test-GangplankLazaretteVaultUnlocked)) 'Lazarette should begin locked'
     $secretWhenLocked = Get-GangplankLazaretteSecretByName -ServiceName github
     Assert (-not $secretWhenLocked) 'Secret must not be fetched while locked'
-    Assert ($global:FakeArcUnlockCalls -eq 0) 'HTTP-safe lookup may not trigger unlock'
+    Assert ($global:FakeLazaretteUnlockCalls -eq 0) 'HTTP-safe lookup may not trigger unlock'
     $wasRejected = $false
     try { $null = Get-GangplankToken -Provider GitHub } catch {
         $wasRejected = $_.Exception.Message -like 'ARC_LOCKED*'
     }
     Assert $wasRejected 'Locked vault must produce a useful diagnostic'
-    Assert ($global:FakeArcUnlockCalls -eq 0) 'Get-GangplankToken must not unlock implicitly'
+    Assert ($global:FakeLazaretteUnlockCalls -eq 0) 'Get-GangplankToken must not unlock implicitly'
     $initialized = Initialize-GangplankLazaretteAuthentication -Quiet
     Assert $initialized.Unlocked 'Expected explicit startup unlock'
-    Assert ($global:FakeArcUnlockCalls -eq 1) 'Unlock only once at startup'
+    Assert ($global:FakeLazaretteUnlockCalls -eq 1) 'Unlock only once at startup'
     Assert (Test-GangplankLazaretteVaultUnlocked) 'Unlocked state must be readable non-interactively'
     Assert (Import-GangplankLazaretteSession -Quiet) 'Subsequent import check should succeed'
-    Assert ($global:FakeArcUnlockCalls -eq 1) 'Lazarette import must not reset/authenticate again'
+    Assert ($global:FakeLazaretteUnlockCalls -eq 1) 'Lazarette import must not reset/authenticate again'
     Assert ((Get-GangplankToken -Provider GitHub) -eq 'fake-github-test-token') 'GitHub token retrieval'
     Assert ((Get-GangplankToken -Provider GitLab) -eq 'fake-gitlab-test-token') 'GitLab token retrieval'
     $status = Get-GangplankLazaretteConnectionStatus
-    Assert $status.arcUnlocked 'Status must report unlocked'
+    Assert $status.lazaretteUnlocked 'Status must report unlocked'
     Assert ($status.itemNames -contains 'github') 'Catalog must unwrap Lazarette ArrayList'
-    Assert (($status.integrations | Where-Object { $_.provider -eq 'GitHub' }).source -eq 'arc') 'GitHub mapped status'
+    Assert (($status.integrations | Where-Object { $_.provider -eq 'GitHub' }).source -eq 'lazarette') 'GitHub mapped status'
     $serialized = $status | ConvertTo-Json -Depth 8
     Assert ($serialized -notmatch 'fake-github-test-token|fake-gitlab-test-token') 'Never return tokens to browser'
     [void](Set-GangplankLazaretteItemName -Provider GitHub -ServiceName github-alt)
