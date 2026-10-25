@@ -5,6 +5,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $root 'Keystone.psm1') -Force -WarningAction SilentlyContinue
+. (Join-Path $PSScriptRoot 'TestIsolation.ps1')
 function Assert([bool]$Condition,[string]$Message) { if (-not $Condition) { throw "ASSERT FAILED: $Message" } }
 
 $module = Get-Module Keystone
@@ -32,9 +33,9 @@ class KeystoneFakeGitHub : GitHubProvider {
     Assert ($null -ne $script:FakeType) 'Fake provider type must load'
 
     # --- GetRefSha: 404 means "no branch", anything else must surface ---------
-    $p404 = $script:FakeType::new({ param($m,$e,$b) throw 'GitHub API GET x failed (HTTP 404).' })
+    $p404 = $script:FakeType::new({ param($m,$e,$b) throw 'NOT_FOUND|GitHub API GET x failed (HTTP 404).' })
     Assert (-not $p404.GetRefSha('team/demo','missing')) '404 should mean the branch does not exist'
-    $p401 = $script:FakeType::new({ param($m,$e,$b) throw 'GitHub API GET x failed (HTTP 401).' })
+    $p401 = $script:FakeType::new({ param($m,$e,$b) throw 'AUTH_REJECTED|GitHub API GET x failed (HTTP 401).' })
     $threw = $false
     try { [void]$p401.GetRefSha('team/demo','main') } catch { $threw = $true }
     Assert $threw '401 must not be reported as a missing or moved branch'
@@ -50,6 +51,91 @@ class KeystoneFakeGitHub : GitHubProvider {
     Assert ($safe -notmatch 'secret detail') 'Provider response body leaked into browser error'
     Assert ($safe -notmatch "`n") 'Browser error must be a single line'
     Assert ((Get-KeystoneSafeErrorMessage -Message 'ARC_LOCKED|ARC was found but the vault is locked.') -match '^ARC_LOCKED\|') 'Coded errors must keep their code'
+
+    # --- Transport: retries, writes, redirects, coded errors -----------------
+    $script:KeystoneHttpSleep = { param($ms) $script:Slept += $ms }
+    $script:Slept = 0
+    $script:Seen = New-Object System.Collections.Generic.List[object]
+    $script:Plan = New-Object System.Collections.Generic.Queue[object]
+    $script:KeystoneHttpTransport = {
+        param($Request)
+        $script:Seen.Add($Request)
+        return $script:Plan.Dequeue()
+    }
+    function Reply([int]$Status,[string]$Text = '',[hashtable]$Headers = @{}) { [pscustomobject]@{ Status = $Status; Headers = $Headers; Text = $Text; File = $null; NetworkError = $(if ($Status -eq 0) { 'ConnectFailure' } else { '' }) } }
+    $gh = [GitHubProvider]::new('https://api.github.com','tok-123')
+
+    $script:Seen.Clear(); $script:Plan.Enqueue((Reply 429 '{}' @{ 'retry-after' = '2' })); $script:Plan.Enqueue((Reply 502)); $script:Plan.Enqueue((Reply 200 '{"full_name":"team/demo"}'))
+    $repo = $gh.InvokeApi('GET','repos/team/demo')
+    Assert ($repo.full_name -eq 'team/demo') 'GET should succeed after retries'
+    Assert ($script:Seen.Count -eq 3) "GET should be tried 3 times, was $($script:Seen.Count)"
+    Assert ($script:Slept -ge 2000) 'Retry-After was not honoured'
+
+    $script:Seen.Clear(); $script:Plan.Enqueue((Reply 502)); $script:Plan.Enqueue((Reply 200 '{}'))
+    $code = ''
+    try { [void]$gh.InvokeApi('POST','repos/team/demo/git/blobs',@{ content = 'x' }) } catch { $code = ([string]$_.Exception.Message -split '\|')[0] }
+    Assert ($script:Seen.Count -eq 1) 'Writes must never be retried'
+    Assert ($code -eq 'SERVER_ERROR') "502 should map to SERVER_ERROR, got $code"
+    $script:Plan.Clear()
+
+    foreach ($case in @(@(401,'AUTH_REJECTED',@{}),@(403,'FORBIDDEN',@{}),@(403,'RATE_LIMITED',@{ 'x-ratelimit-remaining' = '0' }),@(404,'NOT_FOUND',@{}),@(422,'CONFLICT',@{}))) {
+        $script:Plan.Clear(); $script:Plan.Enqueue((Reply $case[0] '{"message":"provider secret detail"}' $case[2]))
+        $msg = ''
+        try { [void]$gh.InvokeApi('POST','repos/team/demo/pulls',@{}) } catch { $msg = [string]$_.Exception.Message }
+        Assert ($msg -match ('^' + $case[1] + '\|')) ("HTTP $($case[0]) should map to $($case[1]): $msg")
+        Assert ($msg -notmatch 'provider secret detail') 'Response body leaked into the error message'
+    }
+
+    $script:Seen.Clear(); $script:Plan.Clear()
+    $script:Plan.Enqueue((Reply 302 '' @{ location = 'https://codeload.github.com/team/demo/legacy.zip/abc?token=signed' }))
+    $script:Plan.Enqueue([pscustomobject]@{ Status = 200; Headers = @{}; Text = ''; File = 'x.zip'; NetworkError = '' })
+    [void](Invoke-KeystoneDownload -Provider GitHub -Uri 'https://api.github.com/repos/team/demo/zipball/abc' -AuthHeaders $gh.GetAuthHeaders('GET') -OutFile 'x.zip')
+    Assert ($script:Seen[0].Headers['Authorization'] -eq 'Bearer tok-123') 'API host should get the token'
+    Assert (-not $script:Seen[1].Headers.ContainsKey('Authorization')) 'Token must not follow a redirect to another host'
+    Assert ($script:Seen[1].Uri -match '^https://codeload\.github\.com/') 'Redirect target not followed'
+
+    $script:Seen.Clear(); $script:Plan.Clear(); $script:Plan.Enqueue((Reply 0)); $script:Plan.Enqueue((Reply 0)); $script:Plan.Enqueue((Reply 0))
+    $msg = ''
+    try { [void]$gh.InvokeApi('GET','repos/team/demo') } catch { $msg = [string]$_.Exception.Message }
+    Assert ($msg -match '^NETWORK\|') "Network failure should be NETWORK: $msg"
+    Assert ((Get-KeystoneSafeUrl 'https://h.example/p/a?token=secret') -eq 'https://h.example/p/a') 'Safe URL must drop the query'
+    # Same-host redirects are followed for reads (renamed repos); other hosts never get the token.
+    $script:Seen.Clear(); $script:Plan.Clear()
+    $script:Plan.Enqueue((Reply 301 '' @{ location = 'https://api.github.com/repositories/42' })); $script:Plan.Enqueue((Reply 200 '{"full_name":"team/renamed"}'))
+    Assert (($gh.InvokeApi('GET','repos/team/old')).full_name -eq 'team/renamed') 'Same-host redirect not followed'
+    Assert ($script:Seen[1].Headers['Authorization'] -eq 'Bearer tok-123') 'Same-host redirect should keep auth'
+    $script:Seen.Clear(); $script:Plan.Clear()
+    $script:Plan.Enqueue((Reply 302 '' @{ location = 'https://elsewhere.example/x' }))
+    $msg = ''
+    try { [void]$gh.InvokeApi('GET','repos/team/x') } catch { $msg = [string]$_.Exception.Message }
+    Assert ($script:Seen.Count -eq 1) 'A redirect to another host must not be followed with the token'
+    Assert ($msg -match '^HTTP_302\|') "Cross-host API redirect should fail, got: $msg"
+
+    # Requests answered on the HTTP loop fail fast: one attempt, short timeout.
+    $script:Seen.Clear(); $script:Plan.Clear(); $script:Plan.Enqueue((Reply 502)); $script:Plan.Enqueue((Reply 200 '{}'))
+    $script:KeystoneHttpInteractive = $true
+    try { try { [void]$gh.InvokeApi('GET','repos/team/demo') } catch { } } finally { $script:KeystoneHttpInteractive = $false }
+    Assert ($script:Seen.Count -eq 1) 'Interactive reads must not retry'
+    Assert ($script:Seen[0].TimeoutSec -le 20) 'Interactive reads must use a short timeout'
+    $script:Plan.Clear()
+
+    $script:KeystoneHttpTransport = $null
+    $script:KeystoneHttpSleep = { param([int]$Milliseconds) Start-Sleep -Milliseconds $Milliseconds }
+
+    # --- Session snapshots and restore -----------------------------------------
+    $live = [pscustomobject]@{ Provider = 'GitHub'; BaseUrl = 'https://github.com'; ProjectPath = 'team/demo'; DefaultBranch = 'main'; BaselineMap = @{ 'a.txt' = 'h1' } }
+    $snap = ConvertTo-KeystoneSessionSnapshot $live
+    $snap.BaselineMap['b.txt'] = 'h2'
+    Assert (-not $live.BaselineMap.ContainsKey('b.txt')) 'Snapshots must copy the baseline map, not share it across threads'
+    $sessDir = Join-Path ([IO.Path]::GetTempPath()) ('keystone-sess-' + [guid]::NewGuid().ToString('N'))
+    try {
+        Save-KeystoneSessionState -StateRoot $sessDir -Session $live
+        Assert ($null -ne (Read-KeystoneSessionState -StateRoot $sessDir)) 'A github.com session should restore'
+        $devLike = [pscustomobject]@{ Provider = 'GitHub'; BaseUrl = 'http://127.0.0.1:8791'; ProjectPath = 'keystone-demo/sample'; DefaultBranch = 'main'; BaselineMap = @{} }
+        Save-KeystoneSessionState -StateRoot $sessDir -Session $devLike
+        $script:KeystoneDevGitHubUrl = $null
+        Assert ($null -eq (Read-KeystoneSessionState -StateRoot $sessDir)) 'A LocalDev session must never restore in a normal run'
+    } finally { Remove-Item -LiteralPath $sessDir -Recurse -Force -ErrorAction SilentlyContinue }
 
     # --- GetPathModes walks only the needed directories ------------------------
     $trees = @{
@@ -118,19 +204,29 @@ class KeystoneFakeGitHub : GitHubProvider {
     }
 }
 
-# --- Launcher hardening (text checks; the host itself needs Windows) -----------
+# --- Host hardening (text checks; behaviour is covered by tests/e2e/host.e2e.mjs) ---
 $host1 = [IO.File]::ReadAllText((Join-Path $root 'Start-KeystoneWeb.ps1'))
-Assert ($host1 -notmatch 'KEYSTONE_LOCAL_DEV') 'No environment variable may switch the production host into LocalDev'
-Assert ($host1 -match 'nonceBytes') 'CSP nonce must use its own random bytes'
-Assert ($host1 -notmatch '\$nonce\s*=\s*\[Convert\]::ToBase64String\(\$csrfBytes\)') 'CSP nonce must not be derived from the CSRF token'
-Assert ($host1 -match 'Get-KeystoneSafeErrorMessage') 'Browser errors must go through the safe error filter'
-# Every Keystone function the host calls must be exported by the module, or the
-# route fails at runtime with "term not recognized".
+$http = [IO.File]::ReadAllText((Join-Path $root 'Server/Http.ps1'))
+$routes = [IO.File]::ReadAllText((Join-Path $root 'Server/Routes.ps1'))
+foreach ($text in @($host1,$http,$routes)) {
+    Assert ($text -notmatch 'KEYSTONE_LOCAL_DEV') 'No environment variable may switch the host into LocalDev'
+}
+Assert ($http -match 'TcpListener') 'Host must use TcpListener (TechStack), not HttpListener'
+Assert ($http -notmatch 'HttpListener') 'HttpListener must be gone'
+Assert ($http -notmatch "unsafe-inline|unsafe-eval") 'CSP must not allow inline script or style'
+Assert ($http -match 'HttpOnly; SameSite=Strict') 'Session cookie must be HttpOnly and SameSite=Strict'
+Assert ($routes -match 'Split-KeystoneCodedMessage') 'Route errors must go through the safe error filter'
+Assert ($routes -notmatch '\$_\.Exception\.Message\s*\}') 'Raw exception text must not be sent to the browser'
+# Every Keystone function the launcher calls must be exported by the module.
 $exported = @((Get-Module Keystone).ExportedFunctions.Keys)
-$hostLocal = @('Send-KeystoneWebJson','Read-KeystoneWebBody','Test-KeystoneWebRequest')
 $calls = @([regex]::Matches($host1,'\b[A-Z][a-z]+-Keystone[A-Za-z]+\b') | ForEach-Object { $_.Value } | Sort-Object -Unique)
-$unexported = @($calls | Where-Object { $_ -notin $exported -and $_ -notin $hostLocal })
-Assert ($unexported.Count -eq 0) ('Host calls functions the module does not export: ' + ($unexported -join ', '))
+$unexported = @($calls | Where-Object { $_ -notin $exported })
+Assert ($unexported.Count -eq 0) ('Launcher calls functions the module does not export: ' + ($unexported -join ', '))
+# Every function the routes call must exist in the module.
+$moduleCommands = @((& (Get-Module Keystone) { Get-Command -Module Keystone -CommandType Function | ForEach-Object Name }))
+$routeCalls = @([regex]::Matches($routes + $http,'\b(?:Get|Set|New|Invoke|Test|Send|Read|Start|Stop|Remove|Save|Use|Split|Initialize|Assert|Parse|Resolve|ConvertTo|Update|Wait|Write)-Keystone[A-Za-z]+\b') | ForEach-Object { $_.Value } | Sort-Object -Unique)
+$missing = @($routeCalls | Where-Object { $_ -notin $moduleCommands -and $_ -notin @('Parse-KeystoneRepoUrl') })
+Assert ($missing.Count -eq 0) ('Routes call functions that do not exist: ' + ($missing -join ', '))
 $ci = [IO.File]::ReadAllText((Join-Path $root '.github/workflows/keystone-ci.yml'))
 Assert ($ci -notmatch 'KEYSTONE_LOCAL_DEV') 'CI must pass -LocalDev explicitly instead of an environment switch'
 Write-Host 'Provider safety, file-mode and launcher hardening checks passed.' -ForegroundColor Green
