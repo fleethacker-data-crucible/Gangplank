@@ -2,6 +2,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $root 'Keystone.psm1') -Force
+. (Join-Path $PSScriptRoot 'TestIsolation.ps1')
 function Assert($value,[string]$message) { if (-not $value) { throw "FAIL: $message" } }
 $sourceFiles = @(Get-ChildItem -LiteralPath $root -File -Recurse | Where-Object { $_.Extension -in @('.ps1','.psm1') -and $_.FullName -notmatch '[\\/]Providers[\\/]' })
 foreach ($file in $sourceFiles) {

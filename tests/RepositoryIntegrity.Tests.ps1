@@ -13,10 +13,21 @@ $required=@(
  'docs/ENTERPRISE-ROADMAP.md','docs/SECURITY-MODEL.md',
  'tests/Workspace.Tests.ps1','tests/SmartSave.Tests.ps1','tests/WebHost.Tests.ps1',
  'tests/ArcIntegration.Tests.ps1','tests/ArcCoreOnly.Tests.ps1',
- 'tests/Arc5Contract.Tests.ps1','tests/Arc5Real.Tests.ps1','tests/ProviderSafety.Tests.ps1',
+ 'tests/TestIsolation.ps1','tests/Arc5Contract.Tests.ps1','tests/Arc5Real.Tests.ps1','tests/ProviderSafety.Tests.ps1',
  'tests/Sentinel.Tests.ps1','tests/RepositoryInsights.Tests.ps1',
- 'tests/BrowserSyntax.Tests.cjs','web/index.html'
+ 'tests/BrowserSyntax.Tests.cjs','web/index.html','web/app.js','web/app.css','web/logo.svg','docs/keystone-logo.svg',
+ 'Core/HttpClient.ps1','Core/Credentials.ps1','Core/Audit.ps1',
+ 'Server/Http.ps1','Server/Routes.ps1','Server/Jobs.ps1','Server/JobWork.ps1','Server/Session.ps1','Server/WebHost.ps1',
+ 'dev/fake-github.mjs','dev/fake-github.test.mjs','dev/Start-LocalDev.ps1','tests/e2e/host.e2e.mjs','tests/e2e/browser.e2e.mjs','tests/Intelligence.Tests.ps1','Core/Intelligence.ps1','dev/fake-ai.mjs','tests/Credentials.Tests.ps1',
+ 'docs/ROADMAP.md','TechStack'
 )
 $missing=@($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_) -PathType Leaf) })
 if($missing.Count -gt 0){throw ('Keystone critical files missing: '+($missing -join ', '))}
+# Every test that loads Keystone must isolate the credential store (TestIsolation.ps1):
+# the CI runner is a real user account with real saved tokens.
+$leaky = @(Get-ChildItem -LiteralPath (Join-Path $root 'tests') -Filter '*.Tests.ps1' | Where-Object {
+    $t = [IO.File]::ReadAllText($_.FullName)
+    ($t -match "Import-Module \(Join-Path \`$root 'Keystone\.psm1'\)") -and ($t -notmatch 'TestIsolation\.ps1')
+} | ForEach-Object Name)
+if($leaky.Count -gt 0){throw ('Tests load Keystone without TestIsolation.ps1 (real credential store at risk): '+($leaky -join ', '))}
 Write-Host ('Repository integrity passed: '+$required.Count+' required files present.') -ForegroundColor Green

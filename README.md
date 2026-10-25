@@ -1,71 +1,78 @@
-# Keystone Enterprise Workspace
+<p><img src="docs/keystone-logo.svg" alt="" width="72" height="72"></p>
 
-Browser-first, no-Git-training development workspace built for Windows PowerShell 5.1 and a browser. No git.exe, Node or Python installation required.
+# Keystone Workspace
 
-**Engineering preview, not accredited enterprise production software.** See docs/SECURITY-MODEL.md.
+Browser-first workspace for working on GitHub and GitLab projects without learning Git. Windows PowerShell 5.1 and a browser; no git.exe, Node or Python on the workstation. Built to the shared [TechStack](TechStack).
+
+**Engineering preview, not accredited enterprise production software.** See [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Launch
-Double-click Launch-Keystone.bat for the browser UI. For the classic text menu run Launch-Keystone.bat -Cli. Or run Start-KeystoneWeb.ps1 from an approved PowerShell session.
-The server binds to http://localhost:8769/. Press Ctrl+C in its PowerShell window to stop. If HttpListener requires a URL reservation, work with your IT administrator.
+Double-click **Launch-Keystone.bat**. Keystone starts a local server on `http://127.0.0.1:8769/` (another free port if that one is taken) and opens your browser with a one-time launch link. The link works once, for two minutes; if you close the tab, press **L** in the Keystone window for a new link. Ctrl+C in that window stops Keystone.
 
-**Restricted PowerShell launch compatibility:** The batch file uses the same process-scoped `-STA -NoProfile -ExecutionPolicy Bypass` startup switches as ARC and Cascade. This applies only to the launched process and does not modify your device's execution-policy settings or override enforced Group Policy, application control, or IT authorization requirements.
+- `Launch-Keystone.bat -NoBrowser [port]` starts without opening a browser (the link is printed).
+- `Launch-Keystone.bat -Cli` opens the classic text menu.
+- The server uses a `TcpListener` on 127.0.0.1, so no HttpListener URL reservation or admin rights are needed.
+- The batch file uses the same process-scoped `-STA -NoProfile -ExecutionPolicy Bypass` switches as ARC and Cascade. They apply only to the launched process and do not change machine policy or override Group Policy or application control.
 
-For troubleshooting, run `Launch-Keystone.bat -NoBrowser` to start the host without opening a browser. To choose a port, run `Launch-Keystone.bat -NoBrowser 8770`, then open `http://localhost:8770/`. A PowerShell script-policy error is different from an HttpListener access-denied/URL-reservation error; the latter requires an IT-approved configuration rather than changing PowerShell launch flags.
+## Connect → Start → Edit → Smart Save
+1. Add a token in **Credentials** (or set an environment variable), paste a GitHub or GitLab project URL and connect.
+2. Optionally name your branch (for example `dummy-dev`), then **Start my safe workspace**. Keystone creates that branch from the default branch and downloads it to `%USERPROFILE%\Keystone\<repository>\<branch>`, like a normal clone (change the folder in **Settings**). Existing folders are never overwritten. To just look at an existing branch, use **Explore this branch**.
+3. Edit files with your normal tools.
+4. In **Smart Save**, refresh and choose which added or modified files to publish. Deletions start unselected; likely secrets and files over 5 MB are blocked.
+5. Accept the generated commit title (or ask the AI for one from file names only) and publish.
+6. **Create review request** opens a GitHub pull request or GitLab merge request.
 
-## Connect → Download → Edit → Smart Save
-1. Paste a GitHub or GitLab project URL and connect using your configured credentials.
-2. Click **Start my safe workspace**. Keystone creates an isolated work branch and downloads a fresh snapshot into a new folder. Existing local work is never overwritten.
-3. Edit files using your normal tools.
-4. Open Smart Save, refresh and choose exactly which added or modified files to publish. Deletions are unselected by default.
-5. Accept the automatically generated commit title, or explicitly request a filename-only AI suggestion, then confirm publication.
-6. Click **Create review request** to have Keystone automatically compose a GitHub pull request or GitLab merge request for your changes.
+Keystone pins each download to a commit, checks the remote branch before saving and never force-updates a branch: if someone else changed it, saving stops. File modes are kept (scripts stay executable). Direct saves to the default branch are off unless `KEYSTONE_ALLOW_DEFAULT_BRANCH_WRITES=1`.
 
-Keystone checks the remote HEAD against your pinned download baseline, uses non-forced GitHub branch updates, and GitLab per-file commit guards. If others updated the branch, publishing stops. Direct saves to the default branch are disabled unless KEYSTONE_ALLOW_DEFAULT_BRANCH_WRITES=1 is explicitly set.
-Smart Save publishes directly to the remote branch. It is not an offline-only backup or staging mechanism.
+Your project, work branch and download baseline are saved in `%LOCALAPPDATA%\Keystone`, so restarting Keystone keeps pending work. Workspaces never live inside the Keystone program folder (an older `work\` folder there is still ignored by Git and its session is picked up once). Downloads, saves, reviews and AI answers run in the background; the page stays usable and shows progress.
 
-## AI assistant
-Assistant chat is a read-only, token-streaming advisor backed by an administrator-approved OpenAI-compatible HTTPS chat endpoint.
-Default endpoint: https://api.genai.mil/v1/chat/completions . Default model: gemini-3.8-flash (override with KEYSTONE_AI_MODEL after confirming approved availability).
-Set GENAI_TOKEN or KEYSTONE_AI_TOKEN in the PowerShell launch environment, or authenticate ARC and unlock the genapi item. Additional approved AI hosts may be configured with KEYSTONE_AI_ALLOWED_HOSTS.
-Your explicit chat text and project/branch name go to the selected AI provider. AI commit-title refinement sends filenames and statuses only. Source code is never sent to AI automatically.
+## Credentials
+Keystone looks for a token in this order:
+1. **Environment:** `GITHUB_TOKEN`, `GITLAB_TOKEN`, `KEYSTONE_AI_TOKEN` or `GENAI_TOKEN`.
+2. **Saved in Keystone:** paste a token once in **Credentials**. It is sealed with Windows DPAPI for your Windows account in `%LOCALAPPDATA%\Keystone\credentials.json`, never shown again and never sent back to the browser. Remove it there at any time.
+3. **ARC**, only if you turn it on (below).
 
-## ARC integration (GitHub, GitLab and GenAI)
+Only HTTPS github.com, web.git.mil and administrator-approved `KEYSTONE_GITLAB_ALLOWED_HOSTS` are accepted for repositories. Provider errors are reported as codes (`AUTH_REJECTED`, `FORBIDDEN`, `NOT_FOUND`, `RATE_LIMITED`...); response bodies stay in the local log.
 
-**Keystone now loads ARC once in its own PowerShell process and performs the normal CAC + TOTP unlock before launching the browser.** It does not share unlock state with a separately opened ARC application. Follow the authentication prompts in the Keystone PowerShell window at startup; if ARC is cancelled, the browser still opens but can only use approved environment credentials.
+## ARC (optional, opt-in)
+ARC is still in development, so Keystone never looks for it on its own. To use it, open **Credentials → ARC vault**, tick **Use ARC**, enter the ARC folder (the one containing `lib\Arc.ps1`) and restart Keystone; or set `KEYSTONE_ARC_PATH`. Settings are stored in `config\keystone.local.json` (not committed).
 
-1. Store the GitHub PAT as an ARC item named `github` or the GitLab PAT as `gitmil` (GenAI: `genapi`). These are defaults, not requirements.
-2. Keep the ARC repository next to Keystone under `Projects\\arc`, or set `ARC_PATH` to the ARC folder before launching Keystone. Keystone uses ARC 5's integration API (`lib\\Arc.ps1`: `Unlock-ArcVaultInteractive`, `Get-ArcSecret`, `Get-ArcItemNames`; see ARC `docs/INTEGRATION.md`) and falls back to the ARC 3/4 `pm.ps1` helpers only for older installs. ARC 5's `pm.ps1` stub is ignored. No separate Arc browser port is involved.
-3. Start Keystone with `Launch-Keystone.bat` and complete the normal ARC unlock in that PowerShell console.
-4. Open **Integrations** in Keystone's browser GUI. It reports ARC discovery, authentication, and each provider's mapped item status without revealing tokens.
-5. If the ARC item name differs, select it in Integrations and click **Use this Arc item**. Only the service name is saved in `config/arc-items.local.json` (gitignored).
-6. Then go back to **Overview**, enter your repository URL and click **Connect project**.
+When ARC is on, Keystone loads it once at startup and runs ARC's own unlock (`Unlock-ArcVaultInteractive`: passphrase or CAC PIN, then authenticator) in the Keystone PowerShell window, before the server starts. It then reads items with `Get-ArcSecret` (defaults: `github`, `gitmil`, `genapi`; change the mapping in Credentials). Keystone has no unlock code of its own and never unlocks from a browser request. Older ARC 3/4 installs (`pm.ps1`) are still supported.
 
-**If Integrations says "ARC found but not loaded":** Keystone located ARC (`lib\\Arc.ps1`, or `pm.ps1` on ARC 3/4), but ARC's libraries or exported vault functions could not initialize. This is **not** a GitHub token or browser-port error. Update Keystone and open **Integrations → Copy safe diagnostics**. Its diagnostic code distinguishes `ARC_MISSING_MODULES` (specific absent files), `ARC_LIBRARY_INITIALIZATION_FAILED` (ARC itself failed to initialize), `ARC_HELPERS_UNAVAILABLE` (functions missing), and `ARC_IMPORT_EXCEPTION`. The copy contains no secrets, only booleans, mapped service names and safe module filenames. For missing files, update the **complete ARC repository**, including `lib/`; do not copy only `pm.ps1`. For initialization failures, run ARC's own approved launcher and inspect its local error logs; Keystone does not modify or bypass the vault.
+## AI model
+Open **Settings → AI model**, enter your organisation's endpoint and select **Detect models**. Keystone asks the endpoint what it is and which chat models it offers, filters out embedding, speech and image models, and preselects the best match; **Test** sends one short message to prove it works. Supported:
 
-Older ARC installations may expose `Ensure-VaultUnlocked`, `Find-VaultRows` / `Get-LiveVault`, and `Unprotect-SecretText` without `Get-PmStarkApiKey`. Keystone supports the core ARC API as a fallback. The web server never unlocks ARC from a request handler.
+| Kind | Recognised by | Notes |
+|---|---|---|
+| OpenAI-compatible (genai.mil, OpenAI, LiteLLM, LM Studio, vLLM) | `/v1/models` answers | Bearer token, streaming |
+| Azure OpenAI | `*.openai.azure.com` | `api-key` header; models are your deployments |
+| Databricks model serving | `/serving-endpoints` or a Databricks host | Chat endpoints only; answers arrive in one piece |
+| Ollama on this PC | `/api/tags` (port 11434) | No token needed; plain http allowed for this PC only |
 
-If Connect fails, Keystone distinguishes a missing ARC installation, locked vault, missing mapped item, and upstream 401/403/404 errors. A 401 indicates rejected credentials; 403 commonly means permissions or SSO/token-scope restrictions; 404 may mean a bad URL or unavailable repository access. Keystone does not return Git API response bodies or secrets to the browser.
+The token is the **GenAI** credential (Settings, or `KEYSTONE_AI_TOKEN` / `GENAI_TOKEN`). The environment names Cascade uses also work, so one setup serves both apps: `LLM_URL` or `OPENAI_BASE_URL`, `LLM_MODEL` or `OPENAI_MODEL`, `LLM_TOKEN` or `OPENAI_API_KEY`. With nothing configured, Keystone uses `https://api.genai.mil/v1` and `gemini-3.8-flash`. Endpoints must be HTTPS; if `KEYSTONE_AI_ALLOWED_HOSTS` is set, only those hosts (and genai.mil) are allowed.
 
-For an environment-token-only session, the same startup path works without unlocking ARC. Enterprise application-control policies and CAC authentication remain unchanged.
+The assistant is advisory only: it cannot change files, run tools or publish. Chat sends your typed text and the project/branch name; commit-title help sends file names and statuses only. Source code is never sent automatically.
 
-## Credentials and trust
-GitHub credential: GITHUB_TOKEN or ARC github. GitLab: GITLAB_TOKEN or ARC gitmil.
-Only HTTPS github.com, web.git.mil and administrator-approved KEYSTONE_GITLAB_ALLOWED_HOSTS are permitted for repository connections.
-Do not commit API tokens in scripts or configuration. Obtain approval for the data classification before using any model gateway.
+## Audit
+Every remote write (branch, commit, review request) and every credential or ARC setting change is recorded in `Logs\audit.jsonl` and shown under **Credentials → Recent changes**: what, where and when, never contents or tokens.
 
-## Tests
-Windows PowerShell 5.1: run tests/SmartSave.Tests.ps1 and tests/Workspace.Tests.ps1. GitHub Actions runs them on Windows.
-
-## Important limits
-- The verified browser flow requires an existing initialized remote branch. Empty repo bootstrap is a future feature.
-- The assistant cannot autonomously change code, run tools, or create patches.
-- Common credential filenames/obvious secret patterns and files >5 MB are blocked; this is not comprehensive DLP.
-- Enterprise SSO, RBAC, signing, formal audits, CI integration and security authorization remain future milestones.
-- Deprecated legacy bulk upload API remains available to existing module consumers; new workflows should use Smart Save.
+## Development
+- **LocalDev** (development PCs only): `Launch-LocalDev.bat` runs the real host in test mode against a synthetic GitHub (`dev/fake-github.mjs`, needs Node.js). See [LOCAL-DEV.md](LOCAL-DEV.md).
+- **Tests:** `tests\*.Tests.ps1` (Windows PowerShell 5.1), `node --test tests/e2e/host.e2e.mjs` (real host against the synthetic GitHub), `node --test tests/e2e/browser.e2e.mjs` (the UI in a real browser; needs Playwright), `node --test dev/fake-github.test.mjs`, `node tests/BrowserSyntax.Tests.cjs`. CI runs all of them on the Windows runner.
 
 ## Source layout
-Start-KeystoneWeb.ps1 hosts the browser API; web/index.html is the UI; Core/Workspace.ps1 provides the safe save workflow; Core/SmartSave.ps1 generates titles; Core/AI.ps1 handles approved AI streaming; Providers/ contains native GitHub and GitLab REST adapters; ArcBridge.ps1 integrates ARC; Keystone.ps1 is the CLI.
+| Path | What |
+|---|---|
+| `Start-KeystoneWeb.ps1`, `Launch-Keystone.bat` | Entry point and launcher |
+| `Server/` | Local server (`Http.ps1`), API (`Routes.ps1`), background jobs (`Jobs.ps1`, `JobWork.ps1`), saved session (`Session.ps1`) |
+| `Core/` | Workspace and Smart Save, Sentinel, HTTP transport, credentials, audit, AI (`Intelligence.ps1`: endpoint discovery), logging |
+| `Providers/` | GitHub and GitLab REST adapters |
+| `ArcBridge.ps1` | Optional ARC integration |
+| `web/` | Browser UI (`index.html`, `app.js`, `app.css`) |
+| `dev/` | LocalDev, the synthetic GitHub and a synthetic AI gateway |
+| `Keystone.ps1` | Classic text menu |
 
-
-## Recovery / repository insight interface
-The recovery branch restores the existing application and adds live, read-only provider-backed branches, recent commits, comparisons, open reviews, and simple recommendations. These features operate through existing PowerShell 5.1 GitHub/GitLab REST adapters. The UI uses plain-language labels and hover descriptions; read-only comparison is **not** merge or conflict resolution. The AI panel is still advisory and does not execute commands. Full Git workflows and a new frontend technology stack require separate implementation and workstation verification.
+## Important limits
+- The browser flow needs an existing, initialised remote branch; bootstrapping an empty repository is a future feature.
+- Secret detection is pattern-based for common credential files and formats; it is not complete DLP.
+- Enterprise SSO, RBAC, signing and formal security authorization are future milestones.
