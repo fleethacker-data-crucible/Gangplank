@@ -15,6 +15,35 @@ function Get-KeystoneSafeName {
     return $s.Trim('_')
 }
 
+function Get-KeystoneHttpStatus {
+    # Status code from an Invoke-RestMethod/Invoke-WebRequest error on PS 5.1 or 7, or $null.
+    param($ErrorRecord)
+    try {
+        $resp = $ErrorRecord.Exception.Response
+        if ($resp -and $null -ne $resp.StatusCode) { return [int]$resp.StatusCode }
+    } catch { }
+    return $null
+}
+
+function ConvertTo-KeystoneRefPath {
+    # Percent-encode each segment of a branch name but keep '/' separators, for
+    # REST paths such as git/ref/heads/<branch>.
+    param([Parameter(Mandatory)][string]$Ref)
+    return (($Ref -split '/') | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
+}
+
+function Get-KeystoneSafeErrorMessage {
+    # Reduce an exception message to something safe to return to the browser:
+    # one line, bounded, and with any provider response body (" | ...") removed.
+    param([string]$Message)
+    if ([string]::IsNullOrWhiteSpace($Message)) { return 'The request failed.' }
+    $line = ($Message -split '[\r\n]')[0]
+    $pipe = $line.IndexOf(' | ')
+    if ($pipe -gt 0) { $line = $line.Substring(0,$pipe) }
+    if ($line.Length -gt 300) { $line = $line.Substring(0,300) + '...' }
+    return $line
+}
+
 function Get-KeystoneFileMap {
     param([string]$RootPath)
     $map = @{}

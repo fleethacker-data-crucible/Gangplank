@@ -10,8 +10,9 @@
 param([ValidateRange(1025,65535)][int]$Port = 8769, [switch]$NoBrowser, [switch]$SkipArcUnlock, [switch]$LocalDev)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-# CI and other unattended runs set KEYSTONE_LOCAL_DEV=1: never import ARC or prompt for CAC/TOTP.
-if ($env:KEYSTONE_LOCAL_DEV -eq '1') { $LocalDev = $true }
+# LocalDev is only ever an explicit -LocalDev switch (Launch-LocalDev.bat, tests).
+# No environment variable can turn it on: the production launcher must not be
+# silently downgraded to a no-ARC session.
 Import-Module (Join-Path $root 'Keystone.psm1') -Force
 Initialize-Keystone
 # Import ARC ONCE and perform its normal CAC/TOTP unlock before serving any
@@ -24,11 +25,14 @@ if (-not $arcState.Unlocked) {
     Write-Host '[!] To use ARC, restart Keystone and complete the CAC/TOTP steps in THIS console.' -ForegroundColor DarkGray
 }
 $session = $null
-$buffer = New-Object byte[] 32
+# The CSRF token and the CSP nonce come from independent random buffers. The
+# nonce is sent in every response header, so it must reveal nothing about the token.
+$csrfBytes = New-Object byte[] 32
+$nonceBytes = New-Object byte[] 18
 $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-try { $rng.GetBytes($buffer) } finally { $rng.Dispose() }
-$csrf = [Convert]::ToBase64String($buffer)
-$nonce = [Convert]::ToBase64String($buffer).Replace('+','').Replace('/','').Replace('=','')
+try { $rng.GetBytes($csrfBytes); $rng.GetBytes($nonceBytes) } finally { $rng.Dispose() }
+$csrf = [Convert]::ToBase64String($csrfBytes)
+$nonce = [Convert]::ToBase64String($nonceBytes).Replace('+','').Replace('/','').Replace('=','')
 $listener = New-Object Net.HttpListener
 $prefix = "http://localhost:$Port/"
 $listener.Prefixes.Add($prefix)
@@ -261,8 +265,8 @@ try {
                 Send-KeystoneWebJson -Response $res -Status 404 -Value @{ error = 'Route not found.' }
             }
         } catch {
-            $message = $_.Exception.Message
-            Write-KeystoneLog -Level WARN -Message "Web request failed: $path : $message"
+            Write-KeystoneLog -Level WARN -Message "Web request failed: $path : $($_.Exception.Message)"
+            $message = Get-KeystoneSafeErrorMessage -Message $_.Exception.Message
             try {
                 if ($res.SendChunked) {
                     Send-KeystoneSseEvent -Response $res -Event 'error' -Data $message

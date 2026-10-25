@@ -9,8 +9,6 @@ jobs:
     runs-on: [self-hosted, Windows, X64]
     permissions:
       contents: read
-    env:
-      KEYSTONE_LOCAL_DEV: '1'
     steps:
       - uses: actions/checkout@v4
       - name: Offline PowerShell 5.1 validation
@@ -19,11 +17,19 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & .\tests\SmartSave.Tests.ps1
           & .\tests\Workspace.Tests.ps1
+          & .\tests\ProviderSafety.Tests.ps1
           & .\tests\Sentinel.Tests.ps1
           & .\tests\RepositoryInsights.Tests.ps1
           & .\tests\RepositoryIntegrity.Tests.ps1
           & .\tests\WebHost.Tests.ps1
           & .\tests\ArcIntegration.Tests.ps1
+          # ARC 5 tests run in their own processes: ARC's engine loads once per process.
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Arc5Contract.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'ARC 5 contract tests failed.' }
+          # Uses the real ARC 5 engine in a temp data folder when an ARC checkout is
+          # available (KEYSTONE_TEST_ARC_PATH); otherwise prints SKIP.
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Arc5Real.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Real ARC 5 integration tests failed.' }
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\ArcCoreOnly.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Arc core-only compatibility tests failed.' }
       - name: Browser JavaScript and markup integrity

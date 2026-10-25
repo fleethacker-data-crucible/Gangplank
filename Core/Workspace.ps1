@@ -88,7 +88,7 @@ function Test-KeystoneSecretContent {
     if ($file.Extension.ToLowerInvariant() -notin @('.txt','.ps1','.psm1','.json','.yaml','.yml','.py','.js','.ts','.cs','.html','.xml','.config','.properties','.md','.sh','.bat','.cmd','.env')) { return $false }
     $text = [IO.File]::ReadAllText($file.FullName)
     if ($text -match '-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----') { return $true }
-    if ($text -match '\b(?:gh[pousr]_[A-Za-z0-9_]{24,}|github_pat_[A-Za-z0-9_]{24,}|AKIA[0-9A-Z]{16})\b') { return $true }
+    if ($text -match '\b(?:gh[pousr]_[A-Za-z0-9_]{24,}|github_pat_[A-Za-z0-9_]{24,}|(?:AKIA|ASIA)[0-9A-Z]{16})\b') { return $true }
     return $false
 }
 
@@ -182,6 +182,11 @@ function Invoke-KeystoneWorkspaceSave {
     if ($Session.Provider -eq 'GitHub') {
         $provider = $Session.ProviderObj
         $prior = $provider.InvokeApi('GET', "repos/$($Session.ProjectPath)/git/commits/$head")
+        # Keep each modified file's existing Git mode (an executable script stays
+        # 100755). New files get the regular-file mode.
+        $modified = @($paths | Where-Object { $available[$_].Kind -eq 'Modified' })
+        $modes = @{}
+        if ($modified.Count -gt 0) { $modes = $provider.GetPathModes($Session.ProjectPath,[string]$prior.tree.sha,$modified) }
         $treeItems = New-Object System.Collections.Generic.List[object]
         foreach ($p in $paths) {
             if ($available[$p].Kind -eq 'Deleted') {
@@ -195,7 +200,8 @@ function Invoke-KeystoneWorkspaceSave {
             if ($item.Length -gt 5242880) { throw "File grew beyond 5 MB: $p" }
             if (Test-KeystoneSecretContent -Path $full) { throw "Potential secret detected. File not uploaded: $p" }
             $sha = $provider.CreateBlob($Session.ProjectPath,[IO.File]::ReadAllBytes($full))
-            [void]$treeItems.Add(@{ path = $p; mode = '100644'; type = 'blob'; sha = $sha })
+            $mode = if ($modes.ContainsKey($p)) { [string]$modes[$p] } else { '100644' }
+            [void]$treeItems.Add(@{ path = $p; mode = $mode; type = 'blob'; sha = $sha })
         }
         $tree = $provider.CreateTree($Session.ProjectPath,$treeItems.ToArray(),[string]$prior.tree.sha)
         $commit = $provider.CreateCommit($Session.ProjectPath,$Message,$tree,@($head))
