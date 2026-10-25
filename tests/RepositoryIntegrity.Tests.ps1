@@ -15,7 +15,7 @@ $required=@(
  'tests/LazaretteIntegration.Tests.ps1','tests/LazaretteCoreOnly.Tests.ps1',
  'tests/TestIsolation.ps1','tests/LazaretteContract.Tests.ps1','tests/LazaretteReal.Tests.ps1','tests/LazaretteNames.Tests.ps1','tests/ProviderSafety.Tests.ps1',
  'tests/Sentinel.Tests.ps1','tests/RepositoryInsights.Tests.ps1',
- 'tests/BrowserSyntax.Tests.cjs','web/index.html','web/app.js','web/app.css','web/logo.svg','docs/gangplank-logo.svg',
+ 'tests/BrowserSyntax.Tests.cjs','web/index.html','web/app.js','web/app.css','web/logo.svg','web/shell.js','web/icons.js','web/vendor/fleet/fleet.css','tools/gen-icons.mjs','docs/gangplank-logo.svg',
  'Core/HttpClient.ps1','Core/Credentials.ps1','Core/Audit.ps1',
  'Server/Http.ps1','Server/Routes.ps1','Server/Jobs.ps1','Server/JobWork.ps1','Server/Session.ps1','Server/WebHost.ps1',
  'dev/fake-github.mjs','dev/fake-github.test.mjs','dev/Start-LocalDev.ps1','tests/e2e/host.e2e.mjs','tests/e2e/browser.e2e.mjs','tests/Intelligence.Tests.ps1','Core/Intelligence.ps1','dev/fake-ai.mjs','tests/Credentials.Tests.ps1',
