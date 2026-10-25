@@ -23,7 +23,7 @@ $script:GangplankHttp = @{
     Port = 0; Listener = $null; Stream = $null; Client = $null; Responded = $false
     Nonce = $null; NonceExpires = [datetime]::MinValue
     SessionToken = $null; ClientSecret = $null; StopRequested = $false
-    UiRoot = ''; Manifest = @('index.html','app.js','app.css','logo.svg','heartbeat-worker.js')
+    UiRoot = ''; Manifest = @('index.html','app.js','app.css','logo.svg','heartbeat-worker.js','shell.js','icons.js','vendor/fleet/fleet.css')
     Csp = "default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     PeerCheck = 'unknown'
     MaxBody = 1048576
@@ -361,7 +361,7 @@ function Send-GangplankStaticFile {
 
 function Initialize-GangplankUiManifest {
     # ui/dist/manifest.json (future built UI) lists servable files; otherwise the
-    # current web/ trio. Only listed files are ever served.
+    # web/ files in the Manifest above. Only listed files are ever served.
     param([Parameter(Mandatory)][string]$UiRoot)
     $script:GangplankHttp.UiRoot = $UiRoot
     $m = Join-Path $UiRoot 'manifest.json'
