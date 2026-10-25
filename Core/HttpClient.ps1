@@ -8,13 +8,13 @@
 #  - Failures become coded errors: CODE|Provider API METHOD endpoint failed (HTTP n).
 # ============================================================
 
-$script:KeystoneHttpTransport = $null    # test seam: { param($Request) ... returns response }
-$script:KeystoneHttpSleep = { param([int]$Milliseconds) Start-Sleep -Milliseconds $Milliseconds }
-$script:KeystoneHttpMaxRetryWaitMs = 10000
+$script:GangplankHttpTransport = $null    # test seam: { param($Request) ... returns response }
+$script:GangplankHttpSleep = { param([int]$Milliseconds) Start-Sleep -Milliseconds $Milliseconds }
+$script:GangplankHttpMaxRetryWaitMs = 10000
 # Set by the HTTP loop while answering a request: one attempt, short timeout.
-$script:KeystoneHttpInteractive = $false
+$script:GangplankHttpInteractive = $false
 
-function Get-KeystoneProviderErrorCode {
+function Get-GangplankProviderErrorCode {
     param([int]$Status,[hashtable]$Headers = @{})
     if ($Status -eq 0) { return 'NETWORK' }
     if ($Status -eq 401) { return 'AUTH_REJECTED' }
@@ -29,24 +29,24 @@ function Get-KeystoneProviderErrorCode {
     return "HTTP_$Status"
 }
 
-function Get-KeystoneRetryDelayMs {
+function Get-GangplankRetryDelayMs {
     param([hashtable]$Headers,[int]$Attempt)
     $after = [string]$Headers['retry-after']
     $seconds = 0
-    if ($after -and [int]::TryParse($after,[ref]$seconds)) { return [Math]::Min($seconds * 1000, $script:KeystoneHttpMaxRetryWaitMs) }
-    return [Math]::Min(500 * [Math]::Pow(2,$Attempt - 1), $script:KeystoneHttpMaxRetryWaitMs)
+    if ($after -and [int]::TryParse($after,[ref]$seconds)) { return [Math]::Min($seconds * 1000, $script:GangplankHttpMaxRetryWaitMs) }
+    return [Math]::Min(500 * [Math]::Pow(2,$Attempt - 1), $script:GangplankHttpMaxRetryWaitMs)
 }
 
-function Invoke-KeystoneHttpOnce {
+function Invoke-GangplankHttpOnce {
     param([pscustomobject]$Request)
-    if ($script:KeystoneHttpTransport) { return (& $script:KeystoneHttpTransport $Request) }
+    if ($script:GangplankHttpTransport) { return (& $script:GangplankHttpTransport $Request) }
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
     $req = [Net.HttpWebRequest]::Create($Request.Uri)
     $req.Method = $Request.Method
     $req.AllowAutoRedirect = $false
     $req.Timeout = $Request.TimeoutSec * 1000
     $req.ReadWriteTimeout = $Request.TimeoutSec * 1000
-    $req.UserAgent = 'Keystone'
+    $req.UserAgent = 'Gangplank'
     # .NET Framework sends "Expect: 100-continue" on POST by default; some proxies answer 417.
     try { $req.ServicePoint.Expect100Continue = $false } catch { }
     foreach ($k in $Request.Headers.Keys) {
@@ -105,7 +105,7 @@ function Invoke-KeystoneHttpOnce {
     } finally { $resp.Dispose() }
 }
 
-function Invoke-KeystoneHttpRequest {
+function Invoke-GangplankHttpRequest {
     # Returns @{ Status; Headers; Text; File } for any HTTP status (callers decide),
     # or throws NETWORK after retries. 3xx responses are returned, not followed.
     [CmdletBinding()]
@@ -121,10 +121,10 @@ function Invoke-KeystoneHttpRequest {
     $idempotent = $Method -in @('GET','HEAD')
     if ($MaxAttempts -le 0) { $MaxAttempts = if ($idempotent) { 3 } else { 1 } }
     if (-not $idempotent) { $MaxAttempts = 1 }
-    if ($script:KeystoneHttpInteractive) { $MaxAttempts = 1; $TimeoutSec = [Math]::Min($TimeoutSec,20) }
+    if ($script:GangplankHttpInteractive) { $MaxAttempts = 1; $TimeoutSec = [Math]::Min($TimeoutSec,20) }
     $request = [pscustomobject]@{ Method = $Method; Uri = $Uri; Headers = $Headers; Body = $Body; OutFile = $OutFile; TimeoutSec = $TimeoutSec }
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-        $response = Invoke-KeystoneHttpOnce -Request $request
+        $response = Invoke-GangplankHttpOnce -Request $request
         # API reads follow redirects on the SAME host only (GitHub uses 301/307 for
         # renamed or transferred repositories). Other hosts never get the token.
         $hops = 0
@@ -132,24 +132,24 @@ function Invoke-KeystoneHttpRequest {
             $next = [uri]::new([uri]$request.Uri,[string]$response.Headers['location'])
             if ($next.Authority -ne ([uri]$request.Uri).Authority -or $next.Scheme -ne ([uri]$request.Uri).Scheme) { break }
             $request.Uri = $next.AbsoluteUri
-            $response = Invoke-KeystoneHttpOnce -Request $request
+            $response = Invoke-GangplankHttpOnce -Request $request
             $hops++
         }
         $retryable = ($response.Status -eq 0) -or ($response.Status -in @(429,502,503,504))
         if (-not $retryable -or $attempt -eq $MaxAttempts) { return $response }
-        $wait = Get-KeystoneRetryDelayMs -Headers $response.Headers -Attempt $attempt
-        Write-KeystoneLog -Level WARN -Message ("HTTP {0} {1} returned {2}; retry {3} in {4} ms" -f $Method, (Get-KeystoneSafeUrl $Uri), $response.Status, $attempt, $wait)
-        & $script:KeystoneHttpSleep $wait
+        $wait = Get-GangplankRetryDelayMs -Headers $response.Headers -Attempt $attempt
+        Write-GangplankLog -Level WARN -Message ("HTTP {0} {1} returned {2}; retry {3} in {4} ms" -f $Method, (Get-GangplankSafeUrl $Uri), $response.Status, $attempt, $wait)
+        & $script:GangplankHttpSleep $wait
     }
 }
 
-function Get-KeystoneSafeUrl {
+function Get-GangplankSafeUrl {
     # Scheme, host and path only: query strings can carry signed tokens.
     param([string]$Uri)
     try { $u = [uri]$Uri; return ('{0}://{1}{2}' -f $u.Scheme, $u.Authority, $u.AbsolutePath) } catch { return '(invalid url)' }
 }
 
-function ConvertFrom-KeystoneApiResponse {
+function ConvertFrom-GangplankApiResponse {
     # Parse a JSON API response or throw a coded, body-free error.
     param([Parameter(Mandatory)][string]$Provider,[string]$Method,[string]$Endpoint,[Parameter(Mandatory)]$Response)
     $status = [int]$Response.Status
@@ -157,16 +157,16 @@ function ConvertFrom-KeystoneApiResponse {
         if ([string]::IsNullOrWhiteSpace($Response.Text)) { return $null }
         return ($Response.Text | ConvertFrom-Json)
     }
-    $code = Get-KeystoneProviderErrorCode -Status $status -Headers $Response.Headers
+    $code = Get-GangplankProviderErrorCode -Status $status -Headers $Response.Headers
     $detail = [string]$Response.Text
     if ($detail.Length -gt 500) { $detail = $detail.Substring(0,500) + '...' }
     if ($status -eq 0) { $detail = $Response.NetworkError }
-    Write-KeystoneLog -Level ERROR -Message ("{0} API fail {1} {2} status={3} {4}" -f $Provider, $Method, $Endpoint, $status, $detail)
+    Write-GangplankLog -Level ERROR -Message ("{0} API fail {1} {2} status={3} {4}" -f $Provider, $Method, $Endpoint, $status, $detail)
     $statusText = if ($status) { [string]$status } else { 'no response' }
     throw ("{0}|{1} API {2} {3} failed (HTTP {4})." -f $code, $Provider, $Method, $Endpoint, $statusText)
 }
 
-function Invoke-KeystoneDownload {
+function Invoke-GangplankDownload {
     # Download to a new file, following up to 3 redirects. The auth headers go
     # only to the original host; a redirect to another host (GitHub codeload,
     # object storage) is fetched without them, as those URLs are pre-signed.
@@ -176,15 +176,15 @@ function Invoke-KeystoneDownload {
     $current = $Uri
     for ($hop = 0; $hop -le 3; $hop++) {
         $sameHost = (([uri]$current).Authority -eq $origin)
-        $headers = if ($sameHost) { $AuthHeaders } else { @{ 'User-Agent' = 'Keystone' } }
+        $headers = if ($sameHost) { $AuthHeaders } else { @{ 'User-Agent' = 'Gangplank' } }
         if (([uri]$current).Scheme -ne ([uri]$Uri).Scheme -and ([uri]$current).Scheme -ne 'https') { throw "NETWORK|$Provider download redirected to an insecure address." }
-        $r = Invoke-KeystoneHttpRequest -Method GET -Uri $current -Headers $headers -OutFile $OutFile -TimeoutSec $TimeoutSec
+        $r = Invoke-GangplankHttpRequest -Method GET -Uri $current -Headers $headers -OutFile $OutFile -TimeoutSec $TimeoutSec
         if ($r.Status -ge 300 -and $r.Status -lt 400 -and $r.Headers['location']) {
             $current = ([uri]::new([uri]$current, [string]$r.Headers['location'])).AbsoluteUri
             continue
         }
         if ($r.File) { return $r.File }
-        [void](ConvertFrom-KeystoneApiResponse -Provider $Provider -Method GET -Endpoint (Get-KeystoneSafeUrl $current) -Response $r)
+        [void](ConvertFrom-GangplankApiResponse -Provider $Provider -Method GET -Endpoint (Get-GangplankSafeUrl $current) -Response $r)
         throw "NETWORK|$Provider download returned no content."
     }
     throw "NETWORK|$Provider download redirected too many times."

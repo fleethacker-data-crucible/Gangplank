@@ -2,15 +2,15 @@
 # =============================================================================
 # Workspace session: plain snapshots (for jobs) and persistence (for restarts).
 # A snapshot holds no token and no provider object. The saved state lets a
-# restarted Keystone keep its project, work branch and download baseline, so
+# restarted Gangplank keep its project, work branch and download baseline, so
 # closing the window no longer strands unsaved work.
 # =============================================================================
 
-$script:KeystoneDevGitHubUrl = $null
-$script:KeystoneSessionFields = @('Provider','BaseUrl','ProjectPath','DefaultBranch','Branches','LocalPath','LastBranch','BaselineSha','BaselineMap','LastSaveMessage','LastSavedFiles','LastReviewUrl')
+$script:GangplankDevGitHubUrl = $null
+$script:GangplankSessionFields = @('Provider','BaseUrl','ProjectPath','DefaultBranch','Branches','LocalPath','LastBranch','BaselineSha','BaselineMap','LastSaveMessage','LastSavedFiles','LastReviewUrl')
 
-function Set-KeystoneDevProvider {
-    # LocalDev only (Start-KeystoneWeb.ps1 -LocalDev -DevGitHubUrl): treat a local
+function Set-GangplankDevProvider {
+    # LocalDev only (Start-Gangplank.ps1 -LocalDev -DevGitHubUrl): treat a local
     # synthetic GitHub server as the GitHub API. Loopback http only.
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$GitHubUrl)
@@ -18,33 +18,33 @@ function Set-KeystoneDevProvider {
     if (-not [uri]::TryCreate($GitHubUrl,[UriKind]::Absolute,[ref]$u) -or $u.Scheme -ne 'http' -or $u.Host -notin @('127.0.0.1','localhost') -or $u.AbsolutePath -ne '/') {
         throw 'The synthetic provider must be http://127.0.0.1:<port>/'
     }
-    $script:KeystoneDevGitHubUrl = $u.GetLeftPart([UriPartial]::Authority)
+    $script:GangplankDevGitHubUrl = $u.GetLeftPart([UriPartial]::Authority)
 }
 
-function Get-KeystoneDevProvider { return $script:KeystoneDevGitHubUrl }
+function Get-GangplankDevProvider { return $script:GangplankDevGitHubUrl }
 
-function Test-KeystoneDevRepositoryUrl {
+function Test-GangplankDevRepositoryUrl {
     param([string]$Url)
-    if (-not $script:KeystoneDevGitHubUrl) { return $false }
-    return $Url.StartsWith($script:KeystoneDevGitHubUrl + '/',[StringComparison]::OrdinalIgnoreCase)
+    if (-not $script:GangplankDevGitHubUrl) { return $false }
+    return $Url.StartsWith($script:GangplankDevGitHubUrl + '/',[StringComparison]::OrdinalIgnoreCase)
 }
 
-function ConvertTo-KeystoneSessionSnapshot {
+function ConvertTo-GangplankSessionSnapshot {
     param($Session)
     if (-not $Session) { return $null }
     $snap = [ordered]@{}
-    foreach ($f in $script:KeystoneSessionFields) {
+    foreach ($f in $script:GangplankSessionFields) {
         $p = $Session.PSObject.Properties[$f]
         $snap[$f] = $(if ($p) { $p.Value } else { $null })
     }
     # A copy, never the live table: jobs run on other threads.
-    $snap.BaselineMap = (ConvertTo-KeystoneHashtable $snap.BaselineMap).Clone()
+    $snap.BaselineMap = (ConvertTo-GangplankHashtable $snap.BaselineMap).Clone()
     $snap.Branches = @($snap.Branches)
     $snap.LastSavedFiles = @($snap.LastSavedFiles)
     return $snap
 }
 
-function ConvertTo-KeystoneHashtable {
+function ConvertTo-GangplankHashtable {
     param($Value)
     $h = @{}
     if ($null -eq $Value) { return $h }
@@ -53,37 +53,37 @@ function ConvertTo-KeystoneHashtable {
     return $h
 }
 
-function New-KeystoneSessionFromSnapshot {
+function New-GangplankSessionFromSnapshot {
     # Live session (with provider object) from a snapshot and a token. No network.
     param([Parameter(Mandatory)]$Snapshot,[Parameter(Mandatory)][string]$Token)
     $s = [ordered]@{}
-    foreach ($f in $script:KeystoneSessionFields) { $s[$f] = $Snapshot[$f] }
+    foreach ($f in $script:GangplankSessionFields) { $s[$f] = $Snapshot[$f] }
     if (-not $s.Provider -or -not $s.ProjectPath) { throw 'BAD_STATE|The saved session is incomplete.' }
-    $s.BaselineMap = ConvertTo-KeystoneHashtable $s.BaselineMap
+    $s.BaselineMap = ConvertTo-GangplankHashtable $s.BaselineMap
     $s.Branches = @($s.Branches)
     $s.LastSavedFiles = @($s.LastSavedFiles)
     $base = if ($s.Provider -eq 'GitHub' -and $s.BaseUrl -match 'github\.com') { 'https://api.github.com' } else { [string]$s.BaseUrl }
-    $s.ProviderObj = New-KeystoneProvider -Provider $s.Provider -BaseUrl $base -Token $Token
+    $s.ProviderObj = New-GangplankProvider -Provider $s.Provider -BaseUrl $base -Token $Token
     $s.Project = $null
     return [pscustomobject]$s
 }
 
-function Get-KeystoneSessionStatePath {
-    # StateRoot is Keystone's own data folder (%LOCALAPPDATA%\Keystone), never the workspaces.
+function Get-GangplankSessionStatePath {
+    # StateRoot is Gangplank's own data folder (%LOCALAPPDATA%\Gangplank), never the workspaces.
     param([Parameter(Mandatory)][string]$StateRoot)
     return (Join-Path $StateRoot 'session.json')
 }
 
-function Save-KeystoneSessionState {
+function Save-GangplankSessionState {
     param([Parameter(Mandatory)][string]$StateRoot,$Session)
-    $path = Get-KeystoneSessionStatePath -StateRoot $StateRoot
+    $path = Get-GangplankSessionStatePath -StateRoot $StateRoot
     if (-not $Session) {
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
         return
     }
     $dir = Split-Path $path -Parent
     if (-not (Test-Path -LiteralPath $dir)) { [void](New-Item -ItemType Directory -Path $dir -Force) }
-    $doc = [ordered]@{ Version = 1; Saved = (Get-Date).ToUniversalTime().ToString('o'); Session = (ConvertTo-KeystoneSessionSnapshot $Session) }
+    $doc = [ordered]@{ Version = 1; Saved = (Get-Date).ToUniversalTime().ToString('o'); Session = (ConvertTo-GangplankSessionSnapshot $Session) }
     $tmp = "$path.$([guid]::NewGuid().ToString('N')).tmp"
     try {
         [IO.File]::WriteAllText($tmp, ($doc | ConvertTo-Json -Depth 8 -Compress), (New-Object Text.UTF8Encoding($false)))
@@ -93,26 +93,26 @@ function Save-KeystoneSessionState {
     }
 }
 
-function Read-KeystoneSessionState {
+function Read-GangplankSessionState {
     # Snapshot hashtable from a previous run, or $null. Unreadable state is set aside, not deleted.
     param([Parameter(Mandatory)][string]$StateRoot)
-    $path = Get-KeystoneSessionStatePath -StateRoot $StateRoot
+    $path = Get-GangplankSessionStatePath -StateRoot $StateRoot
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
     try {
         $doc = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
         $snap = [ordered]@{}
-        foreach ($f in $script:KeystoneSessionFields) {
+        foreach ($f in $script:GangplankSessionFields) {
             $p = $doc.Session.PSObject.Properties[$f]
             $snap[$f] = $(if ($p) { $p.Value } else { $null })
         }
-        $snap.BaselineMap = ConvertTo-KeystoneHashtable $snap.BaselineMap
+        $snap.BaselineMap = ConvertTo-GangplankHashtable $snap.BaselineMap
         if (-not $snap.Provider -or -not $snap.ProjectPath -or -not $snap.BaseUrl) { return $null }
         # Re-check the saved address exactly as a typed URL would be checked, so a
         # session saved in LocalDev (http://127.0.0.1:...) can never send a real
         # token anywhere in a normal run.
-        try { Assert-KeystoneTrustedRepositoryUrl -Url (([string]$snap.BaseUrl).TrimEnd('/') + '/' + [string]$snap.ProjectPath) }
+        try { Assert-GangplankTrustedRepositoryUrl -Url (([string]$snap.BaseUrl).TrimEnd('/') + '/' + [string]$snap.ProjectPath) }
         catch {
-            Write-KeystoneLog -Level WARN -Message 'Saved session points at a host that is not allowed now; it was not restored.'
+            Write-GangplankLog -Level WARN -Message 'Saved session points at a host that is not allowed now; it was not restored.'
             return $null
         }
         if ($snap.LocalPath -and -not (Test-Path -LiteralPath $snap.LocalPath -PathType Container)) {
@@ -121,7 +121,7 @@ function Read-KeystoneSessionState {
         return $snap
     } catch {
         try { Move-Item -LiteralPath $path -Destination ($path + '.unreadable-' + (Get-Date -Format 'yyyyMMddHHmmss')) -Force } catch { }
-        Write-KeystoneLog -Level WARN -Message 'Saved session could not be read and was set aside.'
+        Write-GangplankLog -Level WARN -Message 'Saved session could not be read and was set aside.'
         return $null
     }
 }

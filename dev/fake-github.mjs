@@ -1,4 +1,4 @@
-// Synthetic GitHub REST server for Keystone LocalDev and end-to-end tests.
+// Synthetic GitHub REST server for Gangplank LocalDev and end-to-end tests.
 //
 // It implements the Git Data API (refs, commits, trees, blobs), branches, commits/compare, pulls,
 // the Contents API (empty-repo initialisation) and zipball downloads with a GitHub-style 302 to a
@@ -16,10 +16,10 @@ import { createHash, randomBytes } from 'node:crypto';
 import { deflateRawSync } from 'node:zlib';
 import { pathToFileURL } from 'node:url';
 
-export const DEFAULT_TOKEN = 'fake-keystone-token';
+export const DEFAULT_TOKEN = 'fake-gangplank-token';
 export const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 const SEED_EPOCH = Date.UTC(2026, 9, 20, 9, 0, 0) / 1000; // 2026-10-20T09:00:00Z, fixed so seed SHAs are stable
-const API_USER = { login: 'fake-keystone-user', name: 'Fake Keystone User', email: 'fake-keystone-user@example.test' };
+const API_USER = { login: 'fake-gangplank-user', name: 'Fake Gangplank User', email: 'fake-gangplank-user@example.test' };
 const TEAMMATE = { login: 'teammate-tess', name: 'Teammate Tess', email: 'tess@example.test' };
 const VALID_MODES = new Set(['100644', '100755', '040000', '160000', '120000']);
 
@@ -277,10 +277,10 @@ function seed(store) {
   store.repos = new Map();
   store.codeloads = new Map();
 
-  const sample = store.addRepo({ owner: 'keystone-demo', name: 'sample', visibility: 'private', description: 'Fictional sample project for Keystone LocalDev' });
+  const sample = store.addRepo({ owner: 'gangplank-demo', name: 'sample', visibility: 'private', description: 'Fictional sample project for Gangplank LocalDev' });
   const contributor = { login: 'demo-contributor', name: 'Demo Contributor', email: 'demo-contributor@example.test' };
   const t1 = sample.treeFromFiles({
-    'README.md': '# Sample\n\nFictional demo repository for Keystone local development.\nNothing here is real.\n',
+    'README.md': '# Sample\n\nFictional demo repository for Gangplank local development.\nNothing here is real.\n',
     'src/app.ps1': "Write-Output 'Hello from the sample app'\n",
   });
   const c1 = sample.putCommit({ tree: t1, message: 'Initial commit', author: store.signature(contributor) });
@@ -302,11 +302,11 @@ function seed(store) {
   const closed = store.addPull(sample, { title: 'Old release notes', body: '', head: 'release/2026.10', base: 'main', user: contributor.login });
   closed.state = 'closed';
 
-  const site = store.addRepo({ owner: 'keystone-demo', name: 'public-site', visibility: 'public', description: 'Fictional public repository' });
+  const site = store.addRepo({ owner: 'gangplank-demo', name: 'public-site', visibility: 'public', description: 'Fictional public repository' });
   const ts = site.treeFromFiles({ 'index.html': '<!doctype html><title>Public demo</title>\n' });
   site.setRef('main', site.putCommit({ tree: ts, message: 'Initial public page', author: store.signature(contributor) }));
 
-  store.addRepo({ owner: 'keystone-demo', name: 'empty', visibility: 'private', description: 'Fictional empty repository' });
+  store.addRepo({ owner: 'gangplank-demo', name: 'empty', visibility: 'private', description: 'Fictional empty repository' });
 }
 
 // ---------------------------------------------------------------- JSON shapes
@@ -486,7 +486,7 @@ class Store {
   }
   repo(fullName) { return this.repos.get(String(fullName).toLowerCase()) ?? null; }
 
-  advance({ repo: name = 'keystone-demo/sample', branch, path = 'TEAMMATE.md', content, message, mode } = {}) {
+  advance({ repo: name = 'gangplank-demo/sample', branch, path = 'TEAMMATE.md', content, message, mode } = {}) {
     const repo = this.repo(name);
     if (!repo) throw notFound();
     const b = branch ?? repo.defaultBranch;
@@ -573,7 +573,7 @@ function parseJson(buf, call) {
 
 const defaultMessages = {
   400: 'Bad Request', 401: 'Bad credentials', 403: 'Forbidden', 404: 'Not Found', 409: 'Conflict', 422: 'Validation Failed',
-  429: 'API rate limit exceeded for fake-keystone-user.', 500: 'Server Error', 502: 'Server Error', 503: 'Service Unavailable',
+  429: 'API rate limit exceeded for fake-gangplank-user.', 500: 'Server Error', 502: 'Server Error', 503: 'Service Unavailable',
 };
 
 function sendJson(res, status, payload, headers = {}) {

@@ -5,15 +5,15 @@
 #  Never file contents, tokens, or response bodies.
 # ============================================================
 
-$script:KeystoneAuditPath = $null
+$script:GangplankAuditPath = $null
 
-function Get-KeystoneAuditPath {
-    if ($script:KeystoneAuditPath) { return $script:KeystoneAuditPath }
-    $dir = if ($script:KeystoneLogDir) { $script:KeystoneLogDir } else { Join-Path (Split-Path $PSScriptRoot -Parent) 'Logs' }
+function Get-GangplankAuditPath {
+    if ($script:GangplankAuditPath) { return $script:GangplankAuditPath }
+    $dir = if ($script:GangplankLogDir) { $script:GangplankLogDir } else { Join-Path (Split-Path $PSScriptRoot -Parent) 'Logs' }
     return (Join-Path $dir 'audit.jsonl')
 }
 
-function Write-KeystoneAudit {
+function Write-GangplankAudit {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Action,[hashtable]$Data = @{})
     $entry = [ordered]@{ time = (Get-Date).ToUniversalTime().ToString('o'); action = $Action; user = [Environment]::UserName }
@@ -22,19 +22,19 @@ function Write-KeystoneAudit {
         $entry[$k] = $Data[$k]
     }
     try {
-        $path = Get-KeystoneAuditPath
+        $path = Get-GangplankAuditPath
         $dir = Split-Path $path -Parent
         if (-not (Test-Path -LiteralPath $dir)) { [void](New-Item -ItemType Directory -Path $dir -Force) }
         [IO.File]::AppendAllText($path, (($entry | ConvertTo-Json -Compress -Depth 4) + [Environment]::NewLine), (New-Object Text.UTF8Encoding($false)))
     } catch {
-        Write-KeystoneLog -Level WARN -Message "Audit entry could not be written: $Action"
+        Write-GangplankLog -Level WARN -Message "Audit entry could not be written: $Action"
     }
 }
 
-function Get-KeystoneAuditEntries {
+function Get-GangplankAuditEntries {
     [CmdletBinding()]
     param([ValidateRange(1,500)][int]$Last = 50)
-    $path = Get-KeystoneAuditPath
+    $path = Get-GangplankAuditPath
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return @() }
     $lines = @(Get-Content -LiteralPath $path -Tail $Last -Encoding UTF8)
     $out = New-Object System.Collections.Generic.List[object]

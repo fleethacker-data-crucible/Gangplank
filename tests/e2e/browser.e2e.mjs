@@ -1,6 +1,6 @@
 // Real-browser check of the UI against the real host and the synthetic GitHub.
 // Catches what API tests cannot (CSS, bootstrap, rendering). Uses Playwright when it
-// is available (KEYSTONE_PLAYWRIGHT=<path to playwright package>, or `playwright`
+// is available (GANGPLANK_PLAYWRIGHT=<path to playwright package>, or `playwright`
 // resolvable from here) and an installed Chromium/Edge; otherwise it skips.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,15 +14,15 @@ import { startFakeGitHub } from '../../dev/fake-github.mjs';
 
 const require = createRequire(import.meta.url);
 let playwright = null;
-for (const p of [process.env.KEYSTONE_PLAYWRIGHT, 'playwright', '/opt/npm-tools/node_modules/playwright'].filter(Boolean)) {
+for (const p of [process.env.GANGPLANK_PLAYWRIGHT, 'playwright', '/opt/npm-tools/node_modules/playwright'].filter(Boolean)) {
   try { playwright = require(p); break; } catch { }
 }
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const shell = process.env.KEYSTONE_PWSH || (process.platform === 'win32' ? 'powershell.exe' : 'pwsh');
+const shell = process.env.GANGPLANK_PWSH || (process.platform === 'win32' ? 'powershell.exe' : 'pwsh');
 
 function launchOptions() {
-  if (process.env.KEYSTONE_BROWSER_CHANNEL) return { channel: process.env.KEYSTONE_BROWSER_CHANNEL };   // e.g. msedge
-  if (process.env.KEYSTONE_BROWSER_PATH) return { executablePath: process.env.KEYSTONE_BROWSER_PATH };
+  if (process.env.GANGPLANK_BROWSER_CHANNEL) return { channel: process.env.GANGPLANK_BROWSER_CHANNEL };   // e.g. msedge
+  if (process.env.GANGPLANK_BROWSER_PATH) return { executablePath: process.env.GANGPLANK_BROWSER_PATH };
   const local = '/opt/pw-browsers';
   if (fs.existsSync(local)) {
     for (const d of fs.readdirSync(local).filter((x) => /^chromium-\d+$/.test(x))) {
@@ -36,12 +36,12 @@ function launchOptions() {
 }
 
 test('UI in a real browser', { skip: playwright ? false : 'Playwright not available' }, async () => {
-  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'keystone-browser-'));
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'gangplank-browser-'));
   const fake = await startFakeGitHub({ port: 0 });
   const port = 20000 + Math.floor(Math.random() * 9000);
-  const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'Start-KeystoneWeb.ps1'),
+  const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'Start-Gangplank.ps1'),
     '-LocalDev', '-NoBrowser', '-Port', String(port), '-DevGitHubUrl', fake.url + '/', '-WorkRoot', path.join(temp, 'work')];
-  const env = { ...process.env, GITHUB_TOKEN: fake.token, LOCALAPPDATA: path.join(temp, 'appdata'), HOME: temp, KEYSTONE_ARC_PATH: '' };
+  const env = { ...process.env, GITHUB_TOKEN: fake.token, LOCALAPPDATA: path.join(temp, 'appdata'), HOME: temp, GANGPLANK_LAZARETTE_PATH: '' };
   const child = spawn(shell, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let browser = null;
   after(async () => {
@@ -72,10 +72,10 @@ test('UI in a real browser', { skip: playwright ? false : 'Playwright not availa
   assert.equal(await page.isVisible('#ended'), false, 'The "Session ended" overlay must be hidden on a working session');
   assert.equal(await page.isVisible('#testBanner'), true, 'LocalDev must show the test-mode banner');
   assert.equal(new URL(page.url()).hash, '', 'The launch nonce must be removed from the address bar');
-  assert.match(await page.inputValue('#repoUrl'), /keystone-demo\/sample$/, 'LocalDev should prefill the synthetic repo');
+  assert.match(await page.inputValue('#repoUrl'), /gangplank-demo\/sample$/, 'LocalDev should prefill the synthetic repo');
 
   await page.click('#connectBtn');
-  await page.waitForFunction(() => document.getElementById('projectTitle').textContent === 'keystone-demo/sample', null, { timeout: 30000 });
+  await page.waitForFunction(() => document.getElementById('projectTitle').textContent === 'gangplank-demo/sample', null, { timeout: 30000 });
   await page.waitForFunction(() => !document.getElementById('startBtn').disabled, null, { timeout: 15000 });
 
   // A second tab opened with the already-used link must say so (and not break the first).
