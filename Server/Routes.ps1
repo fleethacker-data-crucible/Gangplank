@@ -218,9 +218,21 @@ function Invoke-KeystoneRouteCore {
             hasBaseline = [bool]($snap -and $snap.BaselineSha)
             ai = [bool]$ai.configured
             canReview = [bool]($snap -and $snap.LastSaveMessage -and -not $snap.LastReviewUrl -and $snap.LastBranch -and $snap.LastBranch -ne $snap.DefaultBranch)
+            autoStop = [bool](Get-KeystoneHostLifecycleState).autoStop
             localDev = [bool]$app.LocalDev
             devProvider = $(if (Get-KeystoneDevProvider) { Get-KeystoneDevProvider } else { '' })
         }
+        return
+    }
+
+    # ---- lifecycle -----------------------------------------------------------
+    if ($m -eq 'POST' -and $p -eq '/api/session/stop') {
+        # End session. A deliberate second header, so no other API call can end it by mistake.
+        $intent = ''; if ($Req.Headers.ContainsKey('X-Keystone-Intent')) { $intent = $Req.Headers['X-Keystone-Intent'] }
+        if ($intent -cne 'end-session') { throw 'BAD_REQUEST|Ending the session requires the X-Keystone-Intent header.' }
+        Write-KeystoneLog -Level INFO -Message 'End session requested from the browser.'
+        Request-KeystoneHostStop -Reason 'End session requested from the browser.'
+        Send-KeystoneJson -Object @{ stopping = $true; waitingForJobs = [bool](Test-KeystoneJobsBusy) }
         return
     }
 

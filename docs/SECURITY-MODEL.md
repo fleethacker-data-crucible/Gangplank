@@ -9,7 +9,8 @@ Development-stage tool, NOT an accredited enterprise deployment.
 - **Same-user check (Windows):** connections from processes owned by another Windows account, or whose owner cannot be read, are refused.
 - **Limits:** idle connections close after 2 s, headers within 5 s and 32 KB, bodies 1 MB; `Transfer-Encoding` and duplicate `Content-Length` are rejected.
 - **Static files:** only the UI files in the manifest are served.
-- **Headers:** CSP `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'` (no inline script or style), `X-Frame-Options: DENY`, `nosniff`, `no-store`, `no-referrer`, same-origin CORP/COOP.
+- **Lifecycle:** `POST /api/heartbeat` (tab presence) needs the session cookie and the client secret like every other call. The tab's unload beacon (`navigator.sendBeacon`) cannot set headers, so on that one route the secret may instead be `client` in the JSON body; it never goes in a query string, the runtime file or the log, and request bodies are not logged. `POST /api/session/stop` (End session) additionally requires `X-Keystone-Intent: end-session`. Stop requests from `Stop-Keystone.ps1` use a per-process named event (`Local\Keystone-Stop-<pid>`); the host stops between requests and after running background jobs finish.
+- **Headers:** CSP `default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'` (no inline script or style), `X-Frame-Options: DENY`, `nosniff`, `no-store`, `no-referrer`, same-origin CORP/COOP.
 - **Errors** reach the browser as a code and one safe line; provider response bodies and stack traces stay in the local log.
 
 ## Credentials

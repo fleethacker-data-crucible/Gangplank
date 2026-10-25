@@ -28,6 +28,7 @@ if (-not $script:KeystoneRoot) {
 . (Join-Path $script:KeystoneRoot "Providers\GitProviderBase.ps1")
 . (Join-Path $script:KeystoneRoot "Providers\GitLabProvider.ps1")
 . (Join-Path $script:KeystoneRoot "Providers\GitHubProvider.ps1")
+. (Join-Path $script:KeystoneRoot "Core\Lifecycle.ps1")
 . (Join-Path $script:KeystoneRoot "Server\Session.ps1")
 . (Join-Path $script:KeystoneRoot "Server\Jobs.ps1")
 . (Join-Path $script:KeystoneRoot "Server\JobWork.ps1")
@@ -319,5 +320,21 @@ Export-ModuleMember -Function @(
     "Get-KeystoneAiSettingsView",
     "Set-KeystoneAiSettings",
     "Test-KeystoneAiConnection",
-    "ConvertTo-KeystoneBranchName"
+    "ConvertTo-KeystoneBranchName",
+    "Reset-KeystonePresence",
+    "Register-KeystonePresence",
+    "Register-KeystoneRequestFinished",
+    "Test-KeystoneBrowserGone",
+    "Get-KeystonePresenceState",
+    "Test-KeystoneAutoStopEnabled",
+    "Write-KeystoneRuntimeFile",
+    "Remove-KeystoneRuntimeFile",
+    "Get-KeystoneServerProcesses",
+    "Stop-KeystoneServerProcesses",
+    "Request-KeystoneServerStop",
+    "New-KeystoneStopEvent",
+    "Format-KeystoneServerProcess",
+    "Test-KeystoneJobsBusy",
+    "Request-KeystoneHostStop",
+    "Get-KeystoneHostLifecycleState"
 )

@@ -7,12 +7,22 @@ Browser-first workspace for working on GitHub and GitLab projects without learni
 **Engineering preview, not accredited enterprise production software.** See [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Launch
-Double-click **Launch-Keystone.bat**. Keystone starts a local server on `http://127.0.0.1:8769/` (another free port if that one is taken) and opens your browser with a one-time launch link. The link works once, for two minutes; if you close the tab, press **L** in the Keystone window for a new link. Ctrl+C in that window stops Keystone.
+Double-click **Launch-Keystone.bat**. Keystone starts a local server on `http://127.0.0.1:8769/` (another free port if that one is taken) and opens your browser with a one-time launch link. The link works once, for two minutes; if you close the tab, press **L** in the Keystone window for a new link.
 
 - `Launch-Keystone.bat -NoBrowser [port]` starts without opening a browser (the link is printed).
 - `Launch-Keystone.bat -Cli` opens the classic text menu.
 - The server uses a `TcpListener` on 127.0.0.1, so no HttpListener URL reservation or admin rights are needed.
 - The batch file uses the same process-scoped `-STA -NoProfile -ExecutionPolicy Bypass` switches as ARC and Cascade. They apply only to the launched process and do not change machine policy or override Group Policy or application control.
+
+## Stopping and one instance
+**The browser tab owns the server.** Keystone stops itself about 20 seconds after its last tab closes (5 seconds when the browser reports the tab closing); a reload or a second open tab keeps it running. It never stops while a background task (save, download, review request, AI) is running: it waits for that to finish. Other ways to stop it:
+- **End session** at the bottom of the left navigation.
+- Ctrl+C in its PowerShell window.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Stop-Keystone.ps1` stops every running Keystone host, including one in a hidden window, without needing its process ID. Each host gets up to 30 seconds to finish what it is doing before it is killed.
+
+**One instance.** If Keystone is already running from this folder with the same saved session, the launcher shows it and asks *Stop it and start fresh?* (Enter = yes). `Launch-Keystone.bat --replace` answers yes without asking; `Launch-Keystone.bat --stay` keeps the server running after the tab closes. To turn auto-stop off permanently, set `KEYSTONE_AUTO_STOP=0` in the environment or `"AutoStop": false` in `config/keystone-config.json` (`KEYSTONE_AUTO_STOP=1` overrides the config file). Options pass through both launchers, for example `Launch-Keystone.bat -NoBrowser 19000 --stay`.
+
+**Runtime files.** While it runs, the host writes `Logs\keystone-server-<pid>.json` (pid, port, url, start time, saved-session folder; never the launch link, cookie or client secret) and deletes it when it stops. The launcher and `Stop-Keystone.ps1` read these files and delete stale ones whose process has gone.
 
 ## Connect → Start → Edit → Smart Save
 1. Add a token in **Credentials** (or set an environment variable), paste a GitHub or GitLab project URL and connect.
@@ -64,6 +74,7 @@ Every remote write (branch, commit, review request) and every credential or ARC 
 | Path | What |
 |---|---|
 | `Start-KeystoneWeb.ps1`, `Launch-Keystone.bat` | Entry point and launcher |
+| `Stop-Keystone.ps1`, `Core/Lifecycle.ps1`, `web/heartbeat-worker.js` | Lifecycle: tab presence (heartbeat), auto-stop, runtime files, finding and stopping running hosts |
 | `Server/` | Local server (`Http.ps1`), API (`Routes.ps1`), background jobs (`Jobs.ps1`, `JobWork.ps1`), saved session (`Session.ps1`) |
 | `Core/` | Workspace and Smart Save, Sentinel, HTTP transport, credentials, audit, AI (`Intelligence.ps1`: endpoint discovery), logging |
 | `Providers/` | GitHub and GitLab REST adapters |

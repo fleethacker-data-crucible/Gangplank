@@ -6,5 +6,6 @@
   },
   "LastUsed": null,
   "Repositories": {},
-  "LogLevel": "INFO"
+  "LogLevel": "INFO",
+  "AutoStop": true
 }

@@ -13,14 +13,18 @@
 #     HttpOnly; SameSite=Strict cookie. Every /api call also needs
 #     X-Keystone-Client, a loopback Host and (if sent) a loopback Origin.
 #   * On Windows, connections from another user's processes are refused.
+#   * Lifecycle (Core/Lifecycle.ps1, Server/WebHost.ps1): POST /api/heartbeat
+#     keeps the host alive while its tab is open. The tab's unload beacon cannot
+#     set headers, so that one route also accepts the client secret as `client`
+#     in its JSON body (the session cookie is still required).
 # =============================================================================
 
 $script:KeystoneHttp = @{
     Port = 0; Listener = $null; Stream = $null; Client = $null; Responded = $false
     Nonce = $null; NonceExpires = [datetime]::MinValue
     SessionToken = $null; ClientSecret = $null; StopRequested = $false
-    UiRoot = ''; Manifest = @('index.html','app.js','app.css','logo.svg')
-    Csp = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    UiRoot = ''; Manifest = @('index.html','app.js','app.css','logo.svg','heartbeat-worker.js')
+    Csp = "default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     PeerCheck = 'unknown'
     MaxBody = 1048576
 }
@@ -49,6 +53,8 @@ function New-KeystoneLaunchNonce {
     $script:KeystoneHttp.NonceExpires = (Get-Date).AddSeconds(120)
     return $script:KeystoneHttp.Nonce
 }
+
+function Get-KeystoneHttpPort { return [int]$script:KeystoneHttp.Port }
 
 function Get-KeystoneLaunchUrl { return ('http://127.0.0.1:{0}/#k={1}' -f $script:KeystoneHttp.Port, $script:KeystoneHttp.Nonce) }
 
@@ -321,6 +327,19 @@ function Invoke-KeystoneServerRequest {
         return
     }
     $client = ''; if ($Req.Headers.ContainsKey('X-Keystone-Client')) { $client = $Req.Headers['X-Keystone-Client'] }
+    if ($Req.Path -eq '/api/heartbeat' -and $Req.Method -eq 'POST') {
+        # Presence. Never log this body: the unload beacon carries the client secret.
+        if (-not $client) { try { if ($Req.Json -and $Req.Json.PSObject.Properties['client']) { $client = [string]$Req.Json.client } } catch { } }
+        if (-not (Test-KeystoneStringsEqual $client $script:KeystoneHttp.ClientSecret) -or -not (Test-KeystoneSessionCookie $Req)) {
+            Send-KeystoneError 401 'SESSION' 'Session ended. Use the link in the Keystone window, or restart Keystone.'
+            return
+        }
+        $tabId = $null; $leaving = $false
+        try { if ($Req.Json) { $tabId = [string]$Req.Json.tab; $leaving = ($Req.Json.leaving -eq $true) } } catch { }
+        Register-KeystonePresence -TabId $tabId -Leaving:$leaving
+        Send-KeystoneJson -Object (Get-KeystonePresenceState)
+        return
+    }
     if (-not (Test-KeystoneStringsEqual $client $script:KeystoneHttp.ClientSecret)) { Send-KeystoneError 401 'SESSION' 'Session ended. Use the link in the Keystone window (press L there for a new one).'; return }
     if (-not (Test-KeystoneSessionCookie $Req)) { Send-KeystoneError 401 'SESSION' 'Session ended. Use the link in the Keystone window, or restart Keystone.'; return }
     Invoke-KeystoneRoute -Req $Req
@@ -402,11 +421,14 @@ function Start-KeystoneHttpServer {
                 }
                 $req = Read-KeystoneHttpRequest -Client $client
                 if ($null -eq $req) { continue }
+                $requestClock = [Diagnostics.Stopwatch]::StartNew()
                 try { Invoke-KeystoneServerRequest -Req $req }
                 catch {
                     Write-KeystoneLog -Level ERROR -Message ("{0} {1}: {2}" -f $req.Method, $req.Path, $_.Exception.Message)
                     if (-not $script:KeystoneHttp.Responded) { try { Send-KeystoneError 500 'INTERNAL' 'Internal error. See the Keystone log.' } catch { } }
                 }
+                # Heartbeats queue behind a slow request; let them arrive before deciding the tab is gone.
+                if ($requestClock.Elapsed.TotalSeconds -ge 2) { Register-KeystoneRequestFinished }
             } catch {
                 Write-KeystoneLog -Level WARN -Message ("Connection failed: {0}" -f $_.Exception.GetType().Name)
             } finally {

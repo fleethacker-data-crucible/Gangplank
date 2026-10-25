@@ -17,6 +17,8 @@ Double-click **Launch-LocalDev.bat** (needs Node.js 18+ on the development PC).
 
 Without Node, the host still starts in LocalDev with no provider.
 
+Lifecycle is the same as the production launcher: the host stops itself when its browser tab closes; `Launch-LocalDev.bat --stay` keeps it running, `--replace` restarts without asking, and `Stop-Keystone.ps1` stops any leftover host. LocalDev keeps its session under `work-localdev\`, so it never counts as "already running" against your real Keystone.
+
 Manual: `powershell -File dev\Start-LocalDev.ps1 [-Port 8769] [-FakePort 8791] [-NoBrowser]`,
 or `node dev/fake-github.mjs 8791` and `Start-KeystoneWeb.ps1 -LocalDev -DevGitHubUrl http://127.0.0.1:8791/`.
 

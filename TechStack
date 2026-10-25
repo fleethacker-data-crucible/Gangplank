@@ -22,3 +22,25 @@ Local web apps: PowerShell 5.1 serves a browser UI on `127.0.0.1` (Edge/Chrome).
 - Build off-workstation; ship compiled JS/CSS/WASM only
 - Bundle all deps — no CDNs or runtime network calls
 - No admin, installers, or services on the workstation
+
+## Lifecycle rules
+
+A loopback app that keeps running after its tab closes is a defect: it hides, holds its DLLs and port, breaks the next build and burns CPU. Every app with a local server and a browser UI does all of these.
+
+| Rule | Requirement |
+| --- | --- |
+| Tab owns the server | UI sends `POST /api/heartbeat` every 5 s and a `navigator.sendBeacon` "leaving" signal on `pagehide`. Server stops itself 20 s after the last heartbeat, or 5 s after a leaving signal with no new heartbeat. A reload sends a fresh heartbeat inside the grace period, so nothing happens. |
+| Never stop mid-write | Auto-stop waits while a background job (save, export, sync, send) runs, then stops on the next tick. |
+| Way out in the UI | An *End session* (or *Quit*) control in the main navigation stops the server cleanly. Tray apps also get *Exit* in the tray menu. |
+| Way out from the shell | `Stop-<App>.ps1` finds and stops every running instance without knowing PIDs. |
+| One instance | The launcher detects a running server and asks *stop it and start fresh?*. `--replace` answers yes; `--stay` keeps the server alive after the tab closes (long jobs, scheduled runs, tray/hotkey mode). |
+| Build stops the app | Build/serve scripts call the stop logic first and say what they stopped. |
+| Runtime file | On start write `logs\<app>-server-<pid>.json` (pid, port, url, start time; never the session token); delete it on stop. Stop scripts and launchers read these and delete stale ones (dead pid). |
+| Off switch | `<APP>_AUTO_STOP=0` (env var or env file) disables auto-stop. |
+
+Notes:
+
+- The beacon cannot set headers, so the server accepts the session token in the JSON body on that one route only — never in the query string, never logged.
+- A hidden PowerShell console counts: if the window is hidden or minimised, the user has no Ctrl+C.
+- To find what holds a DLL, use the Windows Restart Manager (`RmRegisterResources` + `RmGetList`); `Process.Modules` misses .NET-mapped assemblies.
+- Reference implementation: Cascade (`web/src/lib/api.ts` `startHeartbeat`, `Host/CascadeHost.cs`, `scripts/Cascade-Process.ps1`, `Stop-Cascade.ps1`, `Start-Cascade.ps1`).
