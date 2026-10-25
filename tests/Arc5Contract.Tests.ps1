@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('keystone-arc5-' + [guid]::NewGuid().ToString('N'))
 $saved = @{}
-foreach ($n in @('ARC_PATH','ARC_ROOT','ARC_HOME','GITHUB_TOKEN','GITLAB_TOKEN','KEYSTONE_ARC_ITEM_GitHub','ARC_ITEM_GitHub','CASCADE_ARC_ITEM_GitHub')) {
+foreach ($n in @('ARC_PATH','ARC_ROOT','ARC_HOME','KEYSTONE_ARC_PATH','GITHUB_TOKEN','GITLAB_TOKEN','KEYSTONE_ARC_ITEM_GitHub','ARC_ITEM_GitHub','CASCADE_ARC_ITEM_GitHub')) {
     $saved[$n] = [Environment]::GetEnvironmentVariable($n)
     [Environment]::SetEnvironmentVariable($n,$null)
 }
@@ -44,14 +44,15 @@ function Get-ArcSecret {
 }
 '@)
 
-    $env:ARC_PATH = $stubOnly
+    $env:KEYSTONE_ARC_PATH = $stubOnly
     Import-Module (Join-Path $root 'Keystone.psm1') -Force -WarningAction SilentlyContinue
+    . (Join-Path $PSScriptRoot 'TestIsolation.ps1')
     Initialize-Keystone -LogLevel ERROR
     $env:ARC_HOME = $null
     Assert ((Get-KeystoneArcFlavor -ArcRoot $stubOnly) -eq '') 'The ARC 5 pm.ps1 stub must not be treated as ARC 3/4'
     Assert ((Get-KeystoneArcFlavor -ArcRoot $arc) -eq 'v5') 'lib\Arc.ps1 must identify ARC 5'
 
-    $env:ARC_PATH = $arc
+    $env:KEYSTONE_ARC_PATH = $arc
     Assert ((Find-KeystoneArcRoot) -eq [IO.Path]::GetFullPath($arc)) 'ARC 5 root not discovered'
     Assert (Import-KeystoneArcSession -Quiet) 'ARC 5 engine should load'
     Assert (-not (Test-KeystoneArcVaultUnlocked)) 'Vault starts locked'
