@@ -8,6 +8,7 @@ Run `Launch-LocalDev.bat` from this repository on your **personal Windows PC** a
 - Startup: Passes -LocalDev so the host does not import Arc or request an unlock. The GUI remains available, including local diagnostics.
 - Boundary: Remote GitHub/GitLab operations and AI still require authorized provider credentials. This is not a simulated Git provider.
 - Diagnostics / manual check: `powershell.exe -NoProfile -File Start-KeystoneWeb.ps1 -LocalDev -NoBrowser`.
+- Lifecycle: same as the production launcher. The host stops itself when its browser tab closes; `Launch-LocalDev.bat --stay` keeps it running, `--replace` restarts without asking, and `Stop-Keystone.ps1` stops any leftover host.
 
 ## Workflow
 

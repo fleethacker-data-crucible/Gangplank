@@ -47,6 +47,8 @@ function Initialize-KeystoneConfig {
             LastUsed     = $null
             Repositories = [PSCustomObject]@{}
             LogLevel     = "INFO"
+            # false keeps the browser host running after its tab closes (same as KEYSTONE_AUTO_STOP=0).
+            AutoStop     = $true
         }
         $default | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
         Write-KeystoneLog -Level INFO -Message "Created default config at $ConfigPath"

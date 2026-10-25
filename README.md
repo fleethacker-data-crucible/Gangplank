@@ -6,7 +6,16 @@ Browser-first, no-Git-training development workspace built for Windows PowerShel
 
 ## Launch
 Double-click Launch-Keystone.bat for the browser UI. For the classic text menu run Launch-Keystone.bat -Cli. Or run Start-KeystoneWeb.ps1 from an approved PowerShell session.
-The server binds to http://localhost:8769/. Press Ctrl+C in its PowerShell window to stop. If HttpListener requires a URL reservation, work with your IT administrator.
+The server binds to http://localhost:8769/. If HttpListener requires a URL reservation, work with your IT administrator.
+
+**Stopping.** The browser tab owns the server. Keystone stops itself about 20 seconds after its last tab closes (5 seconds when the browser reports the tab closing); a reload or a second open tab keeps it running. It never stops in the middle of a request such as a save or a download. Other ways to stop it:
+- **End session** at the bottom of the left navigation.
+- Ctrl+C in its PowerShell window.
+- `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Stop-Keystone.ps1` stops every running Keystone host, including one in a hidden window, without needing its process ID. Each host gets up to 30 seconds to finish its current request before it is killed.
+
+**One instance.** If Keystone is already running from this folder, the launcher shows it and asks *Stop it and start fresh?* (Enter = yes). `Launch-Keystone.bat --replace` answers yes without asking. `Launch-Keystone.bat --stay` keeps the server running after the tab closes. To turn auto-stop off permanently, set `KEYSTONE_AUTO_STOP=0` in the environment or `"AutoStop": false` in `config/keystone-config.json` (`KEYSTONE_AUTO_STOP=1` overrides the config file). Options pass through both launchers, for example `Launch-Keystone.bat -NoBrowser 19000 --stay`.
+
+**Runtime files.** While it runs, the host writes `Logs\keystone-server-<pid>.json` (pid, port, url, start time; never the session token) and deletes it when it stops. The launcher and `Stop-Keystone.ps1` read these files and delete stale ones whose process has gone.
 
 **Restricted PowerShell launch compatibility:** The batch file uses the same process-scoped `-STA -NoProfile -ExecutionPolicy Bypass` startup switches as ARC and Cascade. This applies only to the launched process and does not modify your device's execution-policy settings or override enforced Group Policy, application control, or IT authorization requirements.
 
@@ -64,7 +73,7 @@ Windows PowerShell 5.1: run tests/SmartSave.Tests.ps1 and tests/Workspace.Tests.
 - Deprecated legacy bulk upload API remains available to existing module consumers; new workflows should use Smart Save.
 
 ## Source layout
-Start-KeystoneWeb.ps1 hosts the browser API; web/index.html is the UI; Core/Workspace.ps1 provides the safe save workflow; Core/SmartSave.ps1 generates titles; Core/AI.ps1 handles approved AI streaming; Providers/ contains native GitHub and GitLab REST adapters; ArcBridge.ps1 integrates ARC; Keystone.ps1 is the CLI.
+Start-KeystoneWeb.ps1 hosts the browser API; Core/Lifecycle.ps1 holds the tab-presence rule, runtime files and instance discovery used by the host and Stop-Keystone.ps1; web/index.html is the UI (web/heartbeat-worker.js sends its heartbeat); Core/Workspace.ps1 provides the safe save workflow; Core/SmartSave.ps1 generates titles; Core/AI.ps1 handles approved AI streaming; Providers/ contains native GitHub and GitLab REST adapters; ArcBridge.ps1 integrates ARC; Keystone.ps1 is the CLI.
 
 
 ## Recovery / repository insight interface
