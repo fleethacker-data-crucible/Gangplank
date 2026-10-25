@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 # Deterministic, offline-first change summaries. No file contents leave the workstation.
-function New-KeystoneSmartMessage {
+function New-GangplankSmartMessage {
     [CmdletBinding()]
     param(
         [string[]]$Added = @(),
@@ -32,7 +32,7 @@ function New-KeystoneSmartMessage {
         Source = $source; Files = $all
     }
 }
-function Get-KeystoneSmartSavePrompt {
+function Get-GangplankSmartSavePrompt {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Diff)
     # Send only file paths/statuses; an approved AI adapter can add sanitized diffs.

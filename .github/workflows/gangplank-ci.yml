@@ -1,6 +1,6 @@
-name: Keystone checks
+name: Gangplank checks
 # Runs on the self-hosted Windows build PC. Tests use temp folders, LocalDev and a
-# synthetic GitHub only: no credentials, no ARC vault, no network services.
+# synthetic GitHub only: no credentials, no Lazarette vault, no network services.
 on:
   push:
     branches: [main, 'feature/**', 'fix/**']
@@ -9,7 +9,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: keystone-ci-${{ github.ref }}
+  group: gangplank-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -40,8 +40,8 @@ jobs:
             foreach ($err in @($e | Where-Object { $_.ErrorId -ne 'TypeNotFound' })) { $bad++; Write-Host ("::error file={0},line={1}::{2}" -f $err.Extent.File, $err.Extent.StartLineNumber, $err.Message) }
           }
           if ($bad) { exit 1 }
-          Import-Module .\Keystone.psm1 -Force -WarningAction SilentlyContinue
-          Write-Host ('Module loads under {0}: {1} functions' -f $PSVersionTable.PSVersion, (Get-Module Keystone).ExportedFunctions.Count)
+          Import-Module .\Gangplank.psm1 -Force -WarningAction SilentlyContinue
+          Write-Host ('Module loads under {0}: {1} functions' -f $PSVersionTable.PSVersion, (Get-Module Gangplank).ExportedFunctions.Count)
 
   powershell:
     name: Windows PowerShell 5.1 tests
@@ -52,12 +52,12 @@ jobs:
       - name: Offline module tests
         shell: powershell
         env:
-          # The runner is a real user account: keep its Keystone credentials and session out of reach.
-          LOCALAPPDATA: ${{ runner.temp }}\keystone-appdata
+          # The runner is a real user account: keep its Gangplank credentials and session out of reach.
+          LOCALAPPDATA: ${{ runner.temp }}\gangplank-appdata
         run: |
           $failed = $false
-          # Each suite in its own process: ARC's engine and the module load once per process.
-          foreach ($t in @('SmartSave','Workspace','ProviderSafety','Credentials','Intelligence','Sentinel','RepositoryInsights','RepositoryIntegrity','ArcIntegration','ArcCoreOnly','Arc5Contract','Arc5Real','WebHost')) {
+          # Each suite in its own process: Lazarette's engine and the module load once per process.
+          foreach ($t in @('SmartSave','Workspace','ProviderSafety','Credentials','Intelligence','Sentinel','RepositoryInsights','RepositoryIntegrity','LazaretteIntegration','LazaretteCoreOnly','LazaretteContract','LazaretteReal','LazaretteNames','WebHost')) {
             Write-Host "== $t"
             .\.github\ci-run.ps1 -Title "$t tests" -Command "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\$t.Tests.ps1"
             if ($LASTEXITCODE -ne 0) { $failed = $true }
@@ -84,23 +84,23 @@ jobs:
       - name: Real host under Windows PowerShell 5.1 against the synthetic GitHub
         shell: powershell
         env:
-          # The runner is a real user account: keep its Keystone credentials and session out of reach.
-          LOCALAPPDATA: ${{ runner.temp }}\keystone-appdata
-          KEYSTONE_PWSH: powershell.exe
+          # The runner is a real user account: keep its Gangplank credentials and session out of reach.
+          LOCALAPPDATA: ${{ runner.temp }}\gangplank-appdata
+          GANGPLANK_PWSH: powershell.exe
         run: |
           .\.github\ci-run.ps1 -Title 'Host e2e' -Command 'node --test tests/e2e/host.e2e.mjs'
           exit $LASTEXITCODE
       - name: UI in a real browser (Edge, Playwright installed to the runner temp folder)
         shell: powershell
         env:
-          # The runner is a real user account: keep its Keystone credentials and session out of reach.
-          LOCALAPPDATA: ${{ runner.temp }}\keystone-appdata
-          KEYSTONE_PWSH: powershell.exe
-          KEYSTONE_BROWSER_CHANNEL: msedge
+          # The runner is a real user account: keep its Gangplank credentials and session out of reach.
+          LOCALAPPDATA: ${{ runner.temp }}\gangplank-appdata
+          GANGPLANK_PWSH: powershell.exe
+          GANGPLANK_BROWSER_CHANNEL: msedge
         run: |
-          $pw = Join-Path $env:RUNNER_TEMP 'keystone-pw'
+          $pw = Join-Path $env:RUNNER_TEMP 'gangplank-pw'
           .\.github\ci-run.ps1 -Title 'Install Playwright' -Command "npm install --prefix `"$pw`" playwright@1.63.0 --no-audit --no-fund --silent"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $env:KEYSTONE_PLAYWRIGHT = Join-Path $pw 'node_modules\playwright'
+          $env:GANGPLANK_PLAYWRIGHT = Join-Path $pw 'node_modules\playwright'
           .\.github\ci-run.ps1 -Title 'Browser e2e' -Command 'node --test tests/e2e/browser.e2e.mjs'
           exit $LASTEXITCODE

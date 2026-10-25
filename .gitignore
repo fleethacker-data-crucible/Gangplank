@@ -1,5 +1,5 @@
 Logs/
-# Older Keystone versions kept workspaces here; new ones go to %USERPROFILE%\Keystone.
+# Older Gangplank versions kept workspaces here; new ones go to %USERPROFILE%\Gangplank.
 work/
 *.log
 *.tmp

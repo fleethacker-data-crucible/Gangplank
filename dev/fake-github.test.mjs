@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startFakeGitHub, crc32, DEFAULT_TOKEN, EMPTY_TREE_SHA } from './fake-github.mjs';
 
-const REPO = 'keystone-demo/sample';
+const REPO = 'gangplank-demo/sample';
 let fake;
 
 before(async () => { fake = await startFakeGitHub({ port: 0 }); });
@@ -15,7 +15,7 @@ after(async () => { await fake?.close(); });
 beforeEach(async () => { await fetch(`${fake.url}/__fake/reset`, { method: 'POST' }); });
 
 async function api(method, path, body, { token = DEFAULT_TOKEN, redirect = 'manual', raw = false } = {}) {
-  const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'Keystone' };
+  const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'Gangplank' };
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const res = await fetch(`${fake.url}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), redirect });
@@ -81,11 +81,11 @@ test('every /repos call requires the bearer token; unknown repo is 404', async (
   assert.equal(ok.json.default_branch, 'main');
   assert.equal(ok.json.private, true);
   assert.equal(ok.json.visibility, 'private');
-  assert.match(ok.json.html_url, /keystone-demo\/sample$/);
-  const missing = await api('GET', '/repos/keystone-demo/nope');
+  assert.match(ok.json.html_url, /gangplank-demo\/sample$/);
+  const missing = await api('GET', '/repos/gangplank-demo/nope');
   assert.equal(missing.status, 404);
   assert.equal(missing.json.message, 'Not Found');
-  const pub = await api('GET', '/repos/keystone-demo/public-site');
+  const pub = await api('GET', '/repos/gangplank-demo/public-site');
   assert.equal(pub.json.visibility, 'public');
   assert.equal(pub.json.private, false);
 });
@@ -131,10 +131,10 @@ test('ref lookup: 404 for a missing branch, object.sha for a found one, encoded 
   assert.equal(encodedSlash.json.object.sha, literal.json.object.sha);
   assert.notEqual(literal.json.object.sha, main.json.object.sha);
   // Create and read back a branch whose segment needs encoding.
-  const created = await api('POST', `/repos/${REPO}/git/refs`, { ref: 'refs/heads/keystone/work-100%', sha: main.json.object.sha });
+  const created = await api('POST', `/repos/${REPO}/git/refs`, { ref: 'refs/heads/gangplank/work-100%', sha: main.json.object.sha });
   assert.equal(created.status, 201);
-  assert.equal((await api('GET', `/repos/${REPO}/git/ref/heads/${refPath('keystone/work-100%')}`)).json.object.sha, main.json.object.sha);
-  const dup = await api('POST', `/repos/${REPO}/git/refs`, { ref: 'refs/heads/keystone/work-100%', sha: main.json.object.sha });
+  assert.equal((await api('GET', `/repos/${REPO}/git/ref/heads/${refPath('gangplank/work-100%')}`)).json.object.sha, main.json.object.sha);
+  const dup = await api('POST', `/repos/${REPO}/git/refs`, { ref: 'refs/heads/gangplank/work-100%', sha: main.json.object.sha });
   assert.equal(dup.status, 422);
   assert.equal(dup.json.message, 'Reference already exists');
 });
@@ -159,15 +159,15 @@ test('seed stores real git object SHAs and the executable mode', async () => {
 });
 
 test('blob -> tree -> commit -> ref: modify a nested file, delete another, keep 100755', async () => {
-  // Same sequence as Invoke-KeystoneWorkspaceSave, on a work branch.
+  // Same sequence as Invoke-GangplankWorkspaceSave, on a work branch.
   const mainSha = await headOf('main');
-  const branch = 'keystone/work-20261024-abc123';
+  const branch = 'gangplank/work-20261024-abc123';
   assert.equal((await api('POST', `/repos/${REPO}/git/refs`, { ref: `refs/heads/${branch}`, sha: mainSha })).status, 201);
   const head = await headOf(branch);
   const prior = (await api('GET', `/repos/${REPO}/git/commits/${head}`)).json;
   assert.equal(prior.sha, head);
 
-  const newGuide = '# Guide\n\nRewritten by Keystone.\n';
+  const newGuide = '# Guide\n\nRewritten by Gangplank.\n';
   const newBuild = '#!/bin/sh\necho "still executable"\n';
   const b1 = await api('POST', `/repos/${REPO}/git/blobs`, { content: Buffer.from(newGuide).toString('base64'), encoding: 'base64' });
   assert.equal(b1.status, 201);
@@ -223,7 +223,7 @@ test('blob -> tree -> commit -> ref: modify a nested file, delete another, keep 
   assert.equal(byName['docs/guide.md'], 'modified');
   assert.equal(byName['src/deep/er/new.txt'], 'added');
 
-  const pr = await api('POST', `/repos/${REPO}/pulls`, { title: 'Keystone save', head: branch, base: 'main', body: '' });
+  const pr = await api('POST', `/repos/${REPO}/pulls`, { title: 'Gangplank save', head: branch, base: 'main', body: '' });
   assert.equal(pr.status, 201);
   assert.equal(pr.json.number, 3);
   assert.match(pr.json.html_url, /\/pull\/3$/);
@@ -236,7 +236,7 @@ test('blob -> tree -> commit -> ref: modify a nested file, delete another, keep 
 
 test('non-fast-forward ref updates are rejected unless forced', async () => {
   const main = await headOf('main');
-  const work = 'keystone/nff';
+  const work = 'gangplank/nff';
   await api('POST', `/repos/${REPO}/git/refs`, { ref: `refs/heads/${work}`, sha: main });
   const prior = (await api('GET', `/repos/${REPO}/git/commits/${main}`)).json;
   const blob = await api('POST', `/repos/${REPO}/git/blobs`, { content: 'mine\n' });
@@ -276,7 +276,7 @@ test('zipball 302s to codeload; codeload needs no auth and serves a valid zip', 
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('content-type'), 'application/zip');
   const entries = unzip(Buffer.from(await res.arrayBuffer()));
-  const top = `keystone-demo-sample-${head.slice(0, 7)}/`;
+  const top = `gangplank-demo-sample-${head.slice(0, 7)}/`;
   assert.ok([...entries.keys()].every((n) => n.startsWith(top)), 'single top-level folder');
   assert.ok(entries.has(top));
   const files = await treeMap((await api('GET', `/repos/${REPO}/git/commits/${head}`)).json.tree.sha);
@@ -344,12 +344,12 @@ test('advance pushes an outside commit and reset restores the seed', async () =>
 });
 
 test('empty repository: git/ref answers 409 like GitHub, Contents API initialises it', async () => {
-  const E = '/repos/keystone-demo/empty';
+  const E = '/repos/gangplank-demo/empty';
   const ref = await api('GET', `${E}/git/ref/heads/main`);
   assert.equal(ref.status, 409);
   assert.equal((await api('POST', `${E}/git/blobs`, { content: 'x' })).status, 409);
   assert.deepEqual((await api('GET', `${E}/branches?per_page=100&page=1`)).json, []);
-  const put = await api('PUT', `${E}/contents/README.md`, { message: 'Initialize repository (Keystone)', content: Buffer.from('hi\n').toString('base64'), branch: 'main' });
+  const put = await api('PUT', `${E}/contents/README.md`, { message: 'Initialize repository (Gangplank)', content: Buffer.from('hi\n').toString('base64'), branch: 'main' });
   assert.equal(put.status, 201);
   assert.match(put.json.commit.sha, /^[0-9a-f]{40}$/);
   const after = await api('GET', `${E}/git/ref/heads/main`);

@@ -17,7 +17,7 @@ assert.equal(scripts[0][2].trim(),'','No inline script allowed');
 assert.doesNotMatch(html,/<style\b/i,'No inline <style> allowed');
 assert.doesNotMatch(html,/\sstyle="/i,'No inline style attributes allowed');
 assert.doesNotMatch(html,/\son[a-z]+=/i,'No inline event handlers allowed');
-assert.doesNotMatch(html+js,/__KEYSTONE_(CSRF|NONCE)__/,'Old CSRF/nonce placeholders must be gone');
+assert.doesNotMatch(html+js,/__GANGPLANK_(CSRF|NONCE)__/,'Old CSRF/nonce placeholders must be gone');
 assert.doesNotMatch(js,/\.innerHTML|insertAdjacentHTML|document\.write|\beval\(/,'Use textContent/DOM APIs only');
 assert.match(html,/<link rel="stylesheet" href="app\.css">/,'Stylesheet link missing');
 
@@ -30,9 +30,9 @@ for(const tab of ['overview','changes','branches','compare','activity','reviews'
 }
 for(const route of ['/api/branches','/api/history','/api/compare','/api/reviews','/api/insights','/api/sentinel','/api/session','/api/jobs/','/api/credentials','/api/integrations/arc','/api/audit','/api/chat','/api/settings','/api/settings/workspace','/api/settings/intelligence','/api/ai/detect','/api/ai/test'])
  assert.ok(js.includes(route),'UI missing route: '+route);
-assert.match(js,/'X-Keystone-Client'/,'API calls must send the client header');
+assert.match(js,/'X-Gangplank-Client'/,'API calls must send the client header');
 // Lifecycle: the tab owns the local service (heartbeat, unload beacon, End session).
-for(const piece of ["'/api/heartbeat'","sendBeacon","'pagehide'","'/api/session/stop'","'X-Keystone-Intent':'end-session'","new Worker('/heartbeat-worker.js')"]) assert.ok(js.includes(piece),'UI missing lifecycle piece: '+piece);
+for(const piece of ["'/api/heartbeat'","sendBeacon","'pagehide'","'/api/session/stop'","'X-Gangplank-Intent':'end-session'","new Worker('/heartbeat-worker.js')"]) assert.ok(js.includes(piece),'UI missing lifecycle piece: '+piece);
 assert.match(html,/<nav[^>]*>[\s\S]*id="endSession"[\s\S]*<\/nav>/,'End session must be in the main navigation');
 assert.match(js,/setInterval\(beatNow,5000\)/,'Fallback heartbeat must run every 5 s');
 assert.ok(!/[?&](session|client)=/.test(js),'Session secrets must never go in a query string');
@@ -48,7 +48,7 @@ new vm.Script(worker,{filename:'web/heartbeat-worker.js'});
  assert.equal(calls.length,1,'worker beats immediately');
  assert.equal(timers[0].ms,5000,'worker beats every 5 s');
  assert.equal(calls[0].u,'/api/heartbeat');
- assert.equal(calls[0].o.headers['X-Keystone-Client'],'tok');
+ assert.equal(calls[0].o.headers['X-Gangplank-Client'],'tok');
  assert.equal(calls[0].o.credentials,'same-origin','worker heartbeat must send the session cookie');
  assert.deepEqual(JSON.parse(calls[0].o.body),{tab:'t1',leaving:false});
  timers[0].f();assert.equal(calls.length,1,'only one heartbeat in flight (the host serves one request at a time)');
