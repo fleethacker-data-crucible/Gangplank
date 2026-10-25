@@ -17,8 +17,10 @@ if ($arcAuth.Unlocked) {
     Write-Host '[+] ARC ready for GitHub and GitLab credentials.' -ForegroundColor Green
 } elseif ($arcAuth.Loaded) {
     Write-Host '[!] ARC loaded but locked. Only configured environment tokens can be used.' -ForegroundColor Yellow
+} elseif ($arcAuth.PSObject.Properties['Configured'] -and -not $arcAuth.Configured) {
+    Write-Host '[i] ARC not configured (optional). Using environment or saved Keystone credentials.' -ForegroundColor DarkGray
 } else {
-    Write-Host '[!] ARC not available. Set ARC_PATH or use approved environment tokens.' -ForegroundColor Yellow
+    Write-Host '[!] ARC is configured but not available. Check the ARC folder in Integrations.' -ForegroundColor Yellow
 }
 $cfg = Get-KeystoneConfig
 Write-Host "    gitmil -> $($cfg.ArcItems.GitLab) | github -> $($cfg.ArcItems.GitHub)" -ForegroundColor DarkGray

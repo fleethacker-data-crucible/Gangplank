@@ -100,6 +100,10 @@ function Parse-KeystoneRepoUrl {
     $Url = $Url.TrimEnd('/')
     if ($Url -match '\.git$') { $Url = $Url.Substring(0, $Url.Length - 4) }
 
+    if (Test-KeystoneDevRepositoryUrl -Url $Url) {
+        $devBase = Get-KeystoneDevProvider
+        return [PSCustomObject]@{ Provider = 'GitHub'; BaseUrl = $devBase; ProjectPath = $Url.Substring($devBase.Length).Trim('/') }
+    }
     if ($Url -match '^(https?://[^/]+)/(.+)$') {
         $base = $Matches[1]
         $path = $Matches[2]

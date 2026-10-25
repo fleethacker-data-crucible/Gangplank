@@ -1,5 +1,7 @@
 # Keystone Enterprise — Implementation roadmap
 
+> Superseded by [ROADMAP.md](ROADMAP.md) (2026-10-24). Kept for history.
+
 ## Current baseline (October 2026)
 PowerShell 5.1, GitHub/GitLab API providers, archive download, folder upload, GitLab merge requests, ARC token bridge, CLI menu. No production browser host or integrated AI service exists in this repository yet.
 

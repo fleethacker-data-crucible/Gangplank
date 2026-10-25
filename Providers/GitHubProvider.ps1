@@ -30,69 +30,20 @@ class GitHubProvider : GitProviderBase {
         return $h
     }
 
-    [void] EnsureTls() {
-        try {
-            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        } catch { }
-    }
-
     [object] InvokeApi([string]$method, [string]$endpoint, [object]$body, [string]$outFile) {
-        $this.EnsureTls()
         $uri = "$($this.ApiRoot)/$($endpoint.TrimStart('/'))"
-        $headers = $this.GetAuthHeaders($method)
-        Write-KeystoneLog -Level DEBUG -Message "GitHub $method $uri"
-
-        $params = @{
-            Uri             = $uri
-            Method          = $method
-            Headers         = $headers
-            UseBasicParsing = $true
-            ErrorAction     = "Stop"
-        }
+        Write-KeystoneLog -Level DEBUG -Message "GitHub $method $(Get-KeystoneSafeUrl $uri)"
         if (-not [string]::IsNullOrWhiteSpace($outFile)) {
-            $params["OutFile"] = $outFile
-            try {
-                Invoke-WebRequest @params | Out-Null
-                return $true
-            }
-            catch {
-                throw $this.FormatApiError($method, $endpoint, $uri, $_)
-            }
+            [void](Invoke-KeystoneDownload -Provider 'GitHub' -Uri $uri -AuthHeaders $this.GetAuthHeaders('GET') -OutFile $outFile)
+            return $true
         }
+        $payload = $null
         if ($null -ne $body) {
-            if ($body -is [string]) {
-                $params["Body"] = $body
-            }
-            else {
-                $params["Body"] = ($body | ConvertTo-Json -Depth 20 -Compress)
-            }
+            $payload = if ($body -is [string]) { $body } else { ($body | ConvertTo-Json -Depth 20 -Compress) }
         }
-        try {
-            return (Invoke-RestMethod @params)
-        }
-        catch {
-            throw $this.FormatApiError($method, $endpoint, $uri, $_)
-        }
-    }
-
-    [string] FormatApiError([string]$method, [string]$endpoint, [string]$uri, $err) {
-        $status = $null
-        $detail = $err.Exception.Message
-        try {
-            $resp = $err.Exception.Response
-            if ($resp) {
-                $status = [int]$resp.StatusCode
-                $stream = $resp.GetResponseStream()
-                if ($stream) {
-                    $reader = New-Object System.IO.StreamReader($stream)
-                    $bodyText = $reader.ReadToEnd()
-                    $reader.Close()
-                    if ($bodyText) { $detail = "$detail | $bodyText" }
-                }
-            }
-        } catch { }
-        Write-KeystoneLog -Level ERROR -Message ("GitHub API fail {0} {1} status={2} {3}" -f $method, $uri, $status, $detail)
-        return ("GitHub API {0} {1} failed (HTTP {2}): {3}" -f $method, $endpoint, $status, $detail)
+        $response = Invoke-KeystoneHttpRequest -Method $method -Uri $uri -Headers $this.GetAuthHeaders($method) -Body $payload
+        $endpointPath = ($endpoint.TrimStart('/') -split '\?')[0]
+        return (ConvertFrom-KeystoneApiResponse -Provider 'GitHub' -Method $method -Endpoint $endpointPath -Response $response)
     }
 
     [object] InvokeApi([string]$method, [string]$endpoint) {
@@ -104,22 +55,15 @@ class GitHubProvider : GitProviderBase {
     }
 
     [void] DownloadArchive([string]$projectPath, [string]$ref, [string]$outZip) {
-        $this.EnsureTls()
+        # api.github.com answers with a redirect to codeload.github.com; the token
+        # is sent to the API host only (Invoke-KeystoneDownload).
         $refEnc = [uri]::EscapeDataString($ref)
         $uri = "$($this.ApiRoot)/repos/$projectPath/zipball/$refEnc"
-        Write-KeystoneLog -Level INFO -Message "GitHub zipball $uri"
-        $headers = $this.GetAuthHeaders("GET")
-        try {
-            Invoke-WebRequest -Uri $uri -Headers $headers -OutFile $outZip `
-                -UseBasicParsing -MaximumRedirection 8 -ErrorAction Stop | Out-Null
-            if ((Test-Path -LiteralPath $outZip) -and ((Get-Item -LiteralPath $outZip).Length -gt 0)) {
-                return
-            }
+        Write-KeystoneLog -Level INFO -Message "GitHub zipball $(Get-KeystoneSafeUrl $uri)"
+        [void](Invoke-KeystoneDownload -Provider 'GitHub' -Uri $uri -AuthHeaders $this.GetAuthHeaders('GET') -OutFile $outZip)
+        if (-not (Test-Path -LiteralPath $outZip) -or (Get-Item -LiteralPath $outZip).Length -eq 0) {
+            throw ("NOT_FOUND|GitHub archive for {0} @ '{1}' was empty. Empty repositories have no archive until the first commit." -f $projectPath, $ref)
         }
-        catch {
-            throw ("GitHub archive download failed for {0} @ '{1}'. Empty repos return 404 until first commit. API: {2}" -f $projectPath, $ref, $_.Exception.Message)
-        }
-        throw ("GitHub archive download failed for {0} @ '{1}'" -f $projectPath, $ref)
     }
 
     [object] ResolveProject([string]$projectPath) {
@@ -138,12 +82,8 @@ class GitHubProvider : GitProviderBase {
         $all = @()
         $page = 1
         do {
-            try {
-                $batch = $this.InvokeApi("GET", "repos/$projectPath/branches?per_page=100&page=$page")
-            }
-            catch {
-                break
-            }
+            # Errors propagate: a silently partial branch list looks like real data.
+            $batch = $this.InvokeApi("GET", "repos/$projectPath/branches?per_page=100&page=$page")
             if (-not $batch) { break }
             $all += @($batch | ForEach-Object { $_.name })
             $page++
@@ -152,16 +92,59 @@ class GitHubProvider : GitProviderBase {
     }
 
     [string] GetRefSha([string]$projectPath, [string]$branch) {
+        # $null means the branch does not exist (404). Any other failure (401, 403,
+        # network) is thrown, so callers do not mistake it for "the branch moved".
+        $refPath = ConvertTo-KeystoneRefPath -Ref $branch
         try {
-            $ref = $this.InvokeApi("GET", "repos/$projectPath/git/ref/heads/$branch")
-            if ($ref -and $ref.object -and $ref.object.sha) {
-                return [string]$ref.object.sha
-            }
+            $ref = $this.InvokeApi("GET", "repos/$projectPath/git/ref/heads/$refPath")
         }
         catch {
-            Write-KeystoneLog -Level DEBUG -Message "GetRefSha($branch): $($_.Exception.Message)"
+            # 404: no such branch. 409: GitHub's answer for a repository with no commits yet.
+            if ([string]$_.Exception.Message -match '^(NOT_FOUND|CONFLICT)\|') {
+                Write-KeystoneLog -Level DEBUG -Message "GetRefSha($branch): branch not found"
+                return $null
+            }
+            throw
+        }
+        if ($ref -and $ref.object -and $ref.object.sha) {
+            return [string]$ref.object.sha
         }
         return $null
+    }
+
+    [hashtable] GetPathModes([string]$projectPath, [string]$treeSha, [string[]]$paths) {
+        # Existing Git file modes (100644, 100755, 120000...) for the given paths,
+        # walking only the directories that contain them. Paths not in the tree
+        # are absent from the result.
+        $modes = @{}
+        $trees = @{ '' = $treeSha }
+        $listed = @{}
+        foreach ($p in @($paths | Sort-Object -Unique)) {
+            $parts = @($p -split '/')
+            $dir = ''
+            $ok = $true
+            for ($i = 0; $i -lt $parts.Count; $i++) {
+                if (-not $listed.ContainsKey($dir)) {
+                    if (-not $trees.ContainsKey($dir)) { $ok = $false; break }
+                    $listing = $this.InvokeApi('GET', "repos/$projectPath/git/trees/$($trees[$dir])")
+                    $entries = @{}
+                    foreach ($e in @($listing.tree)) {
+                        $child = if ($dir) { "$dir/$($e.path)" } else { [string]$e.path }
+                        $entries[$child] = $e
+                        if ($e.type -eq 'tree') { $trees[$child] = [string]$e.sha }
+                    }
+                    $listed[$dir] = $entries
+                }
+                $next = if ($dir) { "$dir/$($parts[$i])" } else { $parts[$i] }
+                if ($i -eq $parts.Count - 1) {
+                    $entry = $listed[$dir][$next]
+                    if ($entry -and $entry.type -eq 'blob') { $modes[$p] = [string]$entry.mode }
+                } else {
+                    $dir = $next
+                }
+            }
+        }
+        return $modes
     }
 
     [bool] IsEmptyRepo([string]$projectPath) {
@@ -233,12 +216,15 @@ class GitHubProvider : GitProviderBase {
         $existing = $this.GetRefSha($projectPath, $branch)
         Write-KeystoneLog -Level INFO -Message ("Ref heads/{0} existing={1} new={2}" -f $branch, $existing, $commitSha)
 
+        # Never forced: a branch that moved since our parent commit is rejected
+        # as a non-fast-forward. The $force parameter is kept for API stability.
         $body = @{
             sha   = $commitSha
             force = $false
         }
+        $refPath = ConvertTo-KeystoneRefPath -Ref $branch
         if ($existing) {
-            $this.InvokeApi("PATCH", "repos/$projectPath/git/refs/heads/$branch", $body) | Out-Null
+            $this.InvokeApi("PATCH", "repos/$projectPath/git/refs/heads/$refPath", $body) | Out-Null
             return
         }
         try {
@@ -249,8 +235,11 @@ class GitHubProvider : GitProviderBase {
             $this.InvokeApi("POST", "repos/$projectPath/git/refs", $create) | Out-Null
         }
         catch {
-            Write-KeystoneLog -Level WARN -Message "POST ref failed - trying PATCH force: $($_.Exception.Message)"
-            $this.InvokeApi("PATCH", "repos/$projectPath/git/refs/heads/$branch", $body) | Out-Null
+            # Only "already exists" (created meanwhile) falls back to a non-forced update;
+            # any other failure (invalid name, permissions) is reported as it is.
+            if ([string]$_.Exception.Message -notmatch '^CONFLICT\|') { throw }
+            Write-KeystoneLog -Level WARN -Message "Branch $branch appeared while saving; updating it without force."
+            $this.InvokeApi("PATCH", "repos/$projectPath/git/refs/heads/$refPath", $body) | Out-Null
         }
     }
 

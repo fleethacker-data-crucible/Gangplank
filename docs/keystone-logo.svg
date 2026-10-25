@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Keystone">
+  <!-- Keystone mark: the wedge that holds an arch together, with a branch cut through it. -->
+  <defs>
+    <linearGradient id="ks-g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8ff5df"/>
+      <stop offset="1" stop-color="#4fb8ff"/>
+    </linearGradient>
+    <filter id="ks-glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <path d="M14.5 9 H49.5 Q52 9 51.6 11.5 L44.2 53.2 Q43.8 55 42 55 H22 Q20.2 55 19.8 53.2 L12.4 11.5 Q12 9 14.5 9 Z" fill="url(#ks-g)" filter="url(#ks-glow)"/>
+  <g fill="none" stroke="#09121f" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M32 47 V18"/>
+    <path d="M32 34 C32 28 40 28 40 21"/>
+  </g>
+  <g fill="#09121f">
+    <circle cx="32" cy="47" r="3.6"/>
+    <circle cx="32" cy="18" r="3.6"/>
+    <circle cx="40" cy="20.5" r="3.6"/>
+  </g>
+</svg>

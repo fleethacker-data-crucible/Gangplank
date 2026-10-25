@@ -13,17 +13,21 @@
 .PARAMETER Quiet
   Print nothing unless something was stopped.
 .PARAMETER ThisFolderOnly
-  Only stop hosts started from this Keystone folder (tests use this so they never
-  stop a Keystone you are using from another folder).
+  Only stop hosts started from this Keystone folder.
+.PARAMETER WorkRoot
+  Only stop hosts started with this -WorkRoot (tests and LocalDev use their own
+  folder, so they never stop the Keystone you are working in).
 .EXAMPLE
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Stop-Keystone.ps1
 #>
 [CmdletBinding()]
-param([switch]$Quiet, [switch]$ThisFolderOnly)
+param([switch]$Quiet, [switch]$ThisFolderOnly, [string]$WorkRoot)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 . (Join-Path $root 'Core\Lifecycle.ps1')
-$stopped = @(Stop-KeystoneServerProcesses -Root $root -ThisCheckout:$ThisFolderOnly)
+$stateRoot = $null
+if ($WorkRoot) { $stateRoot = Join-Path $WorkRoot '.keystone' }
+$stopped = @(Stop-KeystoneServerProcesses -Root $root -ThisCheckout:$ThisFolderOnly -StateRoot $stateRoot)
 if ($stopped.Count -gt 0) {
     foreach ($p in $stopped) { Write-Host ('Stopped Keystone ' + (Format-KeystoneServerProcess -Process $p) + '.') -ForegroundColor Yellow }
 } elseif (-not $Quiet) {

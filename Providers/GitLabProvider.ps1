@@ -9,12 +9,6 @@ class GitLabProvider : GitProviderBase {
         $this.ApiRoot = "$($this.BaseUrl)/api/v4"
     }
 
-    [void] EnsureTls() {
-        try {
-            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        } catch { }
-    }
-
     [hashtable] GetAuthHeaders([string]$method) {
         $h = @{ "PRIVATE-TOKEN" = $this.Token }
         if ($method -in @("POST", "PUT", "PATCH")) {
@@ -28,32 +22,19 @@ class GitLabProvider : GitProviderBase {
     }
 
     [object] InvokeApi([string]$method, [string]$endpoint, [object]$body, [string]$outFile) {
-        $this.EnsureTls()
         $uri = "$($this.ApiRoot)/$($endpoint.TrimStart('/'))"
-        $headers = $this.GetAuthHeaders($method)
-        Write-KeystoneLog -Level DEBUG -Message "GitLab $method $uri"
-
-        $params = @{
-            Uri             = $uri
-            Method          = $method
-            Headers         = $headers
-            UseBasicParsing = $true
-            ErrorAction     = "Stop"
-        }
+        Write-KeystoneLog -Level DEBUG -Message "GitLab $method $(Get-KeystoneSafeUrl $uri)"
         if (-not [string]::IsNullOrWhiteSpace($outFile)) {
-            $params["OutFile"] = $outFile
-            Invoke-WebRequest @params | Out-Null
+            [void](Invoke-KeystoneDownload -Provider 'GitLab' -Uri $uri -AuthHeaders $this.GetAuthHeaders('GET') -OutFile $outFile)
             return $true
         }
+        $payload = $null
         if ($null -ne $body) {
-            if ($body -is [string]) {
-                $params["Body"] = $body
-            }
-            else {
-                $params["Body"] = ($body | ConvertTo-Json -Depth 12 -Compress)
-            }
+            $payload = if ($body -is [string]) { $body } else { ($body | ConvertTo-Json -Depth 12 -Compress) }
         }
-        return (Invoke-RestMethod @params)
+        $response = Invoke-KeystoneHttpRequest -Method $method -Uri $uri -Headers $this.GetAuthHeaders($method) -Body $payload
+        $endpointPath = ($endpoint.TrimStart('/') -split '\?')[0]
+        return (ConvertFrom-KeystoneApiResponse -Provider 'GitLab' -Method $method -Endpoint $endpointPath -Response $response)
     }
 
     [object] InvokeApi([string]$method, [string]$endpoint) {
@@ -83,16 +64,13 @@ class GitLabProvider : GitProviderBase {
         $all = @()
         $enc = $this.EncodePath($projectPath)
         $page = 1
-        try {
-            do {
-                $batch = $this.InvokeApi("GET", "projects/$enc/repository/branches?per_page=100&page=$page")
-                if (-not $batch) { break }
-                $all += @($batch | ForEach-Object { $_.name })
-                $page++
-            } while (@($batch).Count -eq 100)
-        } catch {
-            Write-KeystoneLog -Level WARN -Message "GetBranches: $($_.Exception.Message)"
-        }
+        # Errors propagate: a silently partial branch list looks like real data.
+        do {
+            $batch = $this.InvokeApi("GET", "projects/$enc/repository/branches?per_page=100&page=$page")
+            if (-not $batch) { break }
+            $all += @($batch | ForEach-Object { $_.name })
+            $page++
+        } while (@($batch).Count -eq 100 -and $page -le 50)
         return $all
     }
 

@@ -3,10 +3,10 @@
 #  Core/Lifecycle.ps1 - browser presence, runtime files, and
 #  finding / stopping running Keystone web hosts.
 #
-#  Dot-sourced by Start-KeystoneWeb.ps1, Stop-Keystone.ps1 and
-#  tests. Not loaded by Keystone.psm1: the CLI has no server.
-#  Needs nothing else from Keystone, so Stop-Keystone.ps1 can
-#  use it without importing the module.
+#  Loaded by Keystone.psm1 (the web host calls it from the HTTP
+#  loop), and dot-sourced on its own by Start-KeystoneWeb.ps1
+#  (single-instance check before the module and ARC load),
+#  Stop-Keystone.ps1 and tests. Needs nothing else from Keystone.
 # ============================================================
 
 $script:KeystonePresence = $null
@@ -73,8 +73,9 @@ function Register-KeystonePresence {
 
 function Register-KeystoneRequestFinished {
     <#
-      The host handles one request at a time, so heartbeats sent while a long request
-      (save, download, AI stream) runs wait in the HttpListener queue. After such a
+      The host handles one request at a time. Long work runs as background jobs, but a
+      request answered on the loop can still take seconds (a provider read with a 20 s
+      timeout); heartbeats sent meanwhile wait in the listener queue. After such a
       request, give them the leaving grace to arrive before deciding the tab is gone.
     #>
     param([DateTime]$Now = [DateTime]::UtcNow)
@@ -124,6 +125,35 @@ function Test-KeystoneAutoStopEnabled {
     return $true
 }
 
+function Get-KeystoneFullPath {
+    param([string]$Path)
+    if (-not $Path) { return '' }
+    try { return [IO.Path]::GetFullPath($Path).TrimEnd('\','/') } catch { return $Path.TrimEnd('\','/') }
+}
+
+function Test-KeystoneSameStateRoot {
+    <# Same saved-session folder? Windows paths compare case-insensitively. #>
+    param([string]$A, [string]$B)
+    if (-not $A -or -not $B) { return $false }
+    return [string]::Equals((Get-KeystoneFullPath $A), (Get-KeystoneFullPath $B), [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-KeystoneCommandLineStateRoot {
+    <#
+      The saved-session folder a Start-KeystoneWeb.ps1 command line uses: <WorkRoot>\.keystone
+      with -WorkRoot, otherwise %LOCALAPPDATA%\Keystone (same user, so the same variable).
+    #>
+    param([string]$CommandLine)
+    $m = [regex]::Match([string]$CommandLine, '(?i)-WorkRoot\s+(?:"([^"]+)"|''([^'']+)''|(\S+))')
+    if ($m.Success) {
+        $w = $m.Groups[1].Value; if (-not $w) { $w = $m.Groups[2].Value }; if (-not $w) { $w = $m.Groups[3].Value }
+        # [IO.Path]::Combine: Join-Path would fail for a drive that does not exist here.
+        return [IO.Path]::Combine($w, '.keystone')
+    }
+    $appData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } elseif ($env:HOME) { Join-Path $env:HOME '.local/share' } else { [IO.Path]::GetTempPath() }
+    return (Join-Path $appData 'Keystone')
+}
+
 # ---------- runtime files: Logs\keystone-server-<pid>.json ----------
 
 function Get-KeystoneRuntimeDirectory {
@@ -132,8 +162,11 @@ function Get-KeystoneRuntimeDirectory {
 }
 
 function Write-KeystoneRuntimeFile {
-    <# pid, port, url and start time only; never the session (CSRF) token. Returns the path. #>
-    param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][int]$Port, [Parameter(Mandatory)][string]$Url)
+    <#
+      pid, port, url, start time and the saved-session folder only; never the launch
+      link, cookie or client secret. Returns the path.
+    #>
+    param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][int]$Port, [Parameter(Mandatory)][string]$Url, [string]$StateRoot)
     $dir = Get-KeystoneRuntimeDirectory -Root $Root
     if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     $path = Join-Path $dir ('keystone-server-{0}.json' -f $PID)
@@ -142,6 +175,7 @@ function Write-KeystoneRuntimeFile {
         port = $Port
         url = $Url
         startedAt = [DateTime]::UtcNow.ToString('o')
+        stateRoot = (Get-KeystoneFullPath $StateRoot)
     }
     $json = $info | ConvertTo-Json -Compress
     [IO.File]::WriteAllText($path, $json, (New-Object Text.UTF8Encoding($false)))
@@ -164,10 +198,16 @@ function Get-KeystoneServerProcesses {
     .PARAMETER ThisCheckout
       Only hosts started from this folder: the launcher's single-instance check uses
       this, so a test run in another checkout never stops your real session.
+    .PARAMETER StateRoot
+      Only hosts using this saved-session folder (the launcher's single-instance
+      check). Two hosts may run side by side on different ports; two hosts sharing
+      one saved session may not. Tests and LocalDev use their own -WorkRoot, so they
+      never stop your real session.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Root, [switch]$ThisCheckout)
+    param([Parameter(Mandatory)][string]$Root, [switch]$ThisCheckout, [string]$StateRoot)
     $found = @{}
+    $otherSession = @{}
     $dir = Get-KeystoneRuntimeDirectory -Root $Root
     if (Test-Path -LiteralPath $dir) {
         foreach ($f in @(Get-ChildItem -LiteralPath $dir -Filter 'keystone-server-*.json' -File -ErrorAction SilentlyContinue)) {
@@ -184,7 +224,9 @@ function Get-KeystoneServerProcesses {
                         if ($proc.StartTime.ToUniversalTime() -gt $written.AddSeconds(5)) { $live = $false }
                     } catch { }
                 }
-                if ($live) {
+                if ($live -and $StateRoot -and $info.PSObject.Properties['stateRoot'] -and $info.stateRoot -and -not (Test-KeystoneSameStateRoot $StateRoot ([string]$info.stateRoot))) {
+                    $otherSession[$id] = $true
+                } elseif ($live) {
                     $found[$id] = [pscustomobject]@{ Pid = $id; Port = $info.port; Url = [string]$info.url; Started = $info.startedAt; RuntimeFile = $f.FullName }
                 } elseif ($id -ne $PID) {
                     Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue
@@ -200,9 +242,10 @@ function Get-KeystoneServerProcesses {
         foreach ($row in $rows) {
             $id = [int]$row.ProcessId
             $cmd = [string]$row.CommandLine
-            if ($id -eq $PID -or $found.ContainsKey($id) -or -not $cmd) { continue }
+            if ($id -eq $PID -or $found.ContainsKey($id) -or $otherSession.ContainsKey($id) -or -not $cmd) { continue }
             if ($cmd -notmatch 'Start-KeystoneWeb\.ps1') { continue }
             if ($ThisCheckout -and $cmd.IndexOf($hostScript, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+            if ($StateRoot -and -not (Test-KeystoneSameStateRoot $StateRoot (Get-KeystoneCommandLineStateRoot -CommandLine $cmd))) { continue }
             $found[$id] = [pscustomobject]@{ Pid = $id; Port = $null; Url = $null; Started = $row.CreationDate; RuntimeFile = $null }
         }
     } catch { }   # no CIM (non-Windows) or no permission: the runtime files are still used
@@ -249,9 +292,9 @@ function Stop-KeystoneServerProcesses {
       Access denied (an elevated window) is reported as a warning, not thrown.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Root, [switch]$ThisCheckout, [int]$GraceSeconds = 30)
+    param([Parameter(Mandatory)][string]$Root, [switch]$ThisCheckout, [string]$StateRoot, [int]$GraceSeconds = 30)
     $stopped = New-Object System.Collections.Generic.List[object]
-    foreach ($p in @(Get-KeystoneServerProcesses -Root $Root -ThisCheckout:$ThisCheckout)) {
+    foreach ($p in @(Get-KeystoneServerProcesses -Root $Root -ThisCheckout:$ThisCheckout -StateRoot $StateRoot)) {
         $proc = Get-Process -Id $p.Pid -ErrorAction SilentlyContinue
         if (-not $proc) { Remove-KeystoneRuntimeFile -Path $p.RuntimeFile; continue }
         $clean = $false
