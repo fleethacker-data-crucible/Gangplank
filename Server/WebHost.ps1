@@ -9,13 +9,16 @@ function Start-KeystoneWebHost {
         [switch]$LocalDev,
         [string]$DevGitHubUrl,
         [Parameter(Mandatory)][string]$WorkRoot,
+        [Parameter(Mandatory)][string]$StateRoot,
+        [string]$LegacyStateRoot,
+        [switch]$WorkRootFixed,
         [Parameter(Mandatory)][string]$UiRoot
     )
     if ($DevGitHubUrl) {
         if (-not $LocalDev) { throw 'A synthetic provider (-DevGitHubUrl) is only allowed with -LocalDev.' }
         Set-KeystoneDevProvider -GitHubUrl $DevGitHubUrl
     }
-    Initialize-KeystoneApp -WorkRoot $WorkRoot -LocalDev:$LocalDev
+    Initialize-KeystoneApp -WorkRoot $WorkRoot -StateRoot $StateRoot -LegacyStateRoot $LegacyStateRoot -WorkRootFixed:$WorkRootFixed -LocalDev:$LocalDev
     $onReady = {
         param($Url)
         Write-Host ''

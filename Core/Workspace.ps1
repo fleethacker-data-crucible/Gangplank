@@ -34,24 +34,46 @@ function Get-KeystoneRemoteHead {
     return [string]$ref.commit.id
 }
 
+function ConvertTo-KeystoneBranchName {
+    # A friendly name ("Dummy dev") becomes a valid branch name ("dummy-dev"); anything
+    # still invalid is refused with a message a non-Git user can act on.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name)
+    $n = $Name.Trim() -replace '\s+','-'
+    $n = $n.Trim('/','-','.')
+    if ($n.Length -lt 1 -or $n.Length -gt 100 -or $n -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$' -or $n -match '(\.\.|//|@\{|/\.|\.lock($|/)|/$|\.$)') {
+        throw 'BAD_REQUEST|Branch names can use letters, numbers, dashes, dots and slashes (for example dummy-dev or feature/login), up to 100 characters.'
+    }
+    return $n
+}
+
 function New-KeystoneWorkBranch {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session,[string]$Name)
     $base = $Session.DefaultBranch
     $head = Get-KeystoneRemoteHead -Session $Session -Branch $base
     if (-not $head) { throw 'The default branch has no commit. Initialize this repository through the provider first.' }
-    if (-not $Name) { $Name = 'keystone/work-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + ([guid]::NewGuid().ToString('N').Substring(0,6)) }
-    if ($Name.Length -gt 100 -or $Name -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]+$' -or $Name -match '(\.\.|//|@{|/\.|\.lock($|/)|/$)') {
-        throw 'Invalid work branch name.'
+    if ([string]::IsNullOrWhiteSpace($Name)) { $Name = 'keystone/work-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + ([guid]::NewGuid().ToString('N').Substring(0,6)) }
+    $Name = ConvertTo-KeystoneBranchName -Name $Name
+    if ($Name -eq $Session.DefaultBranch) { throw "BAD_REQUEST|'$Name' is the shared default branch. Choose a different name for your work." }
+    if (@($Session.Branches) -contains $Name) { throw "CONFLICT|A branch named '$Name' already exists. Choose another name, or use Explore to download it." }
+    try {
+        if ($Session.Provider -eq 'GitHub') {
+            $payload = @{ ref = "refs/heads/$Name"; sha = $head }
+            [void]$Session.ProviderObj.InvokeApi('POST',"repos/$($Session.ProjectPath)/git/refs",$payload)
+        } elseif ($Session.Provider -eq 'GitLab') {
+            $project = $Session.ProviderObj.EncodePath($Session.ProjectPath)
+            $payload = @{ branch = $Name; ref = $base }
+            [void]$Session.ProviderObj.InvokeApi('POST',"projects/$project/repository/branches",$payload)
+        } else { throw 'Unsupported provider.' }
+    } catch {
+        if ([string]$_.Exception.Message -match '^(CONFLICT|HTTP_400)\|') {
+            throw "CONFLICT|A branch named '$Name' already exists (or the provider does not allow that name). Choose another name."
+        }
+        throw
     }
-    if ($Session.Provider -eq 'GitHub') {
-        $payload = @{ ref = "refs/heads/$Name"; sha = $head }
-        [void]$Session.ProviderObj.InvokeApi('POST',"repos/$($Session.ProjectPath)/git/refs",$payload)
-    } elseif ($Session.Provider -eq 'GitLab') {
-        $project = $Session.ProviderObj.EncodePath($Session.ProjectPath)
-        $payload = @{ branch = $Name; ref = $base }
-        [void]$Session.ProviderObj.InvokeApi('POST',"projects/$project/repository/branches",$payload)
-    } else { throw 'Unsupported provider.' }
+    # Keep the known branch list current, so a second start with the same name is caught here.
+    $Session | Add-Member -MemberType NoteProperty -Name Branches -Value @(@($Session.Branches) + $Name | Where-Object { $_ } | Select-Object -Unique) -Force
     Write-KeystoneAudit -Action 'branch.created' -Data @{ provider = $Session.Provider; project = $Session.ProjectPath; branch = $Name; from = $base; sha = $head }
     $Session.LastBranch = $Name
     $Session.BaselineSha = $null
@@ -63,7 +85,8 @@ function New-KeystoneWorkBranch {
 function Get-KeystoneSafeWorkspacePath {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Base, [Parameter(Mandatory)][string]$Project, [Parameter(Mandatory)][string]$Branch)
-    $folder = Get-KeystoneSafeName ($Project -replace '/', '-')
+    # <root>\<repository>\<branch>, like a normal clone (dumping-grounds\dummy-dev).
+    $folder = Get-KeystoneSafeName ((($Project -split '/') | Where-Object { $_ })[-1])
     $branchName = Get-KeystoneSafeName $Branch
     $path = Join-Path $Base (Join-Path $folder $branchName)
     if (Test-Path -LiteralPath $path) {

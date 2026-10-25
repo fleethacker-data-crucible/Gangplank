@@ -69,13 +69,14 @@ function New-KeystoneSessionFromSnapshot {
 }
 
 function Get-KeystoneSessionStatePath {
-    param([Parameter(Mandatory)][string]$WorkRoot)
-    return (Join-Path (Join-Path $WorkRoot '.keystone') 'session.json')
+    # StateRoot is Keystone's own data folder (%LOCALAPPDATA%\Keystone), never the workspaces.
+    param([Parameter(Mandatory)][string]$StateRoot)
+    return (Join-Path $StateRoot 'session.json')
 }
 
 function Save-KeystoneSessionState {
-    param([Parameter(Mandatory)][string]$WorkRoot,$Session)
-    $path = Get-KeystoneSessionStatePath -WorkRoot $WorkRoot
+    param([Parameter(Mandatory)][string]$StateRoot,$Session)
+    $path = Get-KeystoneSessionStatePath -StateRoot $StateRoot
     if (-not $Session) {
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
         return
@@ -94,8 +95,8 @@ function Save-KeystoneSessionState {
 
 function Read-KeystoneSessionState {
     # Snapshot hashtable from a previous run, or $null. Unreadable state is set aside, not deleted.
-    param([Parameter(Mandatory)][string]$WorkRoot)
-    $path = Get-KeystoneSessionStatePath -WorkRoot $WorkRoot
+    param([Parameter(Mandatory)][string]$StateRoot)
+    $path = Get-KeystoneSessionStatePath -StateRoot $StateRoot
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
     try {
         $doc = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json

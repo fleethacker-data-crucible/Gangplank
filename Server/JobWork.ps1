@@ -17,7 +17,7 @@ function Invoke-KeystoneJobStart {
     param($Shared,[hashtable]$Arguments)
     $session = New-KeystoneSessionFromSnapshot -Snapshot $Arguments.Session -Token $Arguments.Token
     Set-KeystoneJobProgress $Shared 'Creating your work branch'
-    $branch = New-KeystoneWorkBranch -Session $session
+    $branch = New-KeystoneWorkBranch -Session $session -Name ([string]$Arguments.Name)
     Set-KeystoneJobProgress $Shared 'Downloading a fresh copy'
     $folder = Get-KeystoneSafeWorkspacePath -Base $Arguments.WorkRoot -Project $session.ProjectPath -Branch $branch
     [void](Invoke-KeystonePull -Session $session -Branch $branch -LocalPath $folder)
@@ -76,4 +76,16 @@ function Invoke-KeystoneJobChat {
     Invoke-KeystoneAIStream -Question ([string]$Arguments.Question) -Session $context -Token $Arguments.AiToken -OnChunk { param($t) [void]$chunks.Add($t) }.GetNewClosure()
     Set-KeystoneJobProgress $Shared 'Done'
     return [ordered]@{ characters = [int](($chunks | ForEach-Object { $_.Length }) | Measure-Object -Sum).Sum }
+}
+
+function Invoke-KeystoneJobAiDetect {
+    param($Shared,[hashtable]$Arguments)
+    Set-KeystoneJobProgress $Shared 'Asking the endpoint which models it offers'
+    return (Find-KeystoneAiModels -Endpoint ([string]$Arguments.Endpoint) -Token ([string]$Arguments.AiToken) -Current ([string]$Arguments.Current))
+}
+
+function Invoke-KeystoneJobAiTest {
+    param($Shared,[hashtable]$Arguments)
+    Set-KeystoneJobProgress $Shared 'Sending a short test message'
+    return (Test-KeystoneAiConnection -Token ([string]$Arguments.AiToken))
 }

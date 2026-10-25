@@ -1,22 +1,6 @@
 #Requires -Version 5.1
-# Opt-in approved OpenAI-compatible chat. No source code is sent automatically.
-
-function Get-KeystoneAiConfiguration {
-    $url = if ($env:KEYSTONE_AI_URL) { $env:KEYSTONE_AI_URL } else { 'https://api.genai.mil/v1/chat/completions' }
-    $model = if ($env:KEYSTONE_AI_MODEL) { $env:KEYSTONE_AI_MODEL } else { 'gemini-3.8-flash' }
-    $uri = [uri]$url
-    if ($uri.Scheme -ne 'https' -or -not $uri.IsAbsoluteUri -or $uri.UserInfo) {
-        throw 'AI gateway must use a valid HTTPS URL without embedded credentials.'
-    }
-    $allowed = @('api.genai.mil')
-    if ($env:KEYSTONE_AI_ALLOWED_HOSTS) {
-        $allowed += @($env:KEYSTONE_AI_ALLOWED_HOSTS -split ',' | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
-    }
-    if ($uri.Host.ToLowerInvariant() -notin $allowed) {
-        throw 'AI gateway host is not administrator-allowlisted.'
-    }
-    return [pscustomobject]@{ Url = $uri.AbsoluteUri; Model = $model }
-}
+# Advisory AI chat through the configured gateway (Core/Intelligence.ps1).
+# No source code is sent automatically.
 
 function Get-KeystoneAiToken {
     # Environment (KEYSTONE_AI_TOKEN, GENAI_TOKEN), Keystone's store, or configured ARC.
@@ -51,13 +35,14 @@ function Invoke-KeystoneAI {
     param([Parameter(Mandatory)][string]$Question, $Session, [switch]$CommitTitle, [string]$Token)
     $config = Get-KeystoneAiConfiguration
     $token = if ($Token) { $Token } else { Get-KeystoneAiToken }
-    if (-not $token) { throw 'AI not connected. Set KEYSTONE_AI_TOKEN or GENAI_TOKEN, or unlock the ARC genapi item.' }
+    if (-not $token -and $config.Profile -ne 'ollama') { throw 'AI_NOT_CONFIGURED|AI is not connected. Add a GenAI token in Credentials.' }
     $payload = New-KeystoneAiPayload -Question $Question -Session $Session -Model $config.Model -CommitTitle:$CommitTitle
-    $response = Invoke-KeystoneHttpRequest -Method POST -Uri $config.Url -Headers @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json' } -Body ($payload | ConvertTo-Json -Depth 8 -Compress) -TimeoutSec 90
+    if ($config.Profile -eq 'databricks') { $payload.Remove('model'); $payload.Remove('stream') }
+    $response = Invoke-KeystoneHttpRequest -Method POST -Uri $config.Url -Headers (Get-KeystoneAiAuthHeaders -Auth $config.Auth -Token $token) -Body ($payload | ConvertTo-Json -Depth 8 -Compress) -TimeoutSec 90
     $token = $null
     $result = ConvertFrom-KeystoneApiResponse -Provider 'AI' -Method POST -Endpoint (Get-KeystoneSafeUrl $config.Url) -Response $response
-    $answer = [string]$result.choices[0].message.content
-    if (-not $answer) { throw 'AI provider returned an empty answer.' }
+    $answer = Get-KeystoneAiAnswerText -Response $result
+    if (-not $answer) { throw 'AI_EMPTY|The AI gateway returned an empty answer.' }
     return $answer
 }
 
@@ -68,7 +53,12 @@ function Invoke-KeystoneAIStream {
     param([Parameter(Mandatory)][string]$Question, $Session, [Parameter(Mandatory)][scriptblock]$OnChunk, [string]$Token)
     $config = Get-KeystoneAiConfiguration
     $token = if ($Token) { $Token } else { Get-KeystoneAiToken }
-    if (-not $token) { throw 'AI_NOT_CONFIGURED|AI is not connected. Add a GenAI token in Integrations or set KEYSTONE_AI_TOKEN.' }
+    if (-not $token -and $config.Profile -ne 'ollama') { throw 'AI_NOT_CONFIGURED|AI is not connected. Add a GenAI token in Credentials.' }
+    if (-not $config.Streams) {
+        # Gateway without streaming: one request, the whole answer as one chunk.
+        & $OnChunk (Invoke-KeystoneAI -Question $Question -Session $Session -Token $token)
+        return
+    }
     $payload = New-KeystoneAiPayload -Question $Question -Session $Session -Model $config.Model -Stream
     $body = [Text.Encoding]::UTF8.GetBytes(($payload | ConvertTo-Json -Depth 8 -Compress))
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -76,7 +66,10 @@ function Invoke-KeystoneAIStream {
     $request.Method = 'POST'
     $request.ContentType = 'application/json; charset=utf-8'
     $request.Accept = 'text/event-stream'
-    $request.Headers.Add('Authorization',"Bearer $token")
+    if ($token) {
+        if ($config.Auth -eq 'api-key') { $request.Headers.Add('api-key',$token) } else { $request.Headers.Add('Authorization',"Bearer $token") }
+    }
+    try { $request.ServicePoint.Expect100Continue = $false } catch { }
     $request.Timeout = 90000
     $request.ReadWriteTimeout = 90000
     $request.ContentLength = $body.Length

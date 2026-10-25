@@ -23,7 +23,7 @@ Development-stage tool, NOT an accredited enterprise deployment.
 - All provider calls use one transport with **redirects off**. Archive downloads follow redirects themselves and send the token only to the original host (GitHub's codeload redirect gets no token).
 - API reads follow redirects on the same host only (renamed repositories); other hosts never get the token.
 - Background GET requests are retried on 429/5xx/network errors, honouring `Retry-After` (max 10 s); reads answered directly on the HTTP loop make one attempt with a 20 s timeout. Writes are never retried.
-- **AI:** HTTPS gateways on the administrator allowlist only. Chat sends the typed text plus project and branch name; commit-title help sends file names and statuses only. No source text is sent automatically. Administrators must approve model use for the data classification.
+- **AI:** the endpoint the user saves in Settings (or the environment) must be HTTPS without embedded credentials; plain http is accepted only for a model on this PC (loopback). When `KEYSTONE_AI_ALLOWED_HOSTS` is set it is a strict allowlist (plus genai.mil), and an endpoint outside it is refused before any request leaves. Discovery (`/models`, `/api/tags`, deployment or serving-endpoint lists) sends the token only to that endpoint and never follows redirects to another host. Chat sends the typed text plus project and branch name; commit-title help sends file names and statuses only. No source text is sent automatically. Administrators must approve model use for the data classification.
 
 ## Save safeguards
 - A download never deletes or overwrites a non-empty folder, and each workspace is pinned to a remote commit.
