@@ -8,9 +8,12 @@ REM change machine policy, override Group Policy, or grant elevation.
 REM -STA maintains compatibility with any interactive ARC credential dialogs.
 set "PS_ARGS=-STA -NoProfile -NoLogo -ExecutionPolicy Bypass"
 
+REM ARC 5 is found by lib\Arc.ps1; older ARC 3/4 installs by pm.ps1.
 if not defined ARC_PATH (
   if exist "%~dp0..\arc\pm.ps1" set "ARC_PATH=%~dp0..\arc"
   if exist "%~dp0..\..\arc\pm.ps1" set "ARC_PATH=%~dp0..\..\arc"
+  if exist "%~dp0..\arc\lib\Arc.ps1" set "ARC_PATH=%~dp0..\arc"
+  if exist "%~dp0..\..\arc\lib\Arc.ps1" set "ARC_PATH=%~dp0..\..\arc"
 )
 
 echo.

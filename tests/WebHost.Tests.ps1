@@ -4,13 +4,17 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $port = Get-Random -Minimum 19000 -Maximum 29000
 $url = "http://localhost:$port/"
-# Test the same BAT entrypoint users double-click, not just the PS1 host.
+# The BAT entrypoint users double-click must keep its PowerShell switches.
 $launcher = Join-Path $root 'Launch-Keystone.bat'
 $batchText = [IO.File]::ReadAllText($launcher)
 if ($batchText -notmatch '(?i)-ExecutionPolicy\s+Bypass') { throw 'Keystone launcher is missing the process-scoped execution-policy option used by ARC/Cascade.' }
 if ($batchText -notmatch '(?i)-STA') { throw 'Keystone launcher is missing the STA option needed for ARC UI compatibility.' }
-$args = ('/d /c ""{0}" -NoBrowser {1}"' -f $launcher,$port)
-$process = Start-Process -FilePath 'cmd.exe' -ArgumentList $args -PassThru -WindowStyle Hidden
+# Start the host with the launcher's own PowerShell switches, in explicit LocalDev
+# mode so an unattended runner never imports ARC or waits on a CAC/TOTP prompt.
+# (No environment variable can do this: LocalDev is only ever a -LocalDev switch.)
+$hostScript = Join-Path $root 'Start-KeystoneWeb.ps1'
+$psArgs = @('-STA','-NoProfile','-NoLogo','-ExecutionPolicy','Bypass','-File',('"{0}"' -f $hostScript),'-LocalDev','-NoBrowser','-Port',[string]$port)
+$process = Start-Process -FilePath 'powershell.exe' -ArgumentList $psArgs -PassThru -WindowStyle Hidden
 try {
     $response = $null
     for ($attempt = 0; $attempt -lt 40; $attempt++) {
@@ -53,7 +57,7 @@ try {
     Write-Host 'Localhost browser host, status, CSRF and URL controls passed.' -ForegroundColor Green
 } finally {
     if ($process -and -not $process.HasExited) {
-        # Kill the cmd.exe launcher and its child PowerShell process to avoid orphan servers.
+        # Kill the host process tree to avoid orphan servers.
         & taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null
         if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
     }

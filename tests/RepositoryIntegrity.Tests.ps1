@@ -13,6 +13,7 @@ $required=@(
  'docs/ENTERPRISE-ROADMAP.md','docs/SECURITY-MODEL.md',
  'tests/Workspace.Tests.ps1','tests/SmartSave.Tests.ps1','tests/WebHost.Tests.ps1',
  'tests/ArcIntegration.Tests.ps1','tests/ArcCoreOnly.Tests.ps1',
+ 'tests/Arc5Contract.Tests.ps1','tests/Arc5Real.Tests.ps1','tests/ProviderSafety.Tests.ps1',
  'tests/Sentinel.Tests.ps1','tests/RepositoryInsights.Tests.ps1',
  'tests/BrowserSyntax.Tests.cjs','web/index.html'
 )
