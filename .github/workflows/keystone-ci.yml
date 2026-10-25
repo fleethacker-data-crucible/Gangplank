@@ -47,13 +47,13 @@ jobs:
     name: Windows PowerShell 5.1 tests
     runs-on: [self-hosted, Windows, X64]
     needs: [hygiene]
-    env:
-      # The runner is a real user account: keep its Keystone credentials and session out of reach.
-      LOCALAPPDATA: ${{ runner.temp }}\keystone-appdata
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
       - name: Offline module tests
         shell: powershell
+        env:
+          # The runner is a real user account: keep its Keystone credentials and session out of reach.
+          LOCALAPPDATA: ${{ runner.temp }}\keystone-appdata
         run: |
           $failed = $false
           # Each suite in its own process: ARC's engine and the module load once per process.
@@ -68,8 +68,6 @@ jobs:
     name: Host end to end (synthetic GitHub)
     runs-on: [self-hosted, Windows, X64]
     needs: [hygiene]
-    env:
-      LOCALAPPDATA: ${{ runner.temp }}\keystone-appdata
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
       - name: Browser markup and JavaScript
@@ -86,6 +84,8 @@ jobs:
       - name: Real host under Windows PowerShell 5.1 against the synthetic GitHub
         shell: powershell
         env:
+          # The runner is a real user account: keep its Keystone credentials and session out of reach.
+          LOCALAPPDATA: ${{ runner.temp }}\keystone-appdata
           KEYSTONE_PWSH: powershell.exe
         run: |
           .\.github\ci-run.ps1 -Title 'Host e2e' -Command 'node --test tests/e2e/host.e2e.mjs'
@@ -93,6 +93,8 @@ jobs:
       - name: UI in a real browser (Edge, Playwright installed to the runner temp folder)
         shell: powershell
         env:
+          # The runner is a real user account: keep its Keystone credentials and session out of reach.
+          LOCALAPPDATA: ${{ runner.temp }}\keystone-appdata
           KEYSTONE_PWSH: powershell.exe
           KEYSTONE_BROWSER_CHANNEL: msedge
         run: |
