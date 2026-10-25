@@ -17,30 +17,28 @@ echo    KEYSTONE   -   Development Workspace
 echo ==============================================
 echo.
 echo Starting local browser workspace.
+echo Keystone stops by itself shortly after its browser tab closes.
+echo Options: --stay (keep running after the tab closes), --replace
+echo (stop a running Keystone without asking), -NoBrowser [port].
 echo To use the classic text menu, run:
 echo    Launch-Keystone.bat -Cli
 echo.
 where powershell.exe >nul 2>&1 || (echo ERROR: Windows PowerShell 5.1 not found & pause & exit /b 1)
 
 if /I "%~1"=="-Cli" goto CLI
-if /I "%~1"=="-NoBrowser" goto HEADLESS
+if /I "%~1"=="--cli" goto CLI
 goto BROWSER
 
 :CLI
 powershell.exe %PS_ARGS% -File "%~dp0Keystone.ps1"
 goto FINISH
 
-:HEADLESS
-REM Diagnostic/CI mode: no browser window, optional explicit localhost port.
-if "%~2"=="" (
-  powershell.exe %PS_ARGS% -File "%~dp0Start-KeystoneWeb.ps1" -NoBrowser
-) else (
-  powershell.exe %PS_ARGS% -File "%~dp0Start-KeystoneWeb.ps1" -NoBrowser -Port "%~2"
-)
-goto FINISH
-
 :BROWSER
-powershell.exe %PS_ARGS% -File "%~dp0Start-KeystoneWeb.ps1"
+REM All options pass through to Start-KeystoneWeb.ps1, for example:
+REM   -NoBrowser 19000   diagnostic/CI mode on an explicit localhost port
+REM   --stay             keep running after the browser tab closes
+REM   --replace          stop a running Keystone and start fresh without asking
+powershell.exe %PS_ARGS% -File "%~dp0Start-KeystoneWeb.ps1" %*
 
 :FINISH
 set "ERR=%ERRORLEVEL%"

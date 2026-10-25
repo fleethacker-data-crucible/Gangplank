@@ -8,13 +8,16 @@
   -LocalDev -DevGitHubUrl. Without Node, the host starts in LocalDev with no
   provider. Fictional data only; never real credentials or work data.
 #>
-[CmdletBinding()]
-param([int]$Port = 8769,[int]$FakePort = 8791,[switch]$NoBrowser,[switch]$NoFake)
+[CmdletBinding(PositionalBinding = $false)]
+param([int]$Port = 8769,[int]$FakePort = 8791,[switch]$NoBrowser,[switch]$NoFake,[switch]$Stay,[switch]$Replace,
+    # Launcher options (--stay, --replace, --no-browser) pass through to Start-KeystoneWeb.ps1.
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $work = Join-Path $root 'work-localdev'
 $fake = $null
-$hostArgs = @{ LocalDev = $true; Port = $Port; NoBrowser = $NoBrowser; WorkRoot = $work }
+$hostArgs = @{ LocalDev = $true; Port = $Port; NoBrowser = $NoBrowser; WorkRoot = $work; Stay = $Stay; Replace = $Replace }
+if ($Rest) { $hostArgs.Rest = @($Rest) }
 try {
     $node = Get-Command node -ErrorAction SilentlyContinue
     if (-not $NoFake -and $node) {

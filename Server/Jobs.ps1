@@ -107,6 +107,15 @@ function Update-KeystoneJobs {
     }
 }
 
+function Test-KeystoneJobsBusy {
+    # True while any background job (save, download, review, AI) is still running.
+    # The lifecycle never stops the host under one.
+    foreach ($j in @($script:KeystoneJobs.Values)) {
+        if ($j.State -in @('running','cancelling')) { return $true }
+    }
+    return $false
+}
+
 function Stop-KeystoneJob {
     param([Parameter(Mandatory)][string]$Id)
     $job = $script:KeystoneJobs[$Id]

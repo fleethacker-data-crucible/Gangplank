@@ -86,5 +86,14 @@ test('UI in a real browser', { skip: playwright ? false : 'Playwright not availa
   await page.waitForFunction(() => document.getElementById('online').textContent.includes('connected'));
   assert.equal(await page.isVisible('#ended'), false, 'A reload of the working tab must stay signed in');
 
+  // Lifecycle: the heartbeat worker runs under the CSP, and End session stops the host.
+  await second.close();
+  await page.waitForResponse((r) => r.url().endsWith('/api/heartbeat') && r.status() === 200, { timeout: 15000 });
+  page.once('dialog', (d) => d.accept());
+  await page.click('#endSession');
+  await page.waitForFunction(() => !document.getElementById('ended').hidden, null, { timeout: 10000 });
+  const exited = child.exitCode !== null ? true : await Promise.race([new Promise((r) => child.once('exit', () => r(true))), new Promise((r) => setTimeout(() => r(false), 15000))]);
+  assert.equal(exited, true, 'End session must stop the host process');
+
   assert.deepEqual(errors, [], 'No console errors expected: ' + errors.join(' | '));
 });

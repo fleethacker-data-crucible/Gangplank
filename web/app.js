@@ -1,10 +1,10 @@
 'use strict';const el=id=>document.getElementById(id);let connected=false,workspace='',changes=[],stale=false,lastSaved=false;
-function tab(name){document.querySelectorAll('.section').forEach(x=>x.classList.toggle('active',x.id===name));document.querySelectorAll('.nav button').forEach(x=>x.classList.toggle('active',x.dataset.tab===name));el('crumb').textContent=name;if(connected){if(name==='branches')loadBranches();if(name==='compare')loadBranchSelectors();if(name==='activity')loadHistory();if(name==='reviews')loadReviews();}if(name==='integrations'){loadIntegrations();loadAudit();loadSettings()}}
-document.querySelectorAll('.nav button').forEach(x=>x.addEventListener('click',()=>tab(x.dataset.tab)));
+function tab(name){document.querySelectorAll('.section').forEach(x=>x.classList.toggle('active',x.id===name));document.querySelectorAll('.nav button[data-tab]').forEach(x=>x.classList.toggle('active',x.dataset.tab===name));el('crumb').textContent=name;if(connected){if(name==='branches')loadBranches();if(name==='compare')loadBranchSelectors();if(name==='activity')loadHistory();if(name==='reviews')loadReviews();}if(name==='integrations'){loadIntegrations();loadAudit();loadSettings()}}
+document.querySelectorAll('.nav button[data-tab]').forEach(x=>x.addEventListener('click',()=>tab(x.dataset.tab)));
 function note(id,t,k=''){let x=el(id);x.hidden=!t;x.className='notice '+k;x.textContent=t;}
 function log(t){let d=document.createElement('div'),x=document.createElement('time');d.className='activityItem';d.textContent=t;x.textContent=new Date().toLocaleTimeString();d.append(x);el('activityList').prepend(d);}
 async function api(path,method='GET',body){let r=await fetch(path,{method,headers:{'X-Keystone-Client':clientSecret(),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,cache:'no-store',credentials:'same-origin'}),t=await r.text(),x;try{x=JSON.parse(t)}catch{throw Error('Invalid service response')}if(r.status===401&&x.error==='SESSION'){ended(x.message);throw Error(x.message)}if(!r.ok){const e=Error(plain(x.message||x.error||'Request failed'));e.code=x.error||'';throw e}return x;}
-function ended(t){el('ended').hidden=false;if(t)el('endedText').textContent=t}
+function ended(t){sessionEnded=true;stopHeartbeat();el('ended').hidden=false;if(t)el('endedText').textContent=t;el('online').textContent='Session ended'}
 // Per-session secret from /api/session, kept in this tab only (sessionStorage is per
 // origin, so per port; cookies are not). Sent with every API call.
 function clientSecret(){try{return sessionStorage.getItem('keystone-client')||''}catch{return ''}}
@@ -156,7 +156,34 @@ el('sentinelRefresh').addEventListener('click',async()=>{
   r.findings.forEach(f=>{let p=document.createElement('p');p.textContent=f.Severity+' · '+(f.Path||'Destination')+' · '+f.Code+' — '+f.Detail;box.append(p)});
  }catch(e){box.textContent='Scan unavailable: '+e.message}
 });
-(async()=>{if(await bootstrap())init()})();
+// Presence: this tab owns the local service. A heartbeat every 5 s says "still here";
+// a sendBeacon "leaving" signal on pagehide lets it stop within seconds. A reload sends
+// a new heartbeat inside the grace period, so nothing stops. The heartbeat runs in a
+// worker because hidden tabs throttle main-thread timers; the page's own timer is the
+// fallback. The beacon cannot set headers, so it carries the client secret in its body
+// (the session cookie still goes with it); never in a query string.
+let sessionEnded=false;
+const TAB_ID=(()=>{try{const a=new Uint8Array(12);crypto.getRandomValues(a);return [...a].map(b=>b.toString(16).padStart(2,'0')).join('')}catch{return 't'+Date.now().toString(36)+Math.random().toString(36).slice(2)}})();
+let hbWorker=null,hbTimer=0,hbFailures=0,hbInflight=false;
+function heartbeatResult(ok,status){if(ok){hbFailures=0;return}if(status===401){ended('This page belongs to an earlier Keystone session. Use the link in the Keystone window.');return}if(++hbFailures>=3)ended('Keystone has stopped. You can close this tab. To keep working, start Keystone again with Launch-Keystone.bat.');}
+function beatNow(){if(sessionEnded)return;if(hbWorker){hbWorker.postMessage({type:'beat'});return}if(hbInflight)return;hbInflight=true;fetch('/api/heartbeat',{method:'POST',headers:{'Content-Type':'application/json','X-Keystone-Client':clientSecret()},body:JSON.stringify({tab:TAB_ID,leaving:false}),cache:'no-store',credentials:'same-origin'}).then(r=>{hbInflight=false;heartbeatResult(r.ok,r.status)},()=>{hbInflight=false;heartbeatResult(false,0)});}
+function fallbackTimer(){if(hbTimer||sessionEnded)return;beatNow();hbTimer=setInterval(beatNow,5000);}
+function startHeartbeat(){
+ if(sessionEnded)return;
+ try{hbWorker=new Worker('/heartbeat-worker.js');hbWorker.onmessage=e=>heartbeatResult(!!e.data.ok,e.data.status);hbWorker.onerror=()=>{try{hbWorker.terminate()}catch{}hbWorker=null;fallbackTimer()};hbWorker.postMessage({type:'start',token:clientSecret(),tab:TAB_ID,interval:5000});}
+ catch{hbWorker=null;fallbackTimer()}
+}
+function stopHeartbeat(){if(hbWorker){try{hbWorker.postMessage({type:'stop'});hbWorker.terminate()}catch{}hbWorker=null}if(hbTimer){clearInterval(hbTimer);hbTimer=0}}
+window.addEventListener('pagehide',()=>{if(sessionEnded||!clientSecret())return;const body=JSON.stringify({tab:TAB_ID,leaving:true,client:clientSecret()});let sent=false;try{sent=navigator.sendBeacon('/api/heartbeat',new Blob([body],{type:'application/json'}))}catch{sent=false}if(!sent){try{fetch('/api/heartbeat',{method:'POST',headers:{'Content-Type':'application/json','X-Keystone-Client':clientSecret()},body:JSON.stringify({tab:TAB_ID,leaving:true}),keepalive:true,credentials:'same-origin'}).catch(()=>{})}catch{}}});
+window.addEventListener('pageshow',e=>{if(e.persisted)beatNow()});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')beatNow()});
+el('endSession').addEventListener('click',async()=>{
+ if(!confirm('End this Keystone session? The local service stops (after any save or download in progress). Unsaved selections in this page are lost; published work is not affected.'))return;
+ const b=el('endSession');b.disabled=true;
+ try{const r=await fetch('/api/session/stop',{method:'POST',headers:{'Content-Type':'application/json','X-Keystone-Client':clientSecret(),'X-Keystone-Intent':'end-session'},body:'{}',cache:'no-store',credentials:'same-origin'});let x={};try{x=await r.json()}catch{}if(!r.ok)throw Error(plain(x.message||x.error||'Request failed'));ended(x.waitingForJobs?'Keystone stops as soon as the running task finishes. You can close this tab.':'Keystone has stopped. You can close this tab. To keep working, start Keystone again with Launch-Keystone.bat.')}
+ catch(e){b.disabled=false;alert('Could not end the session: '+e.message)}
+});
+(async()=>{if(await bootstrap()){startHeartbeat();init()}})();
 
 // ---- Settings: workspace folder and AI model --------------------------------
 const AI_KIND={openai:'OpenAI-compatible gateway',azure:'Azure OpenAI',databricks:'Databricks model serving',ollama:'Ollama on this PC'};
