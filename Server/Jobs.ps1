@@ -1,9 +1,9 @@
 #Requires -Version 5.1
 # =============================================================================
-# Background jobs (pattern: Cascade Host/JobManager.cs).
+# Background jobs (pattern: Halyard Host/JobManager.cs).
 # Long work (connect, download, save, review, AI) runs in its own runspace so
 # the sequential HTTP loop keeps answering. A job:
-#   * imports the Keystone module fresh and calls ONE named module function;
+#   * imports the Gangplank module fresh and calls ONE named module function;
 #   * gets plain data in (session snapshot, token) and returns plain data out;
 #   * reports progress / streamed text through a synchronized hashtable;
 #   * is finished on the main thread (OnComplete), which is the only place the
@@ -11,10 +11,10 @@
 # One running job per group: 'workspace' jobs never overlap each other.
 # =============================================================================
 
-$script:KeystoneJobs = [ordered]@{}
-$script:KeystoneJobKeep = 40
+$script:GangplankJobs = [ordered]@{}
+$script:GangplankJobKeep = 40
 
-function Start-KeystoneJob {
+function Start-GangplankJob {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Kind,
@@ -24,10 +24,10 @@ function Start-KeystoneJob {
         [scriptblock]$OnComplete = $null,
         [hashtable]$Context = @{}
     )
-    foreach ($j in $script:KeystoneJobs.Values) {
+    foreach ($j in $script:GangplankJobs.Values) {
         # A cancelled job may still be inside a blocking request: it stays busy until it ends.
         if ($j.Group -eq $Group -and $j.State -in @('running','cancelling')) {
-            throw "BUSY|Keystone is still working on '$($j.Kind)'. Wait for it to finish."
+            throw "BUSY|Gangplank is still working on '$($j.Kind)'. Wait for it to finish."
         }
     }
     $shared = [hashtable]::Synchronized(@{ Progress = 'Starting'; Chunks = [Collections.ArrayList]::Synchronized((New-Object Collections.ArrayList)) })
@@ -40,15 +40,15 @@ function Start-KeystoneJob {
         param($ModulePath,$LogDir,$ConfigPath,$Function,$Shared,$Arguments)
         $ErrorActionPreference = 'Stop'
         Import-Module $ModulePath -Force -WarningAction SilentlyContinue
-        & (Get-Module Keystone) {
+        & (Get-Module Gangplank) {
             param($LogDir,$ConfigPath,$Function,$Shared,$Arguments)
-            Initialize-KeystoneLogging -LogDir $LogDir -Level INFO
-            Initialize-KeystoneConfig -ConfigPath $ConfigPath
-            if ($Arguments.ContainsKey('DevGitHubUrl') -and $Arguments.DevGitHubUrl) { Set-KeystoneDevProvider -GitHubUrl $Arguments.DevGitHubUrl }
+            Initialize-GangplankLogging -LogDir $LogDir -Level INFO
+            Initialize-GangplankConfig -ConfigPath $ConfigPath
+            if ($Arguments.ContainsKey('DevGitHubUrl') -and $Arguments.DevGitHubUrl) { Set-GangplankDevProvider -GitHubUrl $Arguments.DevGitHubUrl }
             & $Function -Shared $Shared -Arguments $Arguments
         } $LogDir $ConfigPath $Function $Shared $Arguments
     }
-    [void]$ps.AddScript($bootstrap.ToString()).AddArgument((Join-Path $script:KeystoneRoot 'Keystone.psm1')).AddArgument($script:KeystoneLogDir).AddArgument($script:KeystoneConfigPath).AddArgument($Function).AddArgument($shared).AddArgument($Arguments)
+    [void]$ps.AddScript($bootstrap.ToString()).AddArgument((Join-Path $script:GangplankRoot 'Gangplank.psm1')).AddArgument($script:GangplankLogDir).AddArgument($script:GangplankConfigPath).AddArgument($Function).AddArgument($shared).AddArgument($Arguments)
     $id = 'job-' + [guid]::NewGuid().ToString('N').Substring(0,12)
     $job = [ordered]@{
         Id = $id; Kind = $Kind; Group = $Group; State = 'running'
@@ -56,24 +56,24 @@ function Start-KeystoneJob {
         Shared = $shared; PowerShell = $ps; Runspace = $rs; Handle = $ps.BeginInvoke()
         OnComplete = $OnComplete; Context = $Context; Result = $null; Error = ''
     }
-    $script:KeystoneJobs[$id] = $job
-    Write-KeystoneLog -Level INFO -Message "Job $id started: $Kind"
-    Remove-KeystoneOldJobs
+    $script:GangplankJobs[$id] = $job
+    Write-GangplankLog -Level INFO -Message "Job $id started: $Kind"
+    Remove-GangplankOldJobs
     return $id
 }
 
-function Get-KeystoneJobErrorMessage {
+function Get-GangplankJobErrorMessage {
     param($ErrorRecordOrException)
     $e = $ErrorRecordOrException
     if ($e -is [Management.Automation.ErrorRecord]) { $e = $e.Exception }
     while ($e -and ($e -is [Management.Automation.MethodInvocationException] -or $e -is [Management.Automation.CmdletInvocationException]) -and $e.InnerException) { $e = $e.InnerException }
     if (-not $e) { return 'The job failed.' }
-    return (Get-KeystoneSafeErrorMessage -Message $e.Message)
+    return (Get-GangplankSafeErrorMessage -Message $e.Message)
 }
 
-function Update-KeystoneJobs {
+function Update-GangplankJobs {
     # Called from the HTTP loop on the main thread: finish completed jobs.
-    foreach ($job in @($script:KeystoneJobs.Values)) {
+    foreach ($job in @($script:GangplankJobs.Values)) {
         if ($job.State -notin @('running','cancelling') -or -not $job.Handle -or -not $job.Handle.IsCompleted) { continue }
         $wasCancelling = ($job.State -eq 'cancelling')
         try {
@@ -90,14 +90,14 @@ function Update-KeystoneJobs {
                 # A failure applying it locally (state file, credential gone) must not
                 # turn a completed write into "failed".
                 try { $result = & $job.OnComplete $result $job.Context }
-                catch { Write-KeystoneLog -Level WARN -Message "Job $($job.Id) finished but its result could not be applied: $($_.Exception.Message)" }
+                catch { Write-GangplankLog -Level WARN -Message "Job $($job.Id) finished but its result could not be applied: $($_.Exception.Message)" }
             }
             $job.Result = $result
             $job.State = 'succeeded'
         } catch {
-            $job.Error = Get-KeystoneJobErrorMessage $_
+            $job.Error = Get-GangplankJobErrorMessage $_
             $job.State = $(if ($wasCancelling) { 'cancelled' } else { 'failed' })
-            Write-KeystoneLog -Level WARN -Message "Job $($job.Id) ($($job.Kind)) failed: $($_.Exception.Message)"
+            Write-GangplankLog -Level WARN -Message "Job $($job.Id) ($($job.Kind)) failed: $($_.Exception.Message)"
         } finally {
             $job.Finished = (Get-Date).ToUniversalTime().ToString('o')
             try { $job.PowerShell.Dispose() } catch { }
@@ -107,18 +107,18 @@ function Update-KeystoneJobs {
     }
 }
 
-function Test-KeystoneJobsBusy {
+function Test-GangplankJobsBusy {
     # True while any background job (save, download, review, AI) is still running.
     # The lifecycle never stops the host under one.
-    foreach ($j in @($script:KeystoneJobs.Values)) {
+    foreach ($j in @($script:GangplankJobs.Values)) {
         if ($j.State -in @('running','cancelling')) { return $true }
     }
     return $false
 }
 
-function Stop-KeystoneJob {
+function Stop-GangplankJob {
     param([Parameter(Mandatory)][string]$Id)
-    $job = $script:KeystoneJobs[$Id]
+    $job = $script:GangplankJobs[$Id]
     if (-not $job) { throw 'NOT_FOUND|No such job.' }
     if ($job.State -ne 'running') { return $false }
     $job.State = 'cancelling'
@@ -126,22 +126,22 @@ function Stop-KeystoneJob {
     return $true
 }
 
-function Wait-KeystoneJob {
+function Wait-GangplankJob {
     # For tests and the CLI: block until the job finishes (main thread).
     param([Parameter(Mandatory)][string]$Id,[int]$TimeoutSec = 120)
     $clock = [Diagnostics.Stopwatch]::StartNew()
     while ($clock.Elapsed.TotalSeconds -lt $TimeoutSec) {
-        Update-KeystoneJobs
-        $job = $script:KeystoneJobs[$Id]
-        if ($job.State -notin @('running','cancelling')) { return (Get-KeystoneJobView -Id $Id) }
+        Update-GangplankJobs
+        $job = $script:GangplankJobs[$Id]
+        if ($job.State -notin @('running','cancelling')) { return (Get-GangplankJobView -Id $Id) }
         Start-Sleep -Milliseconds 50
     }
     throw "TIMEOUT|Job $Id did not finish in $TimeoutSec s."
 }
 
-function Get-KeystoneJobView {
+function Get-GangplankJobView {
     param([Parameter(Mandatory)][string]$Id,[int]$After = 0)
-    $job = $script:KeystoneJobs[$Id]
+    $job = $script:GangplankJobs[$Id]
     if (-not $job) { throw 'NOT_FOUND|No such job.' }
     $chunks = @()
     if ($After -lt 0) { $After = 0 }
@@ -162,17 +162,17 @@ function Get-KeystoneJobView {
     }
 }
 
-function Remove-KeystoneOldJobs {
-    $done = @($script:KeystoneJobs.Values | Where-Object { $_.State -notin @('running','cancelling') })
-    $excess = $script:KeystoneJobs.Count - $script:KeystoneJobKeep
+function Remove-GangplankOldJobs {
+    $done = @($script:GangplankJobs.Values | Where-Object { $_.State -notin @('running','cancelling') })
+    $excess = $script:GangplankJobs.Count - $script:GangplankJobKeep
     foreach ($j in $done) {
         if ($excess -le 0) { break }
-        $script:KeystoneJobs.Remove($j.Id)
+        $script:GangplankJobs.Remove($j.Id)
         $excess--
     }
 }
 
-function Set-KeystoneJobProgress {
+function Set-GangplankJobProgress {
     # Used inside job functions.
     param($Shared,[string]$Message)
     if ($Shared) { $Shared.Progress = $Message }

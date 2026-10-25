@@ -55,7 +55,7 @@ class GitProviderBase {
     }
 }
 
-function New-KeystoneProvider {
+function New-GangplankProvider {
     param(
         [ValidateSet("GitLab","GitHub")]
         [string]$Provider,
@@ -74,7 +74,7 @@ function New-KeystoneProvider {
     }
 }
 
-function Resolve-KeystoneProviderFromUrl {
+function Resolve-GangplankProviderFromUrl {
     param([string]$Url)
     if ([string]::IsNullOrWhiteSpace($Url)) { return "GitLab" }
     try {
@@ -87,7 +87,7 @@ function Resolve-KeystoneProviderFromUrl {
     return "GitLab"
 }
 
-function Parse-KeystoneRepoUrl {
+function Parse-GangplankRepoUrl {
     param([string]$Url)
     if ([string]::IsNullOrWhiteSpace($Url)) {
         throw "Empty repository URL"
@@ -100,8 +100,8 @@ function Parse-KeystoneRepoUrl {
     $Url = $Url.TrimEnd('/')
     if ($Url -match '\.git$') { $Url = $Url.Substring(0, $Url.Length - 4) }
 
-    if (Test-KeystoneDevRepositoryUrl -Url $Url) {
-        $devBase = Get-KeystoneDevProvider
+    if (Test-GangplankDevRepositoryUrl -Url $Url) {
+        $devBase = Get-GangplankDevProvider
         return [PSCustomObject]@{ Provider = 'GitHub'; BaseUrl = $devBase; ProjectPath = $Url.Substring($devBase.Length).Trim('/') }
     }
     if ($Url -match '^(https?://[^/]+)/(.+)$') {
@@ -114,7 +114,7 @@ function Parse-KeystoneRepoUrl {
             if ($idx -gt 0) { $path = $path.Substring(0, $idx) }
         }
         $path = $path.Trim('/')
-        $provider = Resolve-KeystoneProviderFromUrl $base
+        $provider = Resolve-GangplankProviderFromUrl $base
         if ($provider -eq "GitHub" -and $base -match 'github\.com$') {
             $base = "https://github.com"
         }

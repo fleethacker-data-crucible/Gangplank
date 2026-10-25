@@ -1,8 +1,8 @@
 #Requires -Version 5.1
-# Keystone Sentinel: conservative local pre-publication checks, no AI data transfer.
+# Gangplank Sentinel: conservative local pre-publication checks, no AI data transfer.
 # Findings never contain matched secrets or personal data.
 
-function Get-KeystoneSentinelFindings {
+function Get-GangplankSentinelFindings {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
     $findings = New-Object System.Collections.Generic.List[object]
@@ -42,7 +42,7 @@ function Get-KeystoneSentinelFindings {
     return @($findings.ToArray())
 }
 
-function Get-KeystoneSentinelDestination {
+function Get-GangplankSentinelDestination {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session)
     if ($Session.Provider -eq 'GitHub') {
@@ -62,10 +62,10 @@ function Get-KeystoneSentinelDestination {
     throw 'Unsupported repository provider.'
 }
 
-function Test-KeystoneSentinelPublication {
+function Test-GangplankSentinelPublication {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session,[Parameter(Mandatory)][string[]]$Paths)
-    $destination = Get-KeystoneSentinelDestination -Session $Session
+    $destination = Get-GangplankSentinelDestination -Session $Session
     $findings = New-Object System.Collections.Generic.List[object]
     $root = [IO.Path]::GetFullPath([string]$Session.LocalPath).TrimEnd('\','/')
     foreach ($path in @($Paths | Select-Object -Unique)) {
@@ -78,7 +78,7 @@ function Test-KeystoneSentinelPublication {
             [void]$findings.Add([pscustomobject]@{ Path=$path; Code='PATH_INVALID'; Severity='Block'; Detail='File is outside the workspace.' })
             continue
         }
-        foreach ($finding in @(Get-KeystoneSentinelFindings -Path $full)) {
+        foreach ($finding in @(Get-GangplankSentinelFindings -Path $full)) {
             [void]$findings.Add([pscustomobject]@{ Path=$path; Code=$finding.Code; Severity=$finding.Severity; Detail=$finding.Detail })
         }
     }

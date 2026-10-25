@@ -3,11 +3,11 @@
 #  Core/Logging.ps1  - structured console + file logging
 # ============================================================
 
-$script:KeystoneLogDir = $null
-$script:KeystoneLogFile = $null
-$script:KeystoneLogLevel = "INFO"   # DEBUG | INFO | WARN | ERROR
+$script:GangplankLogDir = $null
+$script:GangplankLogFile = $null
+$script:GangplankLogLevel = "INFO"   # DEBUG | INFO | WARN | ERROR
 
-function Initialize-KeystoneLogging {
+function Initialize-GangplankLogging {
     param(
         [string]$LogDir,
         [ValidateSet("DEBUG","INFO","WARN","ERROR")]
@@ -25,14 +25,14 @@ function Initialize-KeystoneLogging {
     if (-not (Test-Path -LiteralPath $LogDir)) {
         New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
     }
-    $script:KeystoneLogDir = $LogDir
+    $script:GangplankLogDir = $LogDir
     $day = Get-Date -Format "yyyyMMdd"
-    $script:KeystoneLogFile = Join-Path $LogDir ("keystone-{0}.log" -f $day)
-    $script:KeystoneLogLevel = $Level
-    Write-KeystoneLog -Level INFO -Message "Logging initialized -> $($script:KeystoneLogFile)"
+    $script:GangplankLogFile = Join-Path $LogDir ("gangplank-{0}.log" -f $day)
+    $script:GangplankLogLevel = $Level
+    Write-GangplankLog -Level INFO -Message "Logging initialized -> $($script:GangplankLogFile)"
 }
 
-function Write-KeystoneLog {
+function Write-GangplankLog {
     param(
         [ValidateSet("DEBUG","INFO","WARN","ERROR")]
         [string]$Level = "INFO",
@@ -41,7 +41,7 @@ function Write-KeystoneLog {
         [object]$Data = $null
     )
     $order = @{ DEBUG = 0; INFO = 1; WARN = 2; ERROR = 3 }
-    if ($order[$Level] -lt $order[$script:KeystoneLogLevel]) { return }
+    if ($order[$Level] -lt $order[$script:GangplankLogLevel]) { return }
 
     $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
     $line = "[{0}] [{1}] {2}" -f $stamp, $Level.PadRight(5), $Message
@@ -61,21 +61,21 @@ function Write-KeystoneLog {
     }
     Write-Host $line -ForegroundColor $color
 
-    if ($script:KeystoneLogFile) {
+    if ($script:GangplankLogFile) {
         try {
-            Add-Content -LiteralPath $script:KeystoneLogFile -Value $line -Encoding UTF8 -ErrorAction SilentlyContinue
+            Add-Content -LiteralPath $script:GangplankLogFile -Value $line -Encoding UTF8 -ErrorAction SilentlyContinue
         } catch { }
     }
 }
 
-function Write-KeystoneError {
+function Write-GangplankError {
     param(
         [Parameter(Mandatory)]
         $ErrorRecord,
         [string]$Context = ""
     )
     $msg = if ($Context) { "$Context :: $($ErrorRecord.Exception.Message)" } else { $ErrorRecord.Exception.Message }
-    Write-KeystoneLog -Level ERROR -Message $msg -Data @{
+    Write-GangplankLog -Level ERROR -Message $msg -Data @{
         Type       = $ErrorRecord.Exception.GetType().FullName
         Script     = $ErrorRecord.InvocationInfo.ScriptName
         Line       = $ErrorRecord.InvocationInfo.ScriptLineNumber

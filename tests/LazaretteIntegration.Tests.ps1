@@ -1,9 +1,9 @@
 #Requires -Version 5.1
-# Offline ARC bridge contract test. Uses a fake pm.ps1: no secrets, CAC, network, or real vault.
+# Offline Lazarette bridge contract test. Uses a fake pm.ps1: no secrets, CAC, network, or real vault.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$temp = Join-Path ([IO.Path]::GetTempPath()) ('keystone-arc-contract-' + [guid]::NewGuid().ToString('N'))
-$previous = [Environment]::GetEnvironmentVariable('KEYSTONE_ARC_PATH')
+$temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-arc-contract-' + [guid]::NewGuid().ToString('N'))
+$previous = [Environment]::GetEnvironmentVariable('GANGPLANK_LAZARETTE_PATH')
 $previousToken = [Environment]::GetEnvironmentVariable('GITHUB_TOKEN')
 $mapping = Join-Path $root 'config\arc-items.local.json'
 $oldMapping = $null
@@ -13,7 +13,7 @@ try {
     [void](New-Item -ItemType Directory -Path $temp -Force)
     $pm = @'
 $script:PmState = @{ VaultUnlocked = $false }
-# Mimic the real ARC dependency manifest; test missing library diagnosis.
+# Mimic the real Lazarette dependency manifest; test missing library diagnosis.
 $libOrder = @(
     '00-logging.ps1','00-core.ps1','01-storage.ps1','02-cac.ps1',
     '03-totp-core.ps1','03-totp-recovery.ps1','03-totp-setup.ps1',
@@ -46,17 +46,17 @@ function Get-PmVaultNameCatalog {
 }
 '@
     [IO.File]::WriteAllText((Join-Path $temp 'pm.ps1'),$pm)
-    # ARC's actual pm.ps1 requires a complete lib/ directory. Verify that
-    # Keystone reports incomplete installations instead of a vague status.
-    $env:KEYSTONE_ARC_PATH = $temp
-    Import-Module (Join-Path $root 'Keystone.psm1') -Force -WarningAction SilentlyContinue
+    # Lazarette's actual pm.ps1 requires a complete lib/ directory. Verify that
+    # Gangplank reports incomplete installations instead of a vague status.
+    $env:GANGPLANK_LAZARETTE_PATH = $temp
+    Import-Module (Join-Path $root 'Gangplank.psm1') -Force -WarningAction SilentlyContinue
     . (Join-Path $PSScriptRoot 'TestIsolation.ps1')
-    Initialize-Keystone
-    Assert (-not (Import-KeystoneArcSession -Quiet)) 'Incomplete ARC installation must be rejected'
-    $incomplete = Get-KeystoneArcConnectionStatus
+    Initialize-Gangplank
+    Assert (-not (Import-GangplankLazaretteSession -Quiet)) 'Incomplete Lazarette installation must be rejected'
+    $incomplete = Get-GangplankLazaretteConnectionStatus
     Assert ($incomplete.code -eq 'ARC_MISSING_MODULES') 'Missing libs must be diagnosed'
     Assert ($incomplete.message -match 'Missing libraries') 'Missing libs message should be actionable'
-    foreach ($name in (Get-KeystoneArcRequiredFiles)) {
+    foreach ($name in (Get-GangplankLazaretteRequiredFiles)) {
         $full = Join-Path $temp $name
         $parent = Split-Path $full -Parent
         if (-not (Test-Path -LiteralPath $parent)) { [void](New-Item -ItemType Directory -Path $parent -Force) }
@@ -64,46 +64,46 @@ function Get-PmVaultNameCatalog {
     }
     Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
     $global:FakeArcUnlockCalls = 0
-    Assert ((Find-KeystoneArcRoot) -eq $temp) 'KEYSTONE_ARC_PATH discovery'
-    Assert (Import-KeystoneArcSession -Quiet) 'ARC dynamic module import'
-    Assert (-not (Test-KeystoneArcVaultUnlocked)) 'ARC should begin locked'
-    $secretWhenLocked = Get-KeystoneArcSecretByName -ServiceName github
+    Assert ((Find-GangplankLazaretteRoot) -eq $temp) 'GANGPLANK_LAZARETTE_PATH discovery'
+    Assert (Import-GangplankLazaretteSession -Quiet) 'Lazarette dynamic module import'
+    Assert (-not (Test-GangplankLazaretteVaultUnlocked)) 'Lazarette should begin locked'
+    $secretWhenLocked = Get-GangplankLazaretteSecretByName -ServiceName github
     Assert (-not $secretWhenLocked) 'Secret must not be fetched while locked'
     Assert ($global:FakeArcUnlockCalls -eq 0) 'HTTP-safe lookup may not trigger unlock'
     $wasRejected = $false
-    try { $null = Get-KeystoneToken -Provider GitHub } catch {
+    try { $null = Get-GangplankToken -Provider GitHub } catch {
         $wasRejected = $_.Exception.Message -like 'ARC_LOCKED*'
     }
     Assert $wasRejected 'Locked vault must produce a useful diagnostic'
-    Assert ($global:FakeArcUnlockCalls -eq 0) 'Get-KeystoneToken must not unlock implicitly'
-    $initialized = Initialize-KeystoneArcAuthentication -Quiet
+    Assert ($global:FakeArcUnlockCalls -eq 0) 'Get-GangplankToken must not unlock implicitly'
+    $initialized = Initialize-GangplankLazaretteAuthentication -Quiet
     Assert $initialized.Unlocked 'Expected explicit startup unlock'
     Assert ($global:FakeArcUnlockCalls -eq 1) 'Unlock only once at startup'
-    Assert (Test-KeystoneArcVaultUnlocked) 'Unlocked state must be readable non-interactively'
-    Assert (Import-KeystoneArcSession -Quiet) 'Subsequent import check should succeed'
-    Assert ($global:FakeArcUnlockCalls -eq 1) 'ARC import must not reset/authenticate again'
-    Assert ((Get-KeystoneToken -Provider GitHub) -eq 'fake-github-test-token') 'GitHub token retrieval'
-    Assert ((Get-KeystoneToken -Provider GitLab) -eq 'fake-gitlab-test-token') 'GitLab token retrieval'
-    $status = Get-KeystoneArcConnectionStatus
+    Assert (Test-GangplankLazaretteVaultUnlocked) 'Unlocked state must be readable non-interactively'
+    Assert (Import-GangplankLazaretteSession -Quiet) 'Subsequent import check should succeed'
+    Assert ($global:FakeArcUnlockCalls -eq 1) 'Lazarette import must not reset/authenticate again'
+    Assert ((Get-GangplankToken -Provider GitHub) -eq 'fake-github-test-token') 'GitHub token retrieval'
+    Assert ((Get-GangplankToken -Provider GitLab) -eq 'fake-gitlab-test-token') 'GitLab token retrieval'
+    $status = Get-GangplankLazaretteConnectionStatus
     Assert $status.arcUnlocked 'Status must report unlocked'
-    Assert ($status.itemNames -contains 'github') 'Catalog must unwrap ARC ArrayList'
+    Assert ($status.itemNames -contains 'github') 'Catalog must unwrap Lazarette ArrayList'
     Assert (($status.integrations | Where-Object { $_.provider -eq 'GitHub' }).source -eq 'arc') 'GitHub mapped status'
     $serialized = $status | ConvertTo-Json -Depth 8
     Assert ($serialized -notmatch 'fake-github-test-token|fake-gitlab-test-token') 'Never return tokens to browser'
-    [void](Set-KeystoneArcItemName -Provider GitHub -ServiceName github-alt)
-    Assert ((Get-KeystoneArcItemName -Provider GitHub) -eq 'github-alt') 'Local ARC item mapping'
-    Assert ((Get-KeystoneToken -Provider GitHub) -eq 'fake-alternate-test-token') 'Alternate service mapping'
+    [void](Set-GangplankLazaretteItemName -Provider GitHub -ServiceName github-alt)
+    Assert ((Get-GangplankLazaretteItemName -Provider GitHub) -eq 'github-alt') 'Local Lazarette item mapping'
+    Assert ((Get-GangplankToken -Provider GitHub) -eq 'fake-alternate-test-token') 'Alternate service mapping'
     $saved = [IO.File]::ReadAllText($mapping)
     Assert ($saved -notmatch 'fake-.*-test-token') 'Local mapping must store names, never secrets'
-    Write-Host 'Keystone ARC import, CAC startup, token lookup, and mapping contract passed.' -ForegroundColor Green
+    Write-Host 'Gangplank Lazarette import, CAC startup, token lookup, and mapping contract passed.' -ForegroundColor Green
 } finally {
     if ($null -ne $oldMapping) {
         [IO.File]::WriteAllText($mapping,$oldMapping)
     } elseif (Test-Path -LiteralPath $mapping) {
         Remove-Item -LiteralPath $mapping -Force -ErrorAction SilentlyContinue
     }
-    if ($null -eq $previous) { Remove-Item Env:KEYSTONE_ARC_PATH -ErrorAction SilentlyContinue }
-    else { $env:KEYSTONE_ARC_PATH = $previous }
+    if ($null -eq $previous) { Remove-Item Env:GANGPLANK_LAZARETTE_PATH -ErrorAction SilentlyContinue }
+    else { $env:GANGPLANK_LAZARETTE_PATH = $previous }
     if ($null -eq $previousToken) { Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue }
     else { $env:GITHUB_TOKEN = $previousToken }
     Remove-Item -LiteralPath $temp -Force -Recurse -ErrorAction SilentlyContinue

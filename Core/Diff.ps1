@@ -3,12 +3,12 @@
 #  Core/Diff.ps1 - local vs remote file maps and push actions
 # ============================================================
 
-function Get-KeystoneFileSha256 {
+function Get-GangplankFileSha256 {
     param([string]$Path)
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
 }
 
-function Get-KeystoneLocalFileMap {
+function Get-GangplankLocalFileMap {
     param(
         [string]$Root,
         [string[]]$ExcludeDirNames = @("Logs", "work", ".git", ".vs", "node_modules")
@@ -27,13 +27,13 @@ function Get-KeystoneLocalFileMap {
         if ($skip) { return }
         $rel = $_.FullName.Substring($prefix.Length).TrimStart('\', '/').Replace('\', '/')
         if ($rel) {
-            $map[$rel] = (Get-KeystoneFileSha256 $_.FullName)
+            $map[$rel] = (Get-GangplankFileSha256 $_.FullName)
         }
     }
     return $map
 }
 
-function Get-KeystoneRemoteMapFromZip {
+function Get-GangplankRemoteMapFromZip {
     param([string]$ZipPath)
     Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
     $map = @{}
@@ -67,7 +67,7 @@ function Get-KeystoneRemoteMapFromZip {
     return $map
 }
 
-function Get-KeystonePathDiff {
+function Get-GangplankPathDiff {
     param([hashtable]$LocalMap, [hashtable]$RemoteMap)
     if (-not $LocalMap) { $LocalMap = @{} }
     if (-not $RemoteMap) { $RemoteMap = @{} }
@@ -88,7 +88,7 @@ function Get-KeystonePathDiff {
     }
 }
 
-function New-KeystonePushActions {
+function New-GangplankPushActions {
     param(
         [string]$LocalPath,
         $Diff,
@@ -129,7 +129,7 @@ function New-KeystonePushActions {
     return @($actions)
 }
 
-function Split-KeystonePushBatches {
+function Split-GangplankPushBatches {
     param(
         $Actions,
         [string]$Branch,

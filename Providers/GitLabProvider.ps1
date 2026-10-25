@@ -23,18 +23,18 @@ class GitLabProvider : GitProviderBase {
 
     [object] InvokeApi([string]$method, [string]$endpoint, [object]$body, [string]$outFile) {
         $uri = "$($this.ApiRoot)/$($endpoint.TrimStart('/'))"
-        Write-KeystoneLog -Level DEBUG -Message "GitLab $method $(Get-KeystoneSafeUrl $uri)"
+        Write-GangplankLog -Level DEBUG -Message "GitLab $method $(Get-GangplankSafeUrl $uri)"
         if (-not [string]::IsNullOrWhiteSpace($outFile)) {
-            [void](Invoke-KeystoneDownload -Provider 'GitLab' -Uri $uri -AuthHeaders $this.GetAuthHeaders('GET') -OutFile $outFile)
+            [void](Invoke-GangplankDownload -Provider 'GitLab' -Uri $uri -AuthHeaders $this.GetAuthHeaders('GET') -OutFile $outFile)
             return $true
         }
         $payload = $null
         if ($null -ne $body) {
             $payload = if ($body -is [string]) { $body } else { ($body | ConvertTo-Json -Depth 12 -Compress) }
         }
-        $response = Invoke-KeystoneHttpRequest -Method $method -Uri $uri -Headers $this.GetAuthHeaders($method) -Body $payload
+        $response = Invoke-GangplankHttpRequest -Method $method -Uri $uri -Headers $this.GetAuthHeaders($method) -Body $payload
         $endpointPath = ($endpoint.TrimStart('/') -split '\?')[0]
-        return (ConvertFrom-KeystoneApiResponse -Provider 'GitLab' -Method $method -Endpoint $endpointPath -Response $response)
+        return (ConvertFrom-GangplankApiResponse -Provider 'GitLab' -Method $method -Endpoint $endpointPath -Response $response)
     }
 
     [object] InvokeApi([string]$method, [string]$endpoint) {
@@ -55,7 +55,7 @@ class GitLabProvider : GitProviderBase {
             $p = $this.ResolveProject($projectPath)
             if ($p.default_branch) { return [string]$p.default_branch }
         } catch {
-            Write-KeystoneLog -Level WARN -Message "GetDefaultBranch: $($_.Exception.Message)"
+            Write-GangplankLog -Level WARN -Message "GetDefaultBranch: $($_.Exception.Message)"
         }
         return "main"
     }
@@ -87,9 +87,9 @@ class GitLabProvider : GitProviderBase {
             if (-not (Test-Path $tmp) -or ((Get-Item $tmp).Length -eq 0)) {
                 return @{}
             }
-            return (Get-KeystoneRemoteMapFromZip -ZipPath $tmp)
+            return (Get-GangplankRemoteMapFromZip -ZipPath $tmp)
         } catch {
-            Write-KeystoneLog -Level INFO -Message "Remote map unavailable (empty branch?): $($_.Exception.Message)"
+            Write-GangplankLog -Level INFO -Message "Remote map unavailable (empty branch?): $($_.Exception.Message)"
             return @{}
         } finally {
             if (Test-Path $tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
@@ -109,15 +109,15 @@ class GitLabProvider : GitProviderBase {
 
     [object] PushFolder([string]$projectPath, [string]$branch, [string]$localPath, [string]$message, [string]$deletePolicy) {
         if (-not $deletePolicy) { $deletePolicy = "Omit" }
-        $localMap = Get-KeystoneLocalFileMap -Root $localPath
+        $localMap = Get-GangplankLocalFileMap -Root $localPath
         if ($localMap.Count -eq 0) {
             throw "No files to push under $localPath"
         }
         $remoteMap = $this.TryGetRemoteFileMap($projectPath, $branch)
-        $diff = Get-KeystonePathDiff -LocalMap $localMap -RemoteMap $remoteMap
-        Write-KeystoneLog -Level INFO -Message ("Diff new={0} mod={1} del={2}" -f @($diff.New).Count, @($diff.Modified).Count, @($diff.Deleted).Count)
+        $diff = Get-GangplankPathDiff -LocalMap $localMap -RemoteMap $remoteMap
+        Write-GangplankLog -Level INFO -Message ("Diff new={0} mod={1} del={2}" -f @($diff.New).Count, @($diff.Modified).Count, @($diff.Deleted).Count)
 
-        $actions = New-KeystonePushActions -LocalPath $localPath -Diff $diff -DeletePolicy $deletePolicy
+        $actions = New-GangplankPushActions -LocalPath $localPath -Diff $diff -DeletePolicy $deletePolicy
         if (@($actions).Count -eq 0) {
             return [PSCustomObject]@{
                 Branch    = $branch
@@ -129,13 +129,13 @@ class GitLabProvider : GitProviderBase {
             }
         }
 
-        $batches = Split-KeystonePushBatches -Actions $actions -Branch $branch -Message $message
+        $batches = Split-GangplankPushBatches -Actions $actions -Branch $branch -Message $message
         $commits = New-Object System.Collections.Generic.List[string]
         $i = 0
         foreach ($batch in $batches) {
             $i++
             $msg = if ($batches.Count -eq 1) { $message } else { "$message ($i/$($batches.Count))" }
-            Write-KeystoneLog -Level INFO -Message ("Commit batch {0}/{1} actions={2}" -f $i, $batches.Count, @($batch).Count)
+            Write-GangplankLog -Level INFO -Message ("Commit batch {0}/{1} actions={2}" -f $i, $batches.Count, @($batch).Count)
             $result = $this.CreateCommit($projectPath, $branch, $msg, @($batch))
             if ($result.short_id) { [void]$commits.Add([string]$result.short_id) }
             elseif ($result.id) { [void]$commits.Add([string]$result.id) }

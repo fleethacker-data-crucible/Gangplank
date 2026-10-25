@@ -4,22 +4,22 @@
 # No credentials or network: the GitHub API is a scripted in-memory fake.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-Import-Module (Join-Path $root 'Keystone.psm1') -Force -WarningAction SilentlyContinue
+Import-Module (Join-Path $root 'Gangplank.psm1') -Force -WarningAction SilentlyContinue
 . (Join-Path $PSScriptRoot 'TestIsolation.ps1')
 function Assert([bool]$Condition,[string]$Message) { if (-not $Condition) { throw "ASSERT FAILED: $Message" } }
 
-$module = Get-Module Keystone
+$module = Get-Module Gangplank
 & $module {
     function Assert([bool]$Condition,[string]$Message) { if (-not $Condition) { throw "ASSERT FAILED: $Message" } }
-    Initialize-KeystoneLogging -LogDir (Join-Path ([IO.Path]::GetTempPath()) 'keystone-test-logs') -Level ERROR
+    Initialize-GangplankLogging -LogDir (Join-Path ([IO.Path]::GetTempPath()) 'gangplank-test-logs') -Level ERROR
 
     # A GitHubProvider whose InvokeApi is answered by a script block, so the real
     # class methods (GetRefSha, GetPathModes, CreateTree...) run unchanged.
     Invoke-Expression @'
-class KeystoneFakeGitHub : GitHubProvider {
+class GangplankFakeGitHub : GitHubProvider {
     [scriptblock]$Handler
     [System.Collections.Generic.List[object]]$Calls
-    KeystoneFakeGitHub([scriptblock]$handler) : base('https://api.github.com','test-token') {
+    GangplankFakeGitHub([scriptblock]$handler) : base('https://api.github.com','test-token') {
         $this.Handler = $handler
         $this.Calls = New-Object System.Collections.Generic.List[object]
     }
@@ -29,7 +29,7 @@ class KeystoneFakeGitHub : GitHubProvider {
     }
 }
 '@
-    $script:FakeType = 'KeystoneFakeGitHub' -as [type]
+    $script:FakeType = 'GangplankFakeGitHub' -as [type]
     Assert ($null -ne $script:FakeType) 'Fake provider type must load'
 
     # --- GetRefSha: 404 means "no branch", anything else must surface ---------
@@ -44,20 +44,20 @@ class KeystoneFakeGitHub : GitHubProvider {
     $pRef = $script:FakeType::new({ param($m,$e,$b) return @{ object = @{ sha = 'abc' } } })
     [void]$pRef.GetRefSha('team/demo','feature/a b#1')
     Assert ($pRef.Calls[0].Endpoint -eq 'repos/team/demo/git/ref/heads/feature/a%20b%231') ("Ref path not encoded: " + $pRef.Calls[0].Endpoint)
-    Assert ((ConvertTo-KeystoneRefPath -Ref 'keystone/work-1') -eq 'keystone/work-1') 'Plain branch names must be unchanged'
+    Assert ((ConvertTo-GangplankRefPath -Ref 'gangplank/work-1') -eq 'gangplank/work-1') 'Plain branch names must be unchanged'
 
     # --- Error bodies never reach the browser text ----------------------------
-    $safe = Get-KeystoneSafeErrorMessage -Message ("GitHub API POST repos/x failed (HTTP 422) | {`"message`":`"secret detail`"}" + [char]10 + 'second line')
+    $safe = Get-GangplankSafeErrorMessage -Message ("GitHub API POST repos/x failed (HTTP 422) | {`"message`":`"secret detail`"}" + [char]10 + 'second line')
     Assert ($safe -notmatch 'secret detail') 'Provider response body leaked into browser error'
     Assert ($safe -notmatch "`n") 'Browser error must be a single line'
-    Assert ((Get-KeystoneSafeErrorMessage -Message 'ARC_LOCKED|ARC was found but the vault is locked.') -match '^ARC_LOCKED\|') 'Coded errors must keep their code'
+    Assert ((Get-GangplankSafeErrorMessage -Message 'ARC_LOCKED|Lazarette was found but the vault is locked.') -match '^ARC_LOCKED\|') 'Coded errors must keep their code'
 
     # --- Transport: retries, writes, redirects, coded errors -----------------
-    $script:KeystoneHttpSleep = { param($ms) $script:Slept += $ms }
+    $script:GangplankHttpSleep = { param($ms) $script:Slept += $ms }
     $script:Slept = 0
     $script:Seen = New-Object System.Collections.Generic.List[object]
     $script:Plan = New-Object System.Collections.Generic.Queue[object]
-    $script:KeystoneHttpTransport = {
+    $script:GangplankHttpTransport = {
         param($Request)
         $script:Seen.Add($Request)
         return $script:Plan.Dequeue()
@@ -89,7 +89,7 @@ class KeystoneFakeGitHub : GitHubProvider {
     $script:Seen.Clear(); $script:Plan.Clear()
     $script:Plan.Enqueue((Reply 302 '' @{ location = 'https://codeload.github.com/team/demo/legacy.zip/abc?token=signed' }))
     $script:Plan.Enqueue([pscustomobject]@{ Status = 200; Headers = @{}; Text = ''; File = 'x.zip'; NetworkError = '' })
-    [void](Invoke-KeystoneDownload -Provider GitHub -Uri 'https://api.github.com/repos/team/demo/zipball/abc' -AuthHeaders $gh.GetAuthHeaders('GET') -OutFile 'x.zip')
+    [void](Invoke-GangplankDownload -Provider GitHub -Uri 'https://api.github.com/repos/team/demo/zipball/abc' -AuthHeaders $gh.GetAuthHeaders('GET') -OutFile 'x.zip')
     Assert ($script:Seen[0].Headers['Authorization'] -eq 'Bearer tok-123') 'API host should get the token'
     Assert (-not $script:Seen[1].Headers.ContainsKey('Authorization')) 'Token must not follow a redirect to another host'
     Assert ($script:Seen[1].Uri -match '^https://codeload\.github\.com/') 'Redirect target not followed'
@@ -98,7 +98,7 @@ class KeystoneFakeGitHub : GitHubProvider {
     $msg = ''
     try { [void]$gh.InvokeApi('GET','repos/team/demo') } catch { $msg = [string]$_.Exception.Message }
     Assert ($msg -match '^NETWORK\|') "Network failure should be NETWORK: $msg"
-    Assert ((Get-KeystoneSafeUrl 'https://h.example/p/a?token=secret') -eq 'https://h.example/p/a') 'Safe URL must drop the query'
+    Assert ((Get-GangplankSafeUrl 'https://h.example/p/a?token=secret') -eq 'https://h.example/p/a') 'Safe URL must drop the query'
     # Same-host redirects are followed for reads (renamed repos); other hosts never get the token.
     $script:Seen.Clear(); $script:Plan.Clear()
     $script:Plan.Enqueue((Reply 301 '' @{ location = 'https://api.github.com/repositories/42' })); $script:Plan.Enqueue((Reply 200 '{"full_name":"team/renamed"}'))
@@ -113,28 +113,28 @@ class KeystoneFakeGitHub : GitHubProvider {
 
     # Requests answered on the HTTP loop fail fast: one attempt, short timeout.
     $script:Seen.Clear(); $script:Plan.Clear(); $script:Plan.Enqueue((Reply 502)); $script:Plan.Enqueue((Reply 200 '{}'))
-    $script:KeystoneHttpInteractive = $true
-    try { try { [void]$gh.InvokeApi('GET','repos/team/demo') } catch { } } finally { $script:KeystoneHttpInteractive = $false }
+    $script:GangplankHttpInteractive = $true
+    try { try { [void]$gh.InvokeApi('GET','repos/team/demo') } catch { } } finally { $script:GangplankHttpInteractive = $false }
     Assert ($script:Seen.Count -eq 1) 'Interactive reads must not retry'
     Assert ($script:Seen[0].TimeoutSec -le 20) 'Interactive reads must use a short timeout'
     $script:Plan.Clear()
 
-    $script:KeystoneHttpTransport = $null
-    $script:KeystoneHttpSleep = { param([int]$Milliseconds) Start-Sleep -Milliseconds $Milliseconds }
+    $script:GangplankHttpTransport = $null
+    $script:GangplankHttpSleep = { param([int]$Milliseconds) Start-Sleep -Milliseconds $Milliseconds }
 
     # --- Session snapshots and restore -----------------------------------------
     $live = [pscustomobject]@{ Provider = 'GitHub'; BaseUrl = 'https://github.com'; ProjectPath = 'team/demo'; DefaultBranch = 'main'; BaselineMap = @{ 'a.txt' = 'h1' } }
-    $snap = ConvertTo-KeystoneSessionSnapshot $live
+    $snap = ConvertTo-GangplankSessionSnapshot $live
     $snap.BaselineMap['b.txt'] = 'h2'
     Assert (-not $live.BaselineMap.ContainsKey('b.txt')) 'Snapshots must copy the baseline map, not share it across threads'
-    $sessDir = Join-Path ([IO.Path]::GetTempPath()) ('keystone-sess-' + [guid]::NewGuid().ToString('N'))
+    $sessDir = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-sess-' + [guid]::NewGuid().ToString('N'))
     try {
-        Save-KeystoneSessionState -StateRoot $sessDir -Session $live
-        Assert ($null -ne (Read-KeystoneSessionState -StateRoot $sessDir)) 'A github.com session should restore'
-        $devLike = [pscustomobject]@{ Provider = 'GitHub'; BaseUrl = 'http://127.0.0.1:8791'; ProjectPath = 'keystone-demo/sample'; DefaultBranch = 'main'; BaselineMap = @{} }
-        Save-KeystoneSessionState -StateRoot $sessDir -Session $devLike
-        $script:KeystoneDevGitHubUrl = $null
-        Assert ($null -eq (Read-KeystoneSessionState -StateRoot $sessDir)) 'A LocalDev session must never restore in a normal run'
+        Save-GangplankSessionState -StateRoot $sessDir -Session $live
+        Assert ($null -ne (Read-GangplankSessionState -StateRoot $sessDir)) 'A github.com session should restore'
+        $devLike = [pscustomobject]@{ Provider = 'GitHub'; BaseUrl = 'http://127.0.0.1:8791'; ProjectPath = 'gangplank-demo/sample'; DefaultBranch = 'main'; BaselineMap = @{} }
+        Save-GangplankSessionState -StateRoot $sessDir -Session $devLike
+        $script:GangplankDevGitHubUrl = $null
+        Assert ($null -eq (Read-GangplankSessionState -StateRoot $sessDir)) 'A LocalDev session must never restore in a normal run'
     } finally { Remove-Item -LiteralPath $sessDir -Recurse -Force -ErrorAction SilentlyContinue }
 
     # --- GetPathModes walks only the needed directories ------------------------
@@ -160,12 +160,12 @@ class KeystoneFakeGitHub : GitHubProvider {
     Assert (@($pModes.Calls | Where-Object { $_.Endpoint -match '/git/trees/docs$' }).Count -eq 0) 'Unrelated directory was listed'
 
     # --- Smart Save keeps the executable bit end to end ------------------------
-    $temp = Join-Path ([IO.Path]::GetTempPath()) ('keystone-save-' + [guid]::NewGuid().ToString('N'))
+    $temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-save-' + [guid]::NewGuid().ToString('N'))
     [void](New-Item -ItemType Directory -Path $temp)
     try {
         [IO.File]::WriteAllText((Join-Path $temp 'build.sh'),"echo old`n")
         [IO.File]::WriteAllText((Join-Path $temp 'README.md'),"old`n")
-        $baseline = Get-KeystoneLocalFileMap -Root $temp
+        $baseline = Get-GangplankLocalFileMap -Root $temp
         [IO.File]::WriteAllText((Join-Path $temp 'build.sh'),"echo new`n")
         [IO.File]::WriteAllText((Join-Path $temp 'notes.txt'),"new file`n")
         $state = @{ Head = 'c0'; Tree = $null; Ref = $null }
@@ -188,10 +188,10 @@ class KeystoneFakeGitHub : GitHubProvider {
         }.GetNewClosure())
         $session = [pscustomobject]@{
             Provider = 'GitHub'; ProviderObj = $pSave; ProjectPath = 'team/demo'
-            DefaultBranch = 'main'; LastBranch = 'keystone/work-1'; LocalPath = $temp
+            DefaultBranch = 'main'; LastBranch = 'gangplank/work-1'; LocalPath = $temp
             BaselineSha = 'c0'; BaselineMap = $baseline
         }
-        $saved = Invoke-KeystoneWorkspaceSave -Session $session -SelectedPaths @('build.sh','notes.txt') -Message 'update build script'
+        $saved = Invoke-GangplankWorkspaceSave -Session $session -SelectedPaths @('build.sh','notes.txt') -Message 'update build script'
         Assert ($saved.Commit -eq 'c1') 'Save did not commit'
         $tree = $state.Tree | ConvertFrom-Json
         $entry = @($tree.tree | Where-Object { $_.path -eq 'build.sh' })[0]
@@ -205,28 +205,28 @@ class KeystoneFakeGitHub : GitHubProvider {
 }
 
 # --- Host hardening (text checks; behaviour is covered by tests/e2e/host.e2e.mjs) ---
-$host1 = [IO.File]::ReadAllText((Join-Path $root 'Start-KeystoneWeb.ps1'))
+$host1 = [IO.File]::ReadAllText((Join-Path $root 'Start-Gangplank.ps1'))
 $http = [IO.File]::ReadAllText((Join-Path $root 'Server/Http.ps1'))
 $routes = [IO.File]::ReadAllText((Join-Path $root 'Server/Routes.ps1'))
 foreach ($text in @($host1,$http,$routes)) {
-    Assert ($text -notmatch 'KEYSTONE_LOCAL_DEV') 'No environment variable may switch the host into LocalDev'
+    Assert ($text -notmatch 'GANGPLANK_LOCAL_DEV') 'No environment variable may switch the host into LocalDev'
 }
 Assert ($http -match 'TcpListener') 'Host must use TcpListener (TechStack), not HttpListener'
 Assert ($http -notmatch 'HttpListener') 'HttpListener must be gone'
 Assert ($http -notmatch "unsafe-inline|unsafe-eval") 'CSP must not allow inline script or style'
 Assert ($http -match 'HttpOnly; SameSite=Strict') 'Session cookie must be HttpOnly and SameSite=Strict'
-Assert ($routes -match 'Split-KeystoneCodedMessage') 'Route errors must go through the safe error filter'
+Assert ($routes -match 'Split-GangplankCodedMessage') 'Route errors must go through the safe error filter'
 Assert ($routes -notmatch '\$_\.Exception\.Message\s*\}') 'Raw exception text must not be sent to the browser'
-# Every Keystone function the launcher calls must be exported by the module.
-$exported = @((Get-Module Keystone).ExportedFunctions.Keys)
-$calls = @([regex]::Matches($host1,'\b[A-Z][a-z]+-Keystone[A-Za-z]+\b') | ForEach-Object { $_.Value } | Sort-Object -Unique)
+# Every Gangplank function the launcher calls must be exported by the module.
+$exported = @((Get-Module Gangplank).ExportedFunctions.Keys)
+$calls = @([regex]::Matches($host1,'\b[A-Z][a-z]+-Gangplank[A-Za-z]+\b') | ForEach-Object { $_.Value } | Sort-Object -Unique)
 $unexported = @($calls | Where-Object { $_ -notin $exported })
 Assert ($unexported.Count -eq 0) ('Launcher calls functions the module does not export: ' + ($unexported -join ', '))
 # Every function the routes call must exist in the module.
-$moduleCommands = @((& (Get-Module Keystone) { Get-Command -Module Keystone -CommandType Function | ForEach-Object Name }))
-$routeCalls = @([regex]::Matches($routes + $http,'\b(?:Get|Set|New|Invoke|Test|Send|Read|Start|Stop|Remove|Save|Use|Split|Initialize|Assert|Parse|Resolve|ConvertTo|Update|Wait|Write)-Keystone[A-Za-z]+\b') | ForEach-Object { $_.Value } | Sort-Object -Unique)
-$missing = @($routeCalls | Where-Object { $_ -notin $moduleCommands -and $_ -notin @('Parse-KeystoneRepoUrl') })
+$moduleCommands = @((& (Get-Module Gangplank) { Get-Command -Module Gangplank -CommandType Function | ForEach-Object Name }))
+$routeCalls = @([regex]::Matches($routes + $http,'\b(?:Get|Set|New|Invoke|Test|Send|Read|Start|Stop|Remove|Save|Use|Split|Initialize|Assert|Parse|Resolve|ConvertTo|Update|Wait|Write)-Gangplank[A-Za-z]+\b') | ForEach-Object { $_.Value } | Sort-Object -Unique)
+$missing = @($routeCalls | Where-Object { $_ -notin $moduleCommands -and $_ -notin @('Parse-GangplankRepoUrl') })
 Assert ($missing.Count -eq 0) ('Routes call functions that do not exist: ' + ($missing -join ', '))
-$ci = [IO.File]::ReadAllText((Join-Path $root '.github/workflows/keystone-ci.yml'))
-Assert ($ci -notmatch 'KEYSTONE_LOCAL_DEV') 'CI must pass -LocalDev explicitly instead of an environment switch'
+$ci = [IO.File]::ReadAllText((Join-Path $root '.github/workflows/gangplank-ci.yml'))
+Assert ($ci -notmatch 'GANGPLANK_LOCAL_DEV') 'CI must pass -LocalDev explicitly instead of an environment switch'
 Write-Host 'Provider safety, file-mode and launcher hardening checks passed.' -ForegroundColor Green
