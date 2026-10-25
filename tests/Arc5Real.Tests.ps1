@@ -26,6 +26,7 @@ try {
     $env:ARC_DATA = $data
     $env:ARC_TEST_MODE = '1'
     Import-Module (Join-Path $root 'Keystone.psm1') -Force -WarningAction SilentlyContinue
+    . (Join-Path $PSScriptRoot 'TestIsolation.ps1')
     Initialize-Keystone -LogLevel ERROR
     Assert ((Get-KeystoneArcFlavor -ArcRoot $arc) -eq 'v5') 'Real ARC checkout should be detected as ARC 5'
     Assert (Import-KeystoneArcSession -Quiet) ('Real ARC 5 engine failed to load: ' + (Get-KeystoneArcConnectionStatus).message)

@@ -50,6 +50,7 @@ function Get-PmVaultNameCatalog {
     # Keystone reports incomplete installations instead of a vague status.
     $env:KEYSTONE_ARC_PATH = $temp
     Import-Module (Join-Path $root 'Keystone.psm1') -Force -WarningAction SilentlyContinue
+    . (Join-Path $PSScriptRoot 'TestIsolation.ps1')
     Initialize-Keystone
     Assert (-not (Import-KeystoneArcSession -Quiet)) 'Incomplete ARC installation must be rejected'
     $incomplete = Get-KeystoneArcConnectionStatus

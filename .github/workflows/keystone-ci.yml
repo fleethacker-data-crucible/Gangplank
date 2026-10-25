@@ -47,6 +47,9 @@ jobs:
     name: Windows PowerShell 5.1 tests
     runs-on: [self-hosted, Windows, X64]
     needs: [hygiene]
+    env:
+      # The runner is a real user account: keep its Keystone credentials and session out of reach.
+      LOCALAPPDATA: ${{ runner.temp }}\keystone-appdata
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
       - name: Offline module tests
@@ -65,6 +68,8 @@ jobs:
     name: Host end to end (synthetic GitHub)
     runs-on: [self-hosted, Windows, X64]
     needs: [hygiene]
+    env:
+      LOCALAPPDATA: ${{ runner.temp }}\keystone-appdata
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
       - name: Browser markup and JavaScript
