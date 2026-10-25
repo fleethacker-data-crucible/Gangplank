@@ -1,4 +1,4 @@
-# Copied from ARC .github/ci-run.ps1 (keep in sync).
+# Copied from Lazarette .github/ci-run.ps1 (keep in sync).
 # Runs one CI command and, when it fails, turns the interesting output lines into GitHub
 # annotations (::error) so failures can be read from the PR checks page without the job log.
 #   .github\ci-run.ps1 -Title 'cargo test' -Command 'cargo test --release' [-WorkingDirectory pdf-engine]

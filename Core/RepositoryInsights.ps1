@@ -2,26 +2,26 @@
 # Read-only GitHub/GitLab repository intelligence.
 # Returns normalized, bounded metadata; never passes credentials to the browser.
 
-function Get-KeystoneKnownBranches {
+function Get-GangplankKnownBranches {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session)
     return @($Session.ProviderObj.GetBranches([string]$Session.ProjectPath) | Where-Object { $_ } | Select-Object -Unique)
 }
 
-function Assert-KeystoneKnownBranch {
+function Assert-GangplankKnownBranch {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session,[Parameter(Mandatory)][string]$Branch)
-    if ($Branch.Length -gt 200 -or $Branch -cnotin @(Get-KeystoneKnownBranches -Session $Session)) {
+    if ($Branch.Length -gt 200 -or $Branch -cnotin @(Get-GangplankKnownBranches -Session $Session)) {
         throw 'Select an existing branch from this repository.'
     }
     return $Branch
 }
 
-function Get-KeystoneRepositoryBranches {
+function Get-GangplankRepositoryBranches {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session)
     $current = if ($Session.LastBranch) { [string]$Session.LastBranch } else { [string]$Session.DefaultBranch }
-    $names = @(Get-KeystoneKnownBranches -Session $Session | Select-Object -First 150)
+    $names = @(Get-GangplankKnownBranches -Session $Session | Select-Object -First 150)
     $out = foreach ($name in $names) {
         [pscustomobject]@{
             Name=[string]$name
@@ -32,11 +32,11 @@ function Get-KeystoneRepositoryBranches {
     return @($out)
 }
 
-function Get-KeystoneRepositoryHistory {
+function Get-GangplankRepositoryHistory {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session,[string]$Branch,[ValidateRange(1,50)][int]$Limit=30)
     if (-not $Branch) { $Branch = if ($Session.LastBranch) { [string]$Session.LastBranch } else { [string]$Session.DefaultBranch } }
-    [void](Assert-KeystoneKnownBranch -Session $Session -Branch $Branch)
+    [void](Assert-GangplankKnownBranch -Session $Session -Branch $Branch)
     $encoded = [uri]::EscapeDataString($Branch)
     $provider = $Session.ProviderObj
     if ($Session.Provider -eq 'GitHub') {
@@ -69,11 +69,11 @@ function Get-KeystoneRepositoryHistory {
     return @($items | Select-Object -First $Limit)
 }
 
-function Get-KeystoneRepositoryComparison {
+function Get-GangplankRepositoryComparison {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session,[Parameter(Mandatory)][string]$Base,[Parameter(Mandatory)][string]$Head)
-    [void](Assert-KeystoneKnownBranch -Session $Session -Branch $Base)
-    [void](Assert-KeystoneKnownBranch -Session $Session -Branch $Head)
+    [void](Assert-GangplankKnownBranch -Session $Session -Branch $Base)
+    [void](Assert-GangplankKnownBranch -Session $Session -Branch $Head)
     $be = [uri]::EscapeDataString($Base)
     $he = [uri]::EscapeDataString($Head)
     $provider = $Session.ProviderObj
@@ -102,7 +102,7 @@ function Get-KeystoneRepositoryComparison {
     }
 }
 
-function Get-KeystoneRepositoryReviews {
+function Get-GangplankRepositoryReviews {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session)
     $provider = $Session.ProviderObj
@@ -131,15 +131,15 @@ function Get-KeystoneRepositoryReviews {
     return @($items | Select-Object -First 30)
 }
 
-function Get-KeystoneRepositoryInsights {
+function Get-GangplankRepositoryInsights {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session)
     $current = if ($Session.LastBranch) { [string]$Session.LastBranch } else { [string]$Session.DefaultBranch }
-    $branches = @(Get-KeystoneRepositoryBranches -Session $Session)
-    $reviews = @(Get-KeystoneRepositoryReviews -Session $Session)
+    $branches = @(Get-GangplankRepositoryBranches -Session $Session)
+    $reviews = @(Get-GangplankRepositoryReviews -Session $Session)
     $notes = New-Object System.Collections.Generic.List[string]
     if ($current -ne $Session.DefaultBranch) {
-        $comparison = Get-KeystoneRepositoryComparison -Session $Session -Base $Session.DefaultBranch -Head $current
+        $comparison = Get-GangplankRepositoryComparison -Session $Session -Base $Session.DefaultBranch -Head $current
         if ($null -ne $comparison.BehindBy -and [int]$comparison.BehindBy -gt 0) {
             [void]$notes.Add("This branch is $($comparison.BehindBy) commit(s) behind the default branch. Review updates before combining.")
         }

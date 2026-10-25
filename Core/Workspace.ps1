@@ -1,27 +1,27 @@
 #Requires -Version 5.1
 # Verified workspace operations: download baseline -> inspect -> select -> save.
 
-function Assert-KeystoneTrustedRepositoryUrl {
+function Assert-GangplankTrustedRepositoryUrl {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Url)
     $uri = $null
     if (-not [uri]::TryCreate($Url,[UriKind]::Absolute,[ref]$uri)) { throw 'Enter a complete HTTPS GitHub or GitLab project URL.' }
-    # LocalDev synthetic provider (set only by Start-KeystoneWeb.ps1 -LocalDev).
-    if ((Test-KeystoneDevRepositoryUrl -Url $Url) -and -not $uri.UserInfo -and @($uri.AbsolutePath.Trim('/') -split '/').Count -ge 2) { return }
+    # LocalDev synthetic provider (set only by Start-Gangplank.ps1 -LocalDev).
+    if ((Test-GangplankDevRepositoryUrl -Url $Url) -and -not $uri.UserInfo -and @($uri.AbsolutePath.Trim('/') -split '/').Count -ge 2) { return }
     if ($uri.Scheme -ne 'https' -or $uri.UserInfo -or $uri.Port -ne 443) { throw 'Only standard HTTPS project URLs without embedded credentials are supported.' }
     $hosts = @('github.com','web.git.mil')
-    if ($env:KEYSTONE_GITLAB_ALLOWED_HOSTS) {
-        $hosts += @($env:KEYSTONE_GITLAB_ALLOWED_HOSTS -split ',' | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
+    if ((Get-GangplankEnv GITLAB_ALLOWED_HOSTS)) {
+        $hosts += @((Get-GangplankEnv GITLAB_ALLOWED_HOSTS) -split ',' | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
     }
     if ($uri.Host.ToLowerInvariant() -notin $hosts) {
-        throw 'Repository host not allowlisted. Ask an administrator to set KEYSTONE_GITLAB_ALLOWED_HOSTS for approved self-hosted GitLab.'
+        throw 'Repository host not allowlisted. Ask an administrator to set GANGPLANK_GITLAB_ALLOWED_HOSTS for approved self-hosted GitLab.'
     }
     if ($uri.Host -eq 'github.com' -and @($uri.AbsolutePath.Trim('/') -split '/').Count -lt 2) { throw 'GitHub project URL needs an owner and repository.' }
     if ($uri.AbsolutePath.Trim('/') -eq '') { throw 'Repository path is missing.' }
 }
 # All writes are restricted to changed, explicitly selected files.
 
-function Get-KeystoneRemoteHead {
+function Get-GangplankRemoteHead {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session, [string]$Branch)
     if (-not $Branch) { $Branch = $Session.DefaultBranch }
@@ -34,7 +34,7 @@ function Get-KeystoneRemoteHead {
     return [string]$ref.commit.id
 }
 
-function ConvertTo-KeystoneBranchName {
+function ConvertTo-GangplankBranchName {
     # A friendly name ("Dummy dev") becomes a valid branch name ("dummy-dev"); anything
     # still invalid is refused with a message a non-Git user can act on.
     [CmdletBinding()]
@@ -47,14 +47,14 @@ function ConvertTo-KeystoneBranchName {
     return $n
 }
 
-function New-KeystoneWorkBranch {
+function New-GangplankWorkBranch {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session,[string]$Name)
     $base = $Session.DefaultBranch
-    $head = Get-KeystoneRemoteHead -Session $Session -Branch $base
+    $head = Get-GangplankRemoteHead -Session $Session -Branch $base
     if (-not $head) { throw 'The default branch has no commit. Initialize this repository through the provider first.' }
-    if ([string]::IsNullOrWhiteSpace($Name)) { $Name = 'keystone/work-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + ([guid]::NewGuid().ToString('N').Substring(0,6)) }
-    $Name = ConvertTo-KeystoneBranchName -Name $Name
+    if ([string]::IsNullOrWhiteSpace($Name)) { $Name = 'gangplank/work-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + ([guid]::NewGuid().ToString('N').Substring(0,6)) }
+    $Name = ConvertTo-GangplankBranchName -Name $Name
     if ($Name -eq $Session.DefaultBranch) { throw "BAD_REQUEST|'$Name' is the shared default branch. Choose a different name for your work." }
     if (@($Session.Branches) -contains $Name) { throw "CONFLICT|A branch named '$Name' already exists. Choose another name, or use Explore to download it." }
     try {
@@ -74,7 +74,7 @@ function New-KeystoneWorkBranch {
     }
     # Keep the known branch list current, so a second start with the same name is caught here.
     $Session | Add-Member -MemberType NoteProperty -Name Branches -Value @(@($Session.Branches) + $Name | Where-Object { $_ } | Select-Object -Unique) -Force
-    Write-KeystoneAudit -Action 'branch.created' -Data @{ provider = $Session.Provider; project = $Session.ProjectPath; branch = $Name; from = $base; sha = $head }
+    Write-GangplankAudit -Action 'branch.created' -Data @{ provider = $Session.Provider; project = $Session.ProjectPath; branch = $Name; from = $base; sha = $head }
     $Session.LastBranch = $Name
     $Session.BaselineSha = $null
     $Session.BaselineMap = @{}
@@ -82,12 +82,12 @@ function New-KeystoneWorkBranch {
     return $Name
 }
 
-function Get-KeystoneSafeWorkspacePath {
+function Get-GangplankSafeWorkspacePath {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Base, [Parameter(Mandatory)][string]$Project, [Parameter(Mandatory)][string]$Branch)
     # <root>\<repository>\<branch>, like a normal clone (dumping-grounds\dummy-dev).
-    $folder = Get-KeystoneSafeName ((($Project -split '/') | Where-Object { $_ })[-1])
-    $branchName = Get-KeystoneSafeName $Branch
+    $folder = Get-GangplankSafeName ((($Project -split '/') | Where-Object { $_ })[-1])
+    $branchName = Get-GangplankSafeName $Branch
     $path = Join-Path $Base (Join-Path $folder $branchName)
     if (Test-Path -LiteralPath $path) {
         $path = Join-Path $Base (Join-Path $folder ("$branchName-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + ([guid]::NewGuid().ToString('N').Substring(0,6))))
@@ -95,7 +95,7 @@ function Get-KeystoneSafeWorkspacePath {
     return $path
 }
 
-function Test-KeystoneSensitivePath {
+function Test-GangplankSensitivePath {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
     $p = $Path.Replace('\','/').ToLowerInvariant()
@@ -105,7 +105,7 @@ function Test-KeystoneSensitivePath {
     return $false
 }
 
-function Test-KeystoneSecretContent {
+function Test-GangplankSecretContent {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
@@ -118,30 +118,30 @@ function Test-KeystoneSecretContent {
     return $false
 }
 
-function Get-KeystoneWorkspacePreview {
+function Get-GangplankWorkspacePreview {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session)
     if (-not $Session.LocalPath -or -not (Test-Path -LiteralPath $Session.LocalPath -PathType Container)) {
-        throw 'Download the project into a Keystone workspace first.'
+        throw 'Download the project into a Gangplank workspace first.'
     }
     if (-not $Session.BaselineSha) {
         throw 'This folder has no verified download baseline. Download the project again.'
     }
     $branch = if ($Session.LastBranch) { $Session.LastBranch } else { $Session.DefaultBranch }
-    $remote = Get-KeystoneRemoteHead -Session $Session -Branch $branch
+    $remote = Get-GangplankRemoteHead -Session $Session -Branch $branch
     $stale = ($remote -ne $Session.BaselineSha)
-    $local = Get-KeystoneLocalFileMap -Root $Session.LocalPath
-    $diff = Get-KeystonePathDiff -LocalMap $local -RemoteMap $Session.BaselineMap
+    $local = Get-GangplankLocalFileMap -Root $Session.LocalPath
+    $diff = Get-GangplankPathDiff -LocalMap $local -RemoteMap $Session.BaselineMap
     $records = New-Object System.Collections.Generic.List[object]
     foreach ($kind in @('New','Modified','Deleted')) {
         foreach ($path in @($diff.$kind | Sort-Object)) {
-            $blocked = Test-KeystoneSensitivePath -Path $path
+            $blocked = Test-GangplankSensitivePath -Path $path
             $size = 0
             if ($kind -ne 'Deleted') {
                 $file = Join-Path $Session.LocalPath ($path.Replace('/',[IO.Path]::DirectorySeparatorChar))
                 if (Test-Path -LiteralPath $file -PathType Leaf) { $size = (Get-Item -LiteralPath $file -Force).Length }
                 if ($size -gt 5242880) { $blocked = $true }
-                elseif (Test-KeystoneSecretContent -Path $file) { $blocked = $true }
+                elseif (Test-GangplankSecretContent -Path $file) { $blocked = $true }
             }
             [void]$records.Add([pscustomobject]@{
                 Path = $path; Kind = $kind; Size = $size
@@ -150,7 +150,7 @@ function Get-KeystoneWorkspacePreview {
         }
     }
     $active = @($records.ToArray() | Where-Object { $_.Selected })
-    $msg = New-KeystoneSmartMessage -Added @($active | Where-Object { $_.Kind -eq 'New' } | ForEach-Object Path) -Modified @($active | Where-Object { $_.Kind -eq 'Modified' } | ForEach-Object Path) -Deleted @($active | Where-Object { $_.Kind -eq 'Deleted' } | ForEach-Object Path)
+    $msg = New-GangplankSmartMessage -Added @($active | Where-Object { $_.Kind -eq 'New' } | ForEach-Object Path) -Modified @($active | Where-Object { $_.Kind -eq 'Modified' } | ForEach-Object Path) -Deleted @($active | Where-Object { $_.Kind -eq 'Deleted' } | ForEach-Object Path)
     return [pscustomobject]@{
         Project = $Session.ProjectPath; Provider = $Session.Provider; Branch = $branch
         LocalPath = $Session.LocalPath; BaselineSha = $Session.BaselineSha
@@ -158,7 +158,7 @@ function Get-KeystoneWorkspacePreview {
     }
 }
 
-function Invoke-KeystoneWorkspaceSave {
+function Invoke-GangplankWorkspaceSave {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Session,
@@ -166,7 +166,7 @@ function Invoke-KeystoneWorkspaceSave {
         [string]$Message,
         [switch]$PublicConfirmed
     )
-    $preview = Get-KeystoneWorkspacePreview -Session $Session
+    $preview = Get-GangplankWorkspacePreview -Session $Session
     if ($preview.RemoteChanged) { throw 'The project changed online. No files were uploaded. Download a fresh workspace and reconcile your edits.' }
     $available = @{}
     foreach ($entry in @($preview.Changes)) { $available[$entry.Path] = $entry }
@@ -178,14 +178,14 @@ function Invoke-KeystoneWorkspaceSave {
     }
     # Fail closed before any remote write; publication is not public-release authorization.
     $scanPaths = @($paths | Where-Object { $available[$_].Kind -ne 'Deleted' })
-    $sentinel = Test-KeystoneSentinelPublication -Session $Session -Paths $scanPaths
+    $sentinel = Test-GangplankSentinelPublication -Session $Session -Paths $scanPaths
     if (-not $sentinel.Allowed) {
         $codes = @($sentinel.Findings | Where-Object { $_.Severity -in @('Block','Review') } | ForEach-Object Code | Select-Object -Unique)
         throw ('Sentinel blocked publication: ' + ($codes -join ', '))
     }
     if ($sentinel.RequiresPublicConfirmation) {
-        if ($env:KEYSTONE_ALLOW_PUBLIC_PUBLISH -ne '1') {
-            throw 'Sentinel blocks public publishing by default. Administrator approval and KEYSTONE_ALLOW_PUBLIC_PUBLISH=1 required.'
+        if ((Get-GangplankEnv ALLOW_PUBLIC_PUBLISH) -ne '1') {
+            throw 'Sentinel blocks public publishing by default. Administrator approval and GANGPLANK_ALLOW_PUBLIC_PUBLISH=1 required.'
         }
         if (-not $PublicConfirmed) {
             throw 'Public repository detected. Explicit public-publish confirmation is required.'
@@ -194,14 +194,14 @@ function Invoke-KeystoneWorkspaceSave {
     $added = @($paths | Where-Object { $available[$_].Kind -eq 'New' })
     $modified = @($paths | Where-Object { $available[$_].Kind -eq 'Modified' })
     $deleted = @($paths | Where-Object { $available[$_].Kind -eq 'Deleted' })
-    $suggestion = New-KeystoneSmartMessage -Added $added -Modified $modified -Deleted $deleted
+    $suggestion = New-GangplankSmartMessage -Added $added -Modified $modified -Deleted $deleted
     if ([string]::IsNullOrWhiteSpace($Message)) { $Message = $suggestion.Title }
     if ($Message.Length -gt 160 -or $Message -match '[\r\n]') { throw 'Commit message must be a single line under 160 characters.' }
     $branch = $preview.Branch
-    if ($branch -eq $Session.DefaultBranch -and $env:KEYSTONE_ALLOW_DEFAULT_BRANCH_WRITES -ne '1') {
+    if ($branch -eq $Session.DefaultBranch -and (Get-GangplankEnv ALLOW_DEFAULT_BRANCH_WRITES) -ne '1') {
         throw 'Direct saves to the default branch are disabled. Create a work branch from the browser before saving.'
     }
-    $head = Get-KeystoneRemoteHead -Session $Session -Branch $branch
+    $head = Get-GangplankRemoteHead -Session $Session -Branch $branch
     if ($head -ne $Session.BaselineSha) { throw 'Remote branch changed. Save cancelled before upload.' }
 
     $root = [IO.Path]::GetFullPath($Session.LocalPath).TrimEnd('\','/')
@@ -224,7 +224,7 @@ function Invoke-KeystoneWorkspaceSave {
             $item = Get-Item -LiteralPath $full -Force
             if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Linked files are not supported: $p" }
             if ($item.Length -gt 5242880) { throw "File grew beyond 5 MB: $p" }
-            if (Test-KeystoneSecretContent -Path $full) { throw "Potential secret detected. File not uploaded: $p" }
+            if (Test-GangplankSecretContent -Path $full) { throw "Potential secret detected. File not uploaded: $p" }
             $sha = $provider.CreateBlob($Session.ProjectPath,[IO.File]::ReadAllBytes($full))
             $mode = if ($modes.ContainsKey($p)) { [string]$modes[$p] } else { '100644' }
             [void]$treeItems.Add(@{ path = $p; mode = $mode; type = 'blob'; sha = $sha })
@@ -247,7 +247,7 @@ function Invoke-KeystoneWorkspaceSave {
             $item = Get-Item -LiteralPath $full -Force
             if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Linked files are not supported: $p" }
             if ($item.Length -gt 5242880) { throw "File grew beyond 5 MB: $p" }
-            if (Test-KeystoneSecretContent -Path $full) { throw "Potential secret detected. File not uploaded: $p" }
+            if (Test-GangplankSecretContent -Path $full) { throw "Potential secret detected. File not uploaded: $p" }
             [void]$actions.Add(@{
                 action = $(if ($available[$p].Kind -eq 'New') { 'create' } else { 'update' })
                 file_path = $p; content = [Convert]::ToBase64String([IO.File]::ReadAllBytes($full)); encoding = 'base64'
@@ -265,7 +265,7 @@ function Invoke-KeystoneWorkspaceSave {
             $a.last_commit_id = [string]$metadata.last_commit_id
         }
         # One last HEAD check before publishing this batch.
-        if ((Get-KeystoneRemoteHead -Session $Session -Branch $branch) -ne $head) { throw 'The remote branch changed while preparing the save.' }
+        if ((Get-GangplankRemoteHead -Session $Session -Branch $branch) -ne $head) { throw 'The remote branch changed while preparing the save.' }
         $result = $provider.InvokeApi('POST',"projects/$project/repository/commits",$payload)
         $newHead = [string]$result.id
     } else {
@@ -277,11 +277,11 @@ function Invoke-KeystoneWorkspaceSave {
             $Session.BaselineMap.Remove($p)
         } else {
             $full = Join-Path $root ($p.Replace('/',[IO.Path]::DirectorySeparatorChar))
-            $Session.BaselineMap[$p] = Get-KeystoneFileSha256 -Path $full
+            $Session.BaselineMap[$p] = Get-GangplankFileSha256 -Path $full
         }
     }
     $Session.BaselineSha = $newHead
-    Write-KeystoneAudit -Action 'commit.created' -Data @{
+    Write-GangplankAudit -Action 'commit.created' -Data @{
         provider = $Session.Provider; project = $Session.ProjectPath; branch = $branch; parent = $head; commit = $newHead
         message = $Message; added = @($added); modified = @($modified); deleted = @($deleted)
     }

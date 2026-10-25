@@ -1,6 +1,6 @@
-// End to end: the real Keystone host (Start-KeystoneWeb.ps1 -LocalDev) against the
+// End to end: the real Gangplank host (Start-Gangplank.ps1 -LocalDev) against the
 // synthetic GitHub server (dev/fake-github.mjs). Fictional data, temp folders only.
-// Run: node --test tests/e2e/host.e2e.mjs   (KEYSTONE_PWSH overrides the shell)
+// Run: node --test tests/e2e/host.e2e.mjs   (GANGPLANK_PWSH overrides the shell)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -13,8 +13,8 @@ import { startFakeGitHub } from '../../dev/fake-github.mjs';
 import { startFakeAi } from '../../dev/fake-ai.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const shell = process.env.KEYSTONE_PWSH || (process.platform === 'win32' ? 'powershell.exe' : 'pwsh');
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'keystone-e2e-'));
+const shell = process.env.GANGPLANK_PWSH || (process.platform === 'win32' ? 'powershell.exe' : 'pwsh');
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'gangplank-e2e-'));
 const workRoot = path.join(temp, 'work');
 const fake = await startFakeGitHub({ port: 0 });
 const fakeAi = await startFakeAi({ port: 0, mode: 'openai' });
@@ -22,11 +22,11 @@ let host = null;
 
 function startHost() {
   const port = 20000 + Math.floor(Math.random() * 9000);
-  const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'Start-KeystoneWeb.ps1'),
+  const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'Start-Gangplank.ps1'),
     '-LocalDev', '-NoBrowser', '-Port', String(port), '-DevGitHubUrl', fake.url + '/', '-WorkRoot', workRoot];
   if (shell.toLowerCase().includes('powershell')) args.unshift('-STA');
   const env = { ...process.env, GITHUB_TOKEN: fake.token, LOCALAPPDATA: path.join(temp, 'appdata'), HOME: temp,
-    KEYSTONE_ARC_PATH: '', GITLAB_TOKEN: '', KEYSTONE_AI_TOKEN: fakeAi.token, GENAI_TOKEN: '', LLM_TOKEN: '', OPENAI_API_KEY: '', LLM_URL: '', KEYSTONE_AI_URL: '', KEYSTONE_WORK_ROOT: '' };
+    GANGPLANK_LAZARETTE_PATH: '', GITLAB_TOKEN: '', GANGPLANK_AI_TOKEN: fakeAi.token, GENAI_TOKEN: '', LLM_TOKEN: '', OPENAI_API_KEY: '', LLM_URL: '', GANGPLANK_AI_URL: '', GANGPLANK_WORK_ROOT: '' };
   const child = spawn(shell, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   return new Promise((resolve, reject) => {
@@ -60,7 +60,7 @@ after(async () => {
 let cookie = '';
 let client = '';
 async function call(h, method, p, body, extra = {}) {
-  const headers = { 'X-Keystone-Client': client, ...(cookie ? { Cookie: cookie } : {}), ...extra };
+  const headers = { 'X-Gangplank-Client': client, ...(cookie ? { Cookie: cookie } : {}), ...extra };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const r = await fetch(h.base + p, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const text = await r.text();
@@ -92,13 +92,13 @@ test('session bootstrap and request gate', async () => {
   assert.equal(r.headers.get('x-frame-options'), 'DENY');
   const getStatus = async (u) => { const x = await fetch(u); await x.text(); return x.status; };
   assert.equal(await getStatus(h.base + '/app.js'), 200);
-  assert.equal(await getStatus(h.base + '/Keystone.psm1'), 404, 'Only manifest files are served');
+  assert.equal(await getStatus(h.base + '/Gangplank.psm1'), 404, 'Only manifest files are served');
   r = await call(h, 'POST', '/api/session', { nonce: 'wrong-wrong-wrong-wrong-wrong' });
   assert.equal(r.status, 401, 'A wrong launch nonce must be refused');
   r = await call(h, 'POST', '/api/session', { nonce: h.nonce });
   assert.equal(r.status, 200);
   const set = r.headers.get('set-cookie');
-  assert.match(set, /keystone_session=[^;]+; HttpOnly; SameSite=Strict/);
+  assert.match(set, /gangplank_session=[^;]+; HttpOnly; SameSite=Strict/);
   cookie = set.split(';')[0];
   client = r.json.client;
   assert.ok(client && client.length >= 40, 'Session must return a per-session client secret');
@@ -107,9 +107,9 @@ test('session bootstrap and request gate', async () => {
   assert.equal(r.status, 401, 'The launch nonce must work only once');
   // Browsers send localhost cookies to every port: a cookie replayed by another local
   // server (without the tab's secret) must not work.
-  r = await call(h, 'GET', '/api/status', undefined, { 'X-Keystone-Client': 'keystone-ui/1' });
+  r = await call(h, 'GET', '/api/status', undefined, { 'X-Gangplank-Client': 'gangplank-ui/1' });
   assert.equal(r.status, 401, 'Cookie with a guessed client header must be refused');
-  r = await call(h, 'GET', '/api/status', undefined, { 'X-Keystone-Client': '' });
+  r = await call(h, 'GET', '/api/status', undefined, { 'X-Gangplank-Client': '' });
   assert.equal(r.status, 401, 'Missing client secret must be refused');
   const savedCookie = cookie; cookie = '';
   r = await call(h, 'GET', '/api/status');
@@ -120,7 +120,7 @@ test('session bootstrap and request gate', async () => {
   // fetch() cannot forge Host; a raw request can (as a DNS-rebinding page would).
   const port = Number(new URL(h.base).port);
   const raw = await new Promise((resolve, reject) => {
-    const sock = net.connect(port, '127.0.0.1', () => sock.write(`GET /api/status HTTP/1.1\r\nHost: evil.example:${port}\r\nX-Keystone-Client: ${client}\r\nCookie: ${cookie}\r\n\r\n`));
+    const sock = net.connect(port, '127.0.0.1', () => sock.write(`GET /api/status HTTP/1.1\r\nHost: evil.example:${port}\r\nX-Gangplank-Client: ${client}\r\nCookie: ${cookie}\r\n\r\n`));
     let data = ''; sock.on('data', (d) => (data += d)); sock.on('end', () => resolve(data)); sock.on('error', reject);
   });
   assert.match(raw, /^HTTP\/1\.1 400 /, 'Foreign Host (DNS rebinding) must be refused');
@@ -141,9 +141,9 @@ test('session bootstrap and request gate', async () => {
 
 test('connect, start, edit, Smart Save, review', async () => {
   const h = host;
-  let r = await job(h, '/api/connect', { url: fake.url + '/keystone-demo/sample' });
+  let r = await job(h, '/api/connect', { url: fake.url + '/gangplank-demo/sample' });
   assert.equal(r.status, 200, JSON.stringify(r));
-  assert.equal(r.json.project, 'keystone-demo/sample');
+  assert.equal(r.json.project, 'gangplank-demo/sample');
   assert.ok(r.json.branches.includes('feature/demo'));
   r = await job(h, '/api/start', { name: 'dummy dev' });
   assert.equal(r.status, 200, JSON.stringify(r));
@@ -179,8 +179,8 @@ test('connect, start, edit, Smart Save, review', async () => {
   assert.equal(r.status, 200, JSON.stringify(r));
   assert.equal(r.json.saved.FileCount, 2);
   const auth = { headers: { Authorization: 'Bearer ' + fake.token } };
-  const commit = await (await fetch(`${fake.url}/repos/keystone-demo/sample/git/commits/${r.json.saved.Commit}`, auth)).json();
-  const tree = await (await fetch(`${fake.url}/repos/keystone-demo/sample/git/trees/${commit.tree.sha}?recursive=1`, auth)).json();
+  const commit = await (await fetch(`${fake.url}/repos/gangplank-demo/sample/git/commits/${r.json.saved.Commit}`, auth)).json();
+  const tree = await (await fetch(`${fake.url}/repos/gangplank-demo/sample/git/trees/${commit.tree.sha}?recursive=1`, auth)).json();
   const build = tree.tree.find((e) => e.path === 'scripts/build.sh');
   assert.equal(build.mode, '100755', 'Executable bit must survive Smart Save');
   assert.equal(tree.tree.find((e) => e.path === 'notes.md').mode, '100644');
@@ -222,6 +222,27 @@ test('session survives a restart', async () => {
   const p = await call(host, 'GET', '/api/preview');
   assert.equal(p.status, 200, p.text);
   assert.ok(p.json.changes.some((c) => c.Path === 'notes.md'), 'Pending edit should still be visible after restart: ' + JSON.stringify(p.json));
+});
+
+test('a session saved by Keystone (before the rename) is picked up', async () => {
+  // Simulate an upgrade: the saved state lives in Keystone's folder, Gangplank's does not exist yet.
+  const before = (await call(host, 'GET', '/api/status')).json;
+  await stopHost(host);
+  const current = path.join(workRoot, '.gangplank'), legacy = path.join(workRoot, '.keystone');
+  fs.rmSync(legacy, { recursive: true, force: true });
+  fs.renameSync(current, legacy);
+  host = await startHost();
+  assert.match(host.log(), /Copied your Keystone data/, 'The host should say it carried the Keystone data forward');
+  assert.ok(fs.existsSync(path.join(legacy, 'session.json')), 'The Keystone folder must be left in place');
+  assert.ok(fs.existsSync(path.join(current, 'session.json')), 'The session must be copied to the Gangplank folder');
+  cookie = '';
+  const r1 = await call(host, 'POST', '/api/session', { nonce: host.nonce });
+  cookie = r1.headers.get('set-cookie').split(';')[0];
+  client = r1.json.client;
+  const after = (await call(host, 'GET', '/api/status')).json;
+  assert.equal(after.project, before.project, 'Project restored from the Keystone session');
+  assert.equal(after.branch, before.branch);
+  assert.equal(after.hasBaseline, true);
 });
 
 test('jobs never overlap and bad jobs are clean', async () => {

@@ -1,5 +1,7 @@
 # Keystone recovery and rebuild report
 
+> Historical report, written when Gangplank was named Keystone and Lazarette was named ARC. File, launcher and workflow names below are as they were then (`Launch-Keystone.bat` is now `Launch-Gangplank.bat`, `Start-KeystoneWeb.ps1` is now `Start-Gangplank.ps1`).
+
 ## Incident and baseline
 - Broken `main` merge: `60adf3c73184a78de003dd4926bc015f785c460e` (PR #11).
 - Last intact baseline: `be1bd871c7969f044f9d480ecfbf3ecb7d7c7ed3`.

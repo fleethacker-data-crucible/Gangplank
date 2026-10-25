@@ -3,11 +3,22 @@
 #  Core/Utils.ps1
 # ============================================================
 
-function Get-KeystoneTimestamp {
+function Get-GangplankEnv {
+    # GANGPLANK_<Name> first, then the pre-rename KEYSTONE_<Name> (Gangplank was Keystone).
+    # Returns $null when neither is set (or both are blank).
+    param([Parameter(Mandatory)][string]$Name)
+    foreach ($n in @("GANGPLANK_$Name", "KEYSTONE_$Name")) {
+        $v = [Environment]::GetEnvironmentVariable($n)
+        if (-not [string]::IsNullOrWhiteSpace($v)) { return $v }
+    }
+    return $null
+}
+
+function Get-GangplankTimestamp {
     return (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
 }
 
-function Get-KeystoneSafeName {
+function Get-GangplankSafeName {
     param([string]$Name)
     if ([string]::IsNullOrWhiteSpace($Name)) { return "unnamed" }
     $s = $Name -replace '[\\/:*?"<>|]', '_'
@@ -15,7 +26,7 @@ function Get-KeystoneSafeName {
     return $s.Trim('_')
 }
 
-function Get-KeystoneHttpStatus {
+function Get-GangplankHttpStatus {
     # Status code from an Invoke-RestMethod/Invoke-WebRequest error on PS 5.1 or 7, or $null.
     param($ErrorRecord)
     try {
@@ -25,14 +36,14 @@ function Get-KeystoneHttpStatus {
     return $null
 }
 
-function ConvertTo-KeystoneRefPath {
+function ConvertTo-GangplankRefPath {
     # Percent-encode each segment of a branch name but keep '/' separators, for
     # REST paths such as git/ref/heads/<branch>.
     param([Parameter(Mandatory)][string]$Ref)
     return (($Ref -split '/') | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
 }
 
-function Get-KeystoneSafeErrorMessage {
+function Get-GangplankSafeErrorMessage {
     # Reduce an exception message to something safe to return to the browser:
     # one line, bounded, and with any provider response body (" | ...") removed.
     param([string]$Message)
@@ -44,7 +55,7 @@ function Get-KeystoneSafeErrorMessage {
     return $line
 }
 
-function Get-KeystoneFileMap {
+function Get-GangplankFileMap {
     param([string]$RootPath)
     $map = @{}
     if (-not (Test-Path -LiteralPath $RootPath)) { return $map }
@@ -60,7 +71,7 @@ function Get-KeystoneFileMap {
     return $map
 }
 
-function Copy-KeystoneTree {
+function Copy-GangplankTree {
     param([string]$Source, [string]$Destination)
     if (-not (Test-Path -LiteralPath $Destination)) {
         New-Item -ItemType Directory -Path $Destination -Force | Out-Null
@@ -68,7 +79,7 @@ function Copy-KeystoneTree {
     Get-ChildItem -LiteralPath $Source -Force | ForEach-Object {
         $dest = Join-Path $Destination $_.Name
         if ($_.PSIsContainer) {
-            Copy-KeystoneTree -Source $_.FullName -Destination $dest
+            Copy-GangplankTree -Source $_.FullName -Destination $dest
         } else {
             Copy-Item -LiteralPath $_.FullName -Destination $dest -Force
         }
@@ -76,7 +87,7 @@ function Copy-KeystoneTree {
 }
 
 
-function Clear-KeystoneInputBuffer {
+function Clear-GangplankInputBuffer {
     # Drain leftover keypresses so the next menu/Read-Host is not auto-selected
     try {
         while ($Host.UI.RawUI.KeyAvailable) {
@@ -90,15 +101,15 @@ function Clear-KeystoneInputBuffer {
     } catch { }
 }
 
-function Show-KeystoneMenu {
+function Show-GangplankMenu {
     param(
         [string]$Title = "Select",
         [string[]]$Options,
         [int]$DefaultIndex = 0,
         [switch]$AllowCancel
     )
-    if (-not $Options -or $Options.Count -eq 0) { throw "Show-KeystoneMenu: Options empty" }
-    Clear-KeystoneInputBuffer
+    if (-not $Options -or $Options.Count -eq 0) { throw "Show-GangplankMenu: Options empty" }
+    Clear-GangplankInputBuffer
 
     $selected = [Math]::Max(0, [Math]::Min($DefaultIndex, $Options.Count - 1))
     $isWindows = ($env:OS -eq "Windows_NT")
@@ -173,13 +184,13 @@ function Show-KeystoneMenu {
     }
 }
 
-function Wait-KeystoneEnter {
+function Wait-GangplankEnter {
     param([string]$Prompt = "Press Enter to continue...")
     Write-Host $Prompt -ForegroundColor DarkGray
     [void](Read-Host)
 }
 
-function Select-KeystoneFolder {
+function Select-GangplankFolder {
     param(
         [string]$Description = "Choose a folder for this repository",
         [string]$InitialDirectory = ""
@@ -202,7 +213,7 @@ function Select-KeystoneFolder {
             }
             return $null
         } catch {
-            Write-KeystoneLog -Level WARN -Message "Folder dialog unavailable: $($_.Exception.Message)"
+            Write-GangplankLog -Level WARN -Message "Folder dialog unavailable: $($_.Exception.Message)"
         }
     }
     Write-Host $Description -ForegroundColor Cyan
@@ -220,23 +231,23 @@ function Select-KeystoneFolder {
     return $typed.Trim().Trim('"')
 }
 
-function Get-KeystoneSuggestedWorkPath {
+function Get-GangplankSuggestedWorkPath {
     param(
         [string]$ProjectPath,
         [string]$Branch,
         [string]$ToolRoot
     )
     if (-not $ToolRoot) { $ToolRoot = (Get-Location).Path }
-    $safeRepo = Get-KeystoneSafeName ($ProjectPath -replace '/', '-')
-    $safeBranch = Get-KeystoneSafeName $Branch
+    $safeRepo = Get-GangplankSafeName ($ProjectPath -replace '/', '-')
+    $safeBranch = Get-GangplankSafeName $Branch
     return (Join-Path $ToolRoot "work\$safeRepo\$safeBranch")
 }
 
-function Show-KeystoneBanner {
+function Show-GangplankBanner {
     Clear-Host
     $bar = "=" * 56
     Write-Host $bar -ForegroundColor Cyan
-    Write-Host "  KEYSTONE  -  GitLab / GitHub  (no git.exe)" -ForegroundColor Cyan
+    Write-Host "  GANGPLANK  -  GitLab / GitHub  (no git.exe)" -ForegroundColor Cyan
     Write-Host $bar -ForegroundColor Cyan
     Write-Host "  Open a project, get files, share updates, create MRs." -ForegroundColor Gray
     Write-Host ""
