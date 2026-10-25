@@ -21,7 +21,11 @@ $exe = if ($PSVersionTable.PSEdition -eq 'Core') { (Get-Process -Id $PID).Path }
 $psArgs = @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',('"{0}"' -f (Join-Path $root 'Start-KeystoneWeb.ps1')),'-LocalDev','-NoBrowser','-Port',[string]$port,'-WorkRoot',('"{0}"' -f (Join-Path $temp 'work')))
 $startArgs = @{ FilePath = $exe; ArgumentList = $psArgs; PassThru = $true; RedirectStandardOutput = $out; RedirectStandardError = (Join-Path $temp 'host.err') }
 if ($env:OS -eq 'Windows_NT') { $startArgs.WindowStyle = 'Hidden' }
-$process = Start-Process @startArgs
+# The host is a separate process: give it a throwaway LOCALAPPDATA so it never sees
+# the real credential store or saved session of the account running the test.
+$savedAppData = $env:LOCALAPPDATA
+$env:LOCALAPPDATA = Join-Path $temp 'appdata'
+try { $process = Start-Process @startArgs } finally { $env:LOCALAPPDATA = $savedAppData }
 try {
     $launch = $null
     for ($i = 0; $i -lt 120 -and -not $launch; $i++) {

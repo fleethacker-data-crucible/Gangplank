@@ -35,6 +35,7 @@ function Unprotect-SecretText {
     Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
     $global:FakeCoreUnlockCalls = 0
     Import-Module (Join-Path $root 'Keystone.psm1') -Force -WarningAction SilentlyContinue
+    . (Join-Path $PSScriptRoot 'TestIsolation.ps1')
     Initialize-Keystone
     Assert (Import-KeystoneArcSession -Quiet) 'Core ARC should load without optional STARK helper'
     Assert (-not (Test-KeystoneArcVaultUnlocked)) 'Core ARC should start locked'

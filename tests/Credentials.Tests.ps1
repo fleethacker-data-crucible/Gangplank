@@ -11,6 +11,7 @@ foreach ($n in $names) { $saved[$n] = [Environment]::GetEnvironmentVariable($n);
 try {
     [void](New-Item -ItemType Directory -Path $temp -Force)
     Import-Module (Join-Path $root 'Keystone.psm1') -Force -WarningAction SilentlyContinue
+    . (Join-Path $PSScriptRoot 'TestIsolation.ps1')
     & (Get-Module Keystone) {
         param($Temp)
         function Assert([bool]$Condition,[string]$Message) { if (-not $Condition) { throw "FAILED: $Message" } }

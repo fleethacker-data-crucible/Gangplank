@@ -46,6 +46,7 @@ function Get-ArcSecret {
 
     $env:KEYSTONE_ARC_PATH = $stubOnly
     Import-Module (Join-Path $root 'Keystone.psm1') -Force -WarningAction SilentlyContinue
+    . (Join-Path $PSScriptRoot 'TestIsolation.ps1')
     Initialize-Keystone -LogLevel ERROR
     $env:ARC_HOME = $null
     Assert ((Get-KeystoneArcFlavor -ArcRoot $stubOnly) -eq '') 'The ARC 5 pm.ps1 stub must not be treated as ARC 3/4'

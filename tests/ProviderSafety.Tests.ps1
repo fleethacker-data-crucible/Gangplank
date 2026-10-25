@@ -5,6 +5,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $root 'Keystone.psm1') -Force -WarningAction SilentlyContinue
+. (Join-Path $PSScriptRoot 'TestIsolation.ps1')
 function Assert([bool]$Condition,[string]$Message) { if (-not $Condition) { throw "ASSERT FAILED: $Message" } }
 
 $module = Get-Module Keystone
