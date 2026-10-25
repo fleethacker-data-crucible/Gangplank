@@ -11,7 +11,7 @@ foreach ($file in $sourceFiles) {
     Assert (@($errors).Count -eq 0) ("Parse failed: " + $file.FullName + ' ' + ($errors -join '; '))
 }
 Write-Host ("Parsed {0} PowerShell scripts" -f $sourceFiles.Count)
-Assert-GangplankTrustedRepositoryUrl -Url 'https://github.com/ashable2/gangplank'
+Assert-GangplankTrustedRepositoryUrl -Url 'https://github.com/sun-of-anton/Gangplank'
 Assert-GangplankTrustedRepositoryUrl -Url 'https://web.git.mil/group/project'
 foreach ($url in @('http://github.com/a/b','https://github.com.evil.invalid/a/b','https://localhost/a/b','https://user:secret@github.com/a/b')) {
     $rejected = $false

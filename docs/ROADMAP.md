@@ -1,7 +1,7 @@
 # Gangplank roadmap
 
 Browser-first Git workspace for people who don't use Git. Built to the shared
-[`TechStack`](../TechStack) used by Lazarette, Halyard and Synapse. Last updated 2026-10-24 (host refactor).
+[`TechStack`](../TechStack) used by Lazarette, Halyard and Shellback. Last updated 2026-10-24 (host refactor).
 Supersedes `docs/ENTERPRISE-ROADMAP.md`.
 
 **Where work happens.** Most development is done off-workstation (cloud sessions and
@@ -46,8 +46,8 @@ needs a CAC, the real web.git.mil instance or workstation application control is
 | 10 | Diff in a Web Worker | Line diff for text files off the main thread; Rust → WASM later if large files need it |
 | 11 | Browser tests | Unit tests plus Playwright e2e against the synthetic provider, on the Windows runner with the Edge channel (Lazarette pattern) |
 
-**Decision needed:** Svelte 5 (Lazarette) or React 19 (Halyard, Synapse); and whether
-`ui/dist` is committed with a staleness check (Synapse) or built in CI and shipped as a
+**Decision needed:** Svelte 5 (Lazarette) or React 19 (Halyard, Shellback); and whether
+`ui/dist` is committed with a staleness check (Shellback) or built in CI and shipped as a
 release zip (Lazarette). Gangplank has no workstation build step, so either a committed `dist`
 or a release zip is required.
 
@@ -61,7 +61,7 @@ or a release zip is required.
 | 15 | Revert a file | Restore one file to the download baseline from the Workspace screen |
 | 16 | AI with explicit consent | Read-only actions (explain this diff, summarize this review) that show exactly what will be sent before sending; still no tool execution |
 | 16b | Use an existing folder | Adopt a git clone (base commit from `.git\HEAD`, file hashes compared with the remote tree) or a plain folder matched to a branch commit |
-| 16c | Shared AI module | Gangplank's endpoint discovery (`Core/Intelligence.ps1`) could become the common AI setting for Halyard and Synapse |
+| 16c | Shared AI module | Gangplank's endpoint discovery (`Core/Intelligence.ps1`) could become the common AI setting for Halyard and Shellback |
 | 17 | Retire the legacy CLI bulk upload | `Invoke-GangplankPush` and the classic menu once the browser flow covers them |
 
 ## Workstation (CAC, real endpoints, application control)
@@ -76,7 +76,7 @@ or a release zip is required.
 
 ## Shared with sibling products
 
-- Halyard's Lazarette bridge (`module/Cascade/Arc.ps1`) still loads `pm.ps1` and is broken
+- Halyard's Lazarette bridge (`module/Halyard/Lazarette.ps1`) still loads `pm.ps1` and is broken
   against Lazarette the same way Gangplank was. Gangplank's `LazaretteBridge.ps1` is the model fix.
 - The local server, Lazarette bridge, mock-provider and CI-hygiene pieces are near-identical
   across products; keep them as copied modules with a version header rather than

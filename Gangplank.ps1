@@ -12,18 +12,19 @@ Initialize-Gangplank -LogLevel "INFO"
 
 Show-GangplankBanner
 # Use same-process Lazarette CAC/TOTP authentication as the browser host.
-$arcAuth = Initialize-GangplankLazaretteAuthentication
-if ($arcAuth.Unlocked) {
+$lazaretteAuth = Initialize-GangplankLazaretteAuthentication
+if ($lazaretteAuth.Unlocked) {
     Write-Host '[+] Lazarette ready for GitHub and GitLab credentials.' -ForegroundColor Green
-} elseif ($arcAuth.Loaded) {
+} elseif ($lazaretteAuth.Loaded) {
     Write-Host '[!] Lazarette loaded but locked. Only configured environment tokens can be used.' -ForegroundColor Yellow
-} elseif ($arcAuth.PSObject.Properties['Configured'] -and -not $arcAuth.Configured) {
+} elseif ($lazaretteAuth.PSObject.Properties['Configured'] -and -not $lazaretteAuth.Configured) {
     Write-Host '[i] Lazarette not configured (optional). Using environment or saved Gangplank credentials.' -ForegroundColor DarkGray
 } else {
     Write-Host '[!] Lazarette is configured but not available. Check the Lazarette folder in Integrations.' -ForegroundColor Yellow
 }
 $cfg = Get-GangplankConfig
-Write-Host "    gitmil -> $($cfg.ArcItems.GitLab) | github -> $($cfg.ArcItems.GitHub)" -ForegroundColor DarkGray
+$cfgItems = Get-GangplankConfigLazaretteItems -Config $cfg
+Write-Host "    gitmil -> $($cfgItems.GitLab) | github -> $($cfgItems.GitHub)" -ForegroundColor DarkGray
 Write-Host ""
 Wait-GangplankEnter
 

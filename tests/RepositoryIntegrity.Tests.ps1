@@ -9,7 +9,7 @@ $required=@(
  'Core/Logging.ps1','Core/SmartSave.ps1','Core/Utils.ps1',
  'Core/Workspace.ps1','Core/Sentinel.ps1','Core/RepositoryInsights.ps1',
  'Providers/GitProviderBase.ps1','Providers/GitHubProvider.ps1','Providers/GitLabProvider.ps1',
- 'config/keystone-config.json','README.md','LOCAL-DEV.md',
+ 'config/gangplank-config.json','README.md','LOCAL-DEV.md',
  'docs/ENTERPRISE-ROADMAP.md','docs/SECURITY-MODEL.md',
  'tests/Workspace.Tests.ps1','tests/SmartSave.Tests.ps1','tests/WebHost.Tests.ps1',
  'tests/LazaretteIntegration.Tests.ps1','tests/LazaretteCoreOnly.Tests.ps1',
