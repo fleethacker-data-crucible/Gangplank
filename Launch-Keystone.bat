@@ -8,10 +8,8 @@ REM change machine policy, override Group Policy, or grant elevation.
 REM -STA maintains compatibility with any interactive ARC credential dialogs.
 set "PS_ARGS=-STA -NoProfile -NoLogo -ExecutionPolicy Bypass"
 
-if not defined ARC_PATH (
-  if exist "%~dp0..\arc\pm.ps1" set "ARC_PATH=%~dp0..\arc"
-  if exist "%~dp0..\..\arc\pm.ps1" set "ARC_PATH=%~dp0..\..\arc"
-)
+REM ARC is optional and opt-in: Keystone only uses it when Integrations has an
+REM ARC folder configured (or KEYSTONE_ARC_PATH is set). Nothing is auto-detected.
 
 echo.
 echo ==============================================

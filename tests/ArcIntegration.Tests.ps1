@@ -3,7 +3,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('keystone-arc-contract-' + [guid]::NewGuid().ToString('N'))
-$previous = [Environment]::GetEnvironmentVariable('ARC_PATH')
+$previous = [Environment]::GetEnvironmentVariable('KEYSTONE_ARC_PATH')
 $previousToken = [Environment]::GetEnvironmentVariable('GITHUB_TOKEN')
 $mapping = Join-Path $root 'config\arc-items.local.json'
 $oldMapping = $null
@@ -48,8 +48,9 @@ function Get-PmVaultNameCatalog {
     [IO.File]::WriteAllText((Join-Path $temp 'pm.ps1'),$pm)
     # ARC's actual pm.ps1 requires a complete lib/ directory. Verify that
     # Keystone reports incomplete installations instead of a vague status.
-    $env:ARC_PATH = $temp
+    $env:KEYSTONE_ARC_PATH = $temp
     Import-Module (Join-Path $root 'Keystone.psm1') -Force -WarningAction SilentlyContinue
+    . (Join-Path $PSScriptRoot 'TestIsolation.ps1')
     Initialize-Keystone
     Assert (-not (Import-KeystoneArcSession -Quiet)) 'Incomplete ARC installation must be rejected'
     $incomplete = Get-KeystoneArcConnectionStatus
@@ -63,7 +64,7 @@ function Get-PmVaultNameCatalog {
     }
     Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
     $global:FakeArcUnlockCalls = 0
-    Assert ((Find-KeystoneArcRoot) -eq $temp) 'ARC_PATH discovery'
+    Assert ((Find-KeystoneArcRoot) -eq $temp) 'KEYSTONE_ARC_PATH discovery'
     Assert (Import-KeystoneArcSession -Quiet) 'ARC dynamic module import'
     Assert (-not (Test-KeystoneArcVaultUnlocked)) 'ARC should begin locked'
     $secretWhenLocked = Get-KeystoneArcSecretByName -ServiceName github
@@ -101,8 +102,8 @@ function Get-PmVaultNameCatalog {
     } elseif (Test-Path -LiteralPath $mapping) {
         Remove-Item -LiteralPath $mapping -Force -ErrorAction SilentlyContinue
     }
-    if ($null -eq $previous) { Remove-Item Env:ARC_PATH -ErrorAction SilentlyContinue }
-    else { $env:ARC_PATH = $previous }
+    if ($null -eq $previous) { Remove-Item Env:KEYSTONE_ARC_PATH -ErrorAction SilentlyContinue }
+    else { $env:KEYSTONE_ARC_PATH = $previous }
     if ($null -eq $previousToken) { Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue }
     else { $env:GITHUB_TOKEN = $previousToken }
     Remove-Item -LiteralPath $temp -Force -Recurse -ErrorAction SilentlyContinue
