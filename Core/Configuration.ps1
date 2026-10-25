@@ -14,8 +14,9 @@
 #   1. Env GANGPLANK_LAZARETTE_ITEM_<Purpose>, then KEYSTONE_ARC_ITEM_ /
 #      LAZARETTE_ITEM_ / ARC_ITEM_ / HALYARD_LAZARETTE_ITEM_ / CASCADE_ARC_ITEM_<Purpose>
 #   (Item names like gitmil, github, genapi are data in the user's vault: unchanged.)
-#   2. config ArcItems.<Purpose>
-#   3. Canonical hard-coded name
+#   2. config\lazarette-items.local.json (per-workstation picker mapping)
+#   3. config LazaretteItems.<Purpose> (ArcItems in a pre-rename config file)
+#   4. Canonical hard-coded name
 # ============================================================
 
 $script:GangplankConfigPath = $null
@@ -28,21 +29,58 @@ $script:GangplankLazaretteCanonical = @{
     Advana = "advana-api"
 }
 
+# Config files that had Keystone/ARC names before the rename. Each pair is
+# (pre-rename name, current name), in the same config folder.
+$script:GangplankLegacyConfigFiles = @(
+    @('keystone-config.json','gangplank-config.json'),
+    @('keystone.local.json','gangplank.local.json'),
+    @('arc-items.local.json','lazarette-items.local.json')
+)
+
+function Copy-GangplankLegacyConfigFiles {
+    <#
+      One-time copy-forward of pre-rename config files in a config folder: for each
+      pair, when the new file does not exist and the old one does, copy it (the old
+      file is left as it was, so an older Keystone keeps working). Idempotent: a later
+      run never overwrites a Gangplank file. Written to a temp name and renamed, so an
+      interrupted copy is simply retried.
+    #>
+    param([Parameter(Mandatory)][string]$ConfigDir)
+    foreach ($pair in $script:GangplankLegacyConfigFiles) {
+        $old = Join-Path $ConfigDir $pair[0]
+        $new = Join-Path $ConfigDir $pair[1]
+        if ((Test-Path -LiteralPath $new) -or -not (Test-Path -LiteralPath $old -PathType Leaf)) { continue }
+        $tmp = "$new.$([guid]::NewGuid().ToString('N')).tmp"
+        try {
+            Copy-Item -LiteralPath $old -Destination $tmp -Force -ErrorAction Stop
+            Move-Item -LiteralPath $tmp -Destination $new -ErrorAction Stop
+            Write-GangplankLog -Level INFO -Message ("Copied {0} to {1} (renamed from Keystone; the original is unchanged)." -f $pair[0], $pair[1])
+        } catch {
+            Write-GangplankLog -Level WARN -Message ("Could not copy {0} to {1}: {2}" -f $pair[0], $pair[1], $_.Exception.Message)
+        } finally {
+            if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+        }
+    }
+}
+
 function Initialize-GangplankConfig {
     param([string]$ConfigPath)
     if (-not $ConfigPath) {
         $root = Split-Path $PSScriptRoot -Parent
-        $ConfigPath = Join-Path $root "config\keystone-config.json"
+        $ConfigPath = Join-Path $root "config\gangplank-config.json"
     }
     $script:GangplankConfigPath = $ConfigPath
     $dir = Split-Path $ConfigPath -Parent
     if (-not (Test-Path -LiteralPath $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
+    # Before the defaults are written: carry an edited keystone-config.json and the
+    # per-workstation keystone.local.json / arc-items.local.json forward once.
+    Copy-GangplankLegacyConfigFiles -ConfigDir $dir
     if (-not (Test-Path -LiteralPath $ConfigPath)) {
         $default = [PSCustomObject]@{
             Version      = "1.0"
-            ArcItems     = [PSCustomObject]@{
+            LazaretteItems = [PSCustomObject]@{
                 GitLab = "gitmil"
                 GitHub = "github"
             }
@@ -66,7 +104,7 @@ function Get-GangplankConfig {
     } catch {
         Write-GangplankLog -Level ERROR -Message "Failed to read config: $($_.Exception.Message)"
         return [PSCustomObject]@{
-            ArcItems     = [PSCustomObject]@{
+            LazaretteItems = [PSCustomObject]@{
                 GitLab = $script:GangplankLazaretteCanonical.GitLab
                 GitHub = $script:GangplankLazaretteCanonical.GitHub
             }
@@ -114,7 +152,7 @@ function Get-GangplankLocalLazaretteMappings {
     $out = @{}
     if (-not $script:GangplankConfigPath) { Initialize-GangplankConfig }
     $root = Split-Path $script:GangplankConfigPath -Parent
-    $path = Join-Path $root 'arc-items.local.json'
+    $path = Join-Path $root 'lazarette-items.local.json'
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $out }
     try {
         $saved = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -143,8 +181,8 @@ function Set-GangplankLazaretteItemName {
     $mappings = Get-GangplankLocalLazaretteMappings
     $mappings[$Provider] = $ServiceName
     $folder = Split-Path $script:GangplankConfigPath -Parent
-    $file = Join-Path $folder 'arc-items.local.json'
-    $tmp = Join-Path $folder ('arc-items-' + [guid]::NewGuid().ToString('N') + '.tmp')
+    $file = Join-Path $folder 'lazarette-items.local.json'
+    $tmp = Join-Path $folder ('lazarette-items-' + [guid]::NewGuid().ToString('N') + '.tmp')
     try {
         $mappings | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $tmp -Encoding UTF8 -ErrorAction Stop
         Move-Item -LiteralPath $tmp -Destination $file -Force -ErrorAction Stop
@@ -152,6 +190,17 @@ function Set-GangplankLazaretteItemName {
         if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
     }
     return $ServiceName
+}
+
+function Get-GangplankConfigLazaretteItems {
+    # The config's item-name map: LazaretteItems, or ArcItems in a pre-rename file.
+    param($Config)
+    if ($null -eq $Config) { return $null }
+    foreach ($key in @('LazaretteItems','ArcItems')) {
+        $p = $Config.PSObject.Properties[$key]
+        if ($p -and $p.Value) { return $p.Value }
+    }
+    return $null
 }
 
 function Get-GangplankLazaretteItemName {
@@ -171,10 +220,10 @@ function Get-GangplankLazaretteItemName {
     $localMapping = Get-GangplankLocalLazaretteMappings
     if ($localMapping.ContainsKey($Provider)) { return [string]$localMapping[$Provider] }
 
-    # 3) Config ArcItems
-    $cfg = Get-GangplankConfig
-    if ($cfg.ArcItems) {
-        $prop = $cfg.ArcItems.PSObject.Properties[$Provider]
+    # 3) Config LazaretteItems (ArcItems in a config file from before the rename)
+    $items = Get-GangplankConfigLazaretteItems -Config (Get-GangplankConfig)
+    if ($items) {
+        $prop = $items.PSObject.Properties[$Provider]
         if ($prop -and -not [string]::IsNullOrWhiteSpace([string]$prop.Value)) {
             return [string]$prop.Value.Trim()
         }

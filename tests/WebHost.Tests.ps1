@@ -164,7 +164,7 @@ try {
     Assert ($status.localDev -eq $true -and $status.connected -eq $false) 'Fresh LocalDev status wrong.'
     $integration = Invoke-RestMethod -Uri ($base + '/api/integrations') -Headers @{ 'X-Gangplank-Client' = $client } -WebSession $web -TimeoutSec 5
     Assert (@($integration.credentials).Count -eq 3) 'Credential status missing providers.'
-    Assert (-not $integration.arc.enabled) 'Lazarette must be off unless configured.'
+    Assert (-not $integration.lazarette.enabled) 'Lazarette must be off unless configured.'
 
     $replay = $false
     try { Invoke-WebRequest -Uri ($base + '/api/session') -Method Post -ContentType 'application/json' -Body ('{"nonce":"' + $nonce + '"}') -UseBasicParsing -TimeoutSec 5 | Out-Null }

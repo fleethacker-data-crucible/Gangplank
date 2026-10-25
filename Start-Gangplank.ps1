@@ -17,7 +17,7 @@
   Stop-Gangplank.ps1 also stop it.
 .PARAMETER Stay
   Keep running after the browser tab closes. Also --stay, or GANGPLANK_AUTO_STOP=0
-  (environment), or "AutoStop": false in config\keystone-config.json.
+  (environment), or "AutoStop": false in config\gangplank-config.json.
 .PARAMETER Replace
   If Gangplank is already running from this folder with the same saved session,
   stop it and start fresh without asking. Also --replace.
@@ -103,7 +103,7 @@ if (Copy-GangplankLegacyStateFolder -From $legacyStateRoot -To $stateRoot) {
 
 Import-Module (Join-Path $root 'Gangplank.psm1') -Force -WarningAction SilentlyContinue
 # With -WorkRoot (tests, LocalDev) every setting Gangplank writes stays under that folder.
-if ($WorkRoot) { Initialize-Gangplank -ConfigPath (Join-Path (Join-Path (Join-Path $WorkRoot '.gangplank') 'config') 'keystone-config.json') }
+if ($WorkRoot) { Initialize-Gangplank -ConfigPath (Join-Path (Join-Path (Join-Path $WorkRoot '.gangplank') 'config') 'gangplank-config.json') }
 else { Initialize-Gangplank }
 $autoStop = Test-GangplankAutoStopEnabled -Stay:$Stay -Config (Get-GangplankConfig)
 
@@ -111,8 +111,8 @@ if ($LocalDev) {
     Write-Host '[LOCAL DEV] Lazarette is not imported; no unlock prompts. Use fictional data only.' -ForegroundColor Yellow
 } elseif (Test-GangplankLazaretteConfigured) {
     # Lazarette's own unlock (passphrase or CAC PIN, then authenticator), in THIS console.
-    $arcState = Initialize-GangplankLazaretteAuthentication -SkipUnlock:$SkipLazaretteUnlock
-    if (-not $arcState.Unlocked) {
+    $lazaretteState = Initialize-GangplankLazaretteAuthentication -SkipUnlock:$SkipLazaretteUnlock
+    if (-not $lazaretteState.Unlocked) {
         Write-Host '[!] Lazarette is configured but not unlocked. Saved Gangplank or environment credentials still work.' -ForegroundColor Yellow
     }
 } else {

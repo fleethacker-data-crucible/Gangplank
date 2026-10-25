@@ -1,9 +1,9 @@
 #Requires -Version 5.1
-# Gangplank -> Lazarette (formerly Lazarette) integration.
+# Gangplank -> Lazarette (formerly ARC) integration.
 #   Lazarette / ARC 5 (current): . <folder>\lib\Lazarette.ps1 (or the older lib\Arc.ps1), then
 #                     Unlock-LazaretteVaultInteractive, Get-LazaretteSecret,
 #                     Get-LazaretteItemNames, Test-LazaretteVaultUnlocked; each falls back
-#                     to its Lazarette name (Unlock-ArcVaultInteractive, Get-ArcSecret, ...)
+#                     to its former ARC name (Unlock-ArcVaultInteractive, Get-ArcSecret, ...)
 #                     when the Lazarette name is not defined (Lazarette docs/INTEGRATION.md).
 #   ARC 3/4 (legacy): pm.ps1 with Ensure-VaultUnlocked / Get-PmStarkApiKey etc.
 # Lazarette (ARC 5) ships a pm.ps1 stub that only throws; it is never treated as ARC 3/4.
@@ -36,7 +36,7 @@ function Get-GangplankLazaretteLoader {
 }
 
 function Get-GangplankLazaretteCommandName {
-    # The first defined command of a Lazarette name and its former Lazarette name.
+    # The first defined command of a Lazarette name and its former ARC name.
     param([Parameter(Mandatory)][string[]]$Names)
     foreach ($n in $Names) { if (Get-Command $n -ErrorAction SilentlyContinue) { return $n } }
     return $null
@@ -53,11 +53,10 @@ function Get-GangplankLazaretteFlavor {
     # 'v5' when lib\Lazarette.ps1 or lib\Arc.ps1 exists (Lazarette / ARC 5), 'legacy' for a
     # real ARC 3/4 pm.ps1, else ''.
     [CmdletBinding()]
-    param([Alias('ArcRoot')][string]$LazaretteRoot)
-    $ArcRoot = $LazaretteRoot
-    if (-not $ArcRoot) { return '' }
-    if (Get-GangplankLazaretteLoader -LazaretteRoot $ArcRoot) { return 'v5' }
-    $pm = Join-Path $ArcRoot 'pm.ps1'
+    param([string]$LazaretteRoot)
+    if (-not $LazaretteRoot) { return '' }
+    if (Get-GangplankLazaretteLoader -LazaretteRoot $LazaretteRoot) { return 'v5' }
+    $pm = Join-Path $LazaretteRoot 'pm.ps1'
     if (Test-Path -LiteralPath $pm -PathType Leaf) {
         try {
             if ([IO.File]::ReadAllText($pm) -match '(ARC 5|Lazarette) no longer provides pm\.ps1') { return '' }
@@ -68,7 +67,7 @@ function Get-GangplankLazaretteFlavor {
 }
 
 function Test-GangplankLazarette5HelpersAvailable {
-    # Every integration function, under its Lazarette name or its former Lazarette name.
+    # Every integration function, under its Lazarette name or its former ARC name.
     foreach ($names in $script:GangplankLazaretteApi.Values) {
         if (-not (Get-GangplankLazaretteCommandName -Names $names)) { return $false }
     }
@@ -77,7 +76,7 @@ function Test-GangplankLazarette5HelpersAvailable {
 
 function Find-GangplankLazaretteRoot {
     # Lazarette is opt-in (main #14): only the folder configured in Integrations
-    # (config\keystone.local.json Arc.Enabled + Arc.Path) or GANGPLANK_LAZARETTE_PATH
+    # (config\gangplank.local.json Lazarette.Enabled + Lazarette.Path) or GANGPLANK_LAZARETTE_PATH
     # (formerly KEYSTONE_ARC_PATH). No search of LAZARETTE_PATH / ARC_PATH, sibling
     # folders or the user profile. The folder may hold lib\Lazarette.ps1 or lib\Arc.ps1.
     [CmdletBinding()]
@@ -86,17 +85,17 @@ function Find-GangplankLazaretteRoot {
     if (-not $configured) { return $null }
     try {
         $full = [IO.Path]::GetFullPath($configured)
-        if (Get-GangplankLazaretteFlavor -ArcRoot $full) { return $full }
+        if (Get-GangplankLazaretteFlavor -LazaretteRoot $full) { return $full }
     } catch { }
     return $null
 }
 
 function Get-GangplankLazaretteRequiredFiles {
     [CmdletBinding()]
-    param([string]$ArcRoot)
+    param([string]$LazaretteRoot)
     # Read Lazarette's declared library names. Different Lazarette releases can ship
     # different sets: never insist on Gangplank's preferred STARK version.
-    if (-not $ArcRoot) {
+    if (-not $LazaretteRoot) {
         # Fixed current-Lazarette reference, useful for regression tests only.
         return @(
             'lib/00-logging.ps1','lib/00-core.ps1','lib/01-storage.ps1',
@@ -106,7 +105,7 @@ function Get-GangplankLazaretteRequiredFiles {
             'lib/09-integrity.ps1','lib/10-stark.ps1'
         )
     }
-    $pmPath = Join-Path $ArcRoot 'pm.ps1'
+    $pmPath = Join-Path $LazaretteRoot 'pm.ps1'
     if (-not (Test-Path -LiteralPath $pmPath -PathType Leaf)) { return @() }
     try {
         $source = [IO.File]::ReadAllText($pmPath)
@@ -122,11 +121,11 @@ function Get-GangplankLazaretteRequiredFiles {
 
 function Get-GangplankLazaretteMissingFiles {
     [CmdletBinding()]
-    param([string]$ArcRoot)
-    if (-not $ArcRoot) { return @() }
+    param([string]$LazaretteRoot)
+    if (-not $LazaretteRoot) { return @() }
     $missing = New-Object System.Collections.Generic.List[string]
-    foreach ($name in (Get-GangplankLazaretteRequiredFiles -ArcRoot $ArcRoot)) {
-        if (-not (Test-Path -LiteralPath (Join-Path $ArcRoot $name) -PathType Leaf)) {
+    foreach ($name in (Get-GangplankLazaretteRequiredFiles -LazaretteRoot $LazaretteRoot)) {
+        if (-not (Test-Path -LiteralPath (Join-Path $LazaretteRoot $name) -PathType Leaf)) {
             [void]$missing.Add($name)
         }
     }
@@ -149,7 +148,7 @@ function Test-GangplankLazaretteHelpersAvailable {
 
 function Get-GangplankLazaretteHelperDiagnostics {
     return [pscustomobject]@{
-        arc5 = [bool](Test-GangplankLazarette5HelpersAvailable)
+        lazarette = [bool](Test-GangplankLazarette5HelpersAvailable)
         unlock = [bool](Get-Command Ensure-VaultUnlocked -ErrorAction SilentlyContinue)
         stark = [bool](Get-Command Get-PmStarkApiKey -ErrorAction SilentlyContinue)
         find = [bool](Get-Command Find-VaultRows -ErrorAction SilentlyContinue)
@@ -180,17 +179,17 @@ function Import-GangplankLazaretteSession {
         $script:GangplankLazaretteLastError = 'Lazarette module was loaded, but required vault helpers are missing. Verify Lazarette installation and restart Gangplank.'
         return $false
     }
-    $arcRoot = Find-GangplankLazaretteRoot
-    if (-not $arcRoot) {
+    $lazaretteRoot = Find-GangplankLazaretteRoot
+    if (-not $lazaretteRoot) {
         $script:GangplankLazaretteErrorCode = 'ARC_NOT_FOUND'
         $script:GangplankLazaretteLastError = 'Lazarette was not found. Turn on Lazarette in Integrations with its folder (the one containing lib\Lazarette.ps1 or lib\Arc.ps1), or set GANGPLANK_LAZARETTE_PATH.'
         if (-not $Quiet) { Write-Warning $script:GangplankLazaretteLastError }
         return $false
     }
-    $script:GangplankLazaretteRoot = $arcRoot
-    $script:GangplankLazaretteFlavor = Get-GangplankLazaretteFlavor -ArcRoot $arcRoot
-    if ($script:GangplankLazaretteFlavor -eq 'v5') { return (Import-GangplankLazarette5 -ArcRoot $arcRoot -Quiet:$Quiet) }
-    $script:GangplankLazaretteMissingModules = @(Get-GangplankLazaretteMissingFiles -ArcRoot $arcRoot)
+    $script:GangplankLazaretteRoot = $lazaretteRoot
+    $script:GangplankLazaretteFlavor = Get-GangplankLazaretteFlavor -LazaretteRoot $lazaretteRoot
+    if ($script:GangplankLazaretteFlavor -eq 'v5') { return (Import-GangplankLazarette5 -LazaretteRoot $lazaretteRoot -Quiet:$Quiet) }
+    $script:GangplankLazaretteMissingModules = @(Get-GangplankLazaretteMissingFiles -LazaretteRoot $lazaretteRoot)
     if ($script:GangplankLazaretteMissingModules.Count -gt 0) {
         $script:GangplankLazaretteErrorCode = 'ARC_MISSING_MODULES'
         $script:GangplankLazaretteLastError = 'Lazarette installation is incomplete. Missing libraries: ' + ($script:GangplankLazaretteMissingModules -join ', ') + '. Update the full Lazarette repository rather than copying pm.ps1 alone.'
@@ -198,7 +197,7 @@ function Import-GangplankLazaretteSession {
         return $false
     }
     try {
-        $pm = Join-Path $arcRoot 'pm.ps1'
+        $pm = Join-Path $lazaretteRoot 'pm.ps1'
         # Like Halyard, import all of Lazarette's commands from a single dynamic module.
         # A child PowerShell process cannot inherit Lazarette's unlocked session.
         $module = New-Module -Name GangplankLazarette -ScriptBlock {
@@ -241,8 +240,8 @@ function Import-GangplankLazarette5 {
     # Load Lazarette's engine once into one dynamic module, so Lazarette's script-scoped
     # session state lives in one place and its functions are visible globally.
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$ArcRoot,[switch]$Quiet)
-    $loader = Get-GangplankLazaretteLoader -LazaretteRoot $ArcRoot
+    param([Parameter(Mandatory)][string]$LazaretteRoot,[switch]$Quiet)
+    $loader = Get-GangplankLazaretteLoader -LazaretteRoot $LazaretteRoot
     $script:GangplankLazaretteMissingModules = @()
     try {
         $module = New-Module -Name GangplankLazarette -ScriptBlock {
@@ -261,7 +260,7 @@ function Import-GangplankLazarette5 {
     }
     if (-not (Test-GangplankLazarette5HelpersAvailable)) {
         $script:GangplankLazaretteErrorCode = 'ARC_HELPERS_UNAVAILABLE'
-        $script:GangplankLazaretteLastError = 'Lazarette loaded but its integration functions (Unlock-ArcVaultInteractive, Get-ArcSecret, Get-ArcItemNames) are missing. Update Lazarette.'
+        $script:GangplankLazaretteLastError = 'Lazarette loaded but its integration functions are missing: Unlock-LazaretteVaultInteractive, Get-LazaretteSecret, Get-LazaretteItemNames and Test-LazaretteVaultUnlocked (or their ARC names Unlock-ArcVaultInteractive, Get-ArcSecret, Get-ArcItemNames, Test-ArcVaultUnlocked). Update Lazarette.'
         if (-not $Quiet) { Write-Warning $script:GangplankLazaretteLastError }
         return $false
     }
@@ -405,16 +404,16 @@ function Get-GangplankLazaretteConnectionStatus {
         $bindings += [pscustomobject]@{
             provider = $purpose; item = $item
             configured = [bool]($envPresent -or $present)
-            source = $(if ($envPresent) { 'environment' } elseif ($present) { 'arc' } else { 'none' })
-            arcItemFound = $present
+            source = $(if ($envPresent) { 'environment' } elseif ($present) { 'lazarette' } else { 'none' })
+            lazaretteItemFound = $present
         }
     }
     return [pscustomobject]@{
-        arcFound = [bool]$root
-        arcLoaded = [bool]$loaded
-        arcUnlocked = [bool]$unlocked
-        arcPath = $(if ($root) { $root } else { '' })
-        arcVersion = $(if ($loaded -and (Test-GangplankLazarette5HelpersAvailable)) { '5' } elseif ($loaded) { 'legacy' } elseif ($root) { $(if ((Get-GangplankLazaretteFlavor -ArcRoot $root) -eq 'v5') { '5' } else { 'legacy' }) } else { '' })
+        lazaretteFound = [bool]$root
+        lazaretteLoaded = [bool]$loaded
+        lazaretteUnlocked = [bool]$unlocked
+        lazarettePath = $(if ($root) { $root } else { '' })
+        lazaretteVersion = $(if ($loaded -and (Test-GangplankLazarette5HelpersAvailable)) { '5' } elseif ($loaded) { 'legacy' } elseif ($root) { $(if ((Get-GangplankLazaretteFlavor -LazaretteRoot $root) -eq 'v5') { '5' } else { 'legacy' }) } else { '' })
         code = $(if (-not $configured) { 'ARC_NOT_CONFIGURED' } elseif ($loaded) { '' } elseif ($script:GangplankLazaretteErrorCode) { $script:GangplankLazaretteErrorCode } else { 'ARC_NOT_LOADED' })
         missingModules = @($script:GangplankLazaretteMissingModules)
         helpers = Get-GangplankLazaretteHelperDiagnostics
@@ -518,12 +517,12 @@ function Get-GangplankLazaretteCredential {
     param([Parameter(Mandatory)][ValidateSet('GitHub','GitLab','GenAi')][string]$Provider)
     $name = Get-GangplankLazaretteItemName -Provider $Provider
     $status = Get-GangplankLazaretteConnectionStatus
-    if (-not $status.arcFound) { throw "ARC_NOT_FOUND|$($status.message)" }
-    if (-not $status.arcLoaded) {
+    if (-not $status.lazaretteFound) { throw "ARC_NOT_FOUND|$($status.message)" }
+    if (-not $status.lazaretteLoaded) {
         $reason = if ($status.message) { [string]$status.message } else { 'Lazarette module could not be loaded.' }
         throw "ARC_UNAVAILABLE|$reason"
     }
-    if (-not $status.arcUnlocked) {
+    if (-not $status.lazaretteUnlocked) {
         throw 'ARC_LOCKED|Lazarette is configured but locked. Restart Gangplank and complete the Lazarette unlock in its PowerShell window.'
     }
     $catalogNames = @($status.itemNames)
