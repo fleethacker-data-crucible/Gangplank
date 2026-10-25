@@ -4,16 +4,79 @@
   Keystone local browser workspace. Windows PowerShell 5.1, no git.exe or Node required.
 .DESCRIPTION
   Binds only to localhost, requires per-process CSRF token on writes, and never
-  exposes Git/AI tokens through the browser. Ctrl+C stops the host.
+  exposes Git/AI tokens through the browser.
+
+  The browser tab owns the host: the page sends a heartbeat every 5 seconds and
+  the host stops itself 20 seconds after the last one (5 seconds after the tab
+  says it is leaving). A reload does not stop it; with several tabs open it stops
+  when the last one is gone. End session in the browser, Ctrl+C here, or
+  Stop-Keystone.ps1 also stop it. The host finishes the request it is serving
+  (a save, a download) before it stops.
+.PARAMETER Stay
+  Keep running after the browser tab closes. Also --stay, or KEYSTONE_AUTO_STOP=0
+  (environment), or "AutoStop": false in config\keystone-config.json.
+.PARAMETER Replace
+  If Keystone is already running from this folder, stop it and start fresh without
+  asking. Also --replace.
 #>
-[CmdletBinding()]
-param([ValidateRange(1025,65535)][int]$Port = 8769, [switch]$NoBrowser, [switch]$SkipArcUnlock, [switch]$LocalDev)
+[CmdletBinding(PositionalBinding = $false)]
+param(
+    [ValidateRange(1025,65535)][int]$Port = 8769,
+    [switch]$NoBrowser,
+    [switch]$SkipArcUnlock,
+    [switch]$LocalDev,
+    [switch]$Stay,
+    [switch]$Replace,
+    # Launcher-style options (--stay, --replace, --no-browser) and a bare port number.
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest
+)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
+foreach ($a in @($Rest)) {
+    if (-not $a) { continue }
+    switch -Regex ($a) {
+        '^--?stay$' { $Stay = $true; continue }
+        '^--?replace$' { $Replace = $true; continue }
+        '^--?no-?browser$' { $NoBrowser = $true; continue }
+        '^--?local-?dev$' { $LocalDev = $true; continue }
+        '^\d{4,5}$' {
+            $n = [int]$a
+            if ($n -lt 1025 -or $n -gt 65535) { throw "Port $a is out of range (1025-65535)." }
+            $Port = $n; continue
+        }
+        default { Write-Warning "Ignoring unknown option $a" }
+    }
+}
 # CI and other unattended runs set KEYSTONE_LOCAL_DEV=1: never import ARC or prompt for CAC/TOTP.
 if ($env:KEYSTONE_LOCAL_DEV -eq '1') { $LocalDev = $true }
+. (Join-Path $root 'Core\Lifecycle.ps1')
+# One instance: a host from this folder that is still running (often a hidden window
+# whose tab was closed) holds the port. Stop it before ARC asks for CAC/TOTP.
+$running = @(Get-KeystoneServerProcesses -Root $root -ThisCheckout)
+if ($running.Count -gt 0) {
+    $where = ($running | ForEach-Object { Format-KeystoneServerProcess -Process $_ }) -join ', '
+    Write-Host ('Keystone is already running: ' + $where) -ForegroundColor Yellow
+    $answer = 'y'
+    $interactive = $true
+    try { if (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected) { $interactive = $false } } catch { $interactive = $false }
+    if (-not $Replace -and $interactive) {
+        try { $answer = Read-Host 'Stop it and start fresh? [Y/n]' } catch { $answer = 'n' }
+    } elseif (-not $Replace) {
+        Write-Host '  No console to ask in; stopping it (the default answer).' -ForegroundColor DarkGray
+    }
+    if ($answer -eq '' -or $answer -match '^[Yy]') {
+        foreach ($p in @(Stop-KeystoneServerProcesses -Root $root -ThisCheckout)) {
+            Write-Host ('  Stopped Keystone ' + (Format-KeystoneServerProcess -Process $p)) -ForegroundColor DarkGray
+        }
+    } else {
+        Write-Host 'Leaving the running Keystone alone. Use End session in its browser tab, or Stop-Keystone.ps1.' -ForegroundColor DarkGray
+        exit 0
+    }
+}
 Import-Module (Join-Path $root 'Keystone.psm1') -Force
 Initialize-Keystone
+$autoStop = Test-KeystoneAutoStopEnabled -Stay:$Stay -Config (Get-KeystoneConfig)
+Reset-KeystonePresence -AutoStop $autoStop
 # Import ARC ONCE and perform its normal CAC/TOTP unlock before serving any
 # browser requests. The browser never starts an ARC authentication prompt.
 # LocalDev deliberately does not import pm.ps1 or open the real ARC vault.
@@ -61,7 +124,11 @@ function Test-KeystoneWebRequest {
     $origin = $Request.Headers['Origin']
     if ($origin -and $origin -ne "http://localhost:$Port") { return $false }
     if ($Request.HttpMethod -eq 'POST') {
-        if ($Request.Headers['X-Keystone-Session'] -cne $Csrf) { return $false }
+        $header = $Request.Headers['X-Keystone-Session']
+        # The tab's unload beacon (navigator.sendBeacon) cannot set headers. That one
+        # route checks the token in its JSON body instead; nothing else may skip it.
+        if (-not $header -and $Request.Url.AbsolutePath -eq '/api/heartbeat') { return $true }
+        if ($header -cne $Csrf) { return $false }
     }
     return $true
 }
@@ -69,28 +136,50 @@ function Test-KeystoneWebRequest {
 try {
     $listener.Start()
 } catch {
-    throw "Unable to start localhost listener on $prefix. Choose an unused port, or ask IT whether HttpListener requires a URL reservation. $($_.Exception.Message)"
+    throw "Unable to start localhost listener on $prefix. If another Keystone (for example from a different folder) is running, stop it with Stop-Keystone.ps1. Otherwise choose an unused port, or ask IT whether HttpListener requires a URL reservation. $($_.Exception.Message)"
 }
 Write-Host ''
 Write-Host '  KEYSTONE  |  Enterprise Workspace' -ForegroundColor Cyan
 Write-Host "  Browser: $prefix" -ForegroundColor Green
 Write-Host '  Localhost only. Ctrl+C to stop. Repository secrets remain server-side.' -ForegroundColor DarkGray
-Write-Host '  ARC: see Integrations in the browser for per-provider credential status.' -ForegroundColor DarkGray
-if (-not $NoBrowser) {
-    try { Start-Process $prefix | Out-Null }
-    catch { Write-Host "Open this URL manually: $prefix" -ForegroundColor Yellow }
+if ($autoStop) {
+    Write-Host '  Stops when its browser tab closes (or End session). Keep it running: --stay or KEYSTONE_AUTO_STOP=0.' -ForegroundColor DarkGray
+} else {
+    Write-Host '  Keeps running after the browser tab closes. Stop: End session, Ctrl+C or Stop-Keystone.ps1.' -ForegroundColor DarkGray
 }
+Write-Host '  ARC: see Integrations in the browser for per-provider credential status.' -ForegroundColor DarkGray
+$runtimeFile = $null
+$stopEvent = $null
+$stopReason = $null
+$pending = $null
 try {
+    $runtimeFile = Write-KeystoneRuntimeFile -Root $root -Port $Port -Url $prefix
+    $stopEvent = New-KeystoneStopEvent
+    Write-KeystoneLog -Level INFO -Message ("Web host started: PID {0}, {1}, auto-stop {2}" -f $PID, $prefix, $autoStop)
+    if (-not $NoBrowser) {
+        try { Start-Process $prefix | Out-Null }
+        catch { Write-Host "Open this URL manually: $prefix" -ForegroundColor Yellow }
+    }
     while ($listener.IsListening) {
-        $context = $listener.GetContext()
+        # Wait for a request in short slices, so the host can notice between requests
+        # that its tab is gone or that Stop-Keystone.ps1 asked it to stop. Requests are
+        # served one at a time, so this never interrupts a save or a download.
+        if ($stopEvent -and $stopEvent.WaitOne(0)) { $stopReason = 'Stop requested by Stop-Keystone.ps1 or a new launch.'; break }
+        if (Test-KeystoneBrowserGone) { $stopReason = 'Browser tab closed; Keystone stops itself (KEYSTONE_AUTO_STOP=0 or --stay keeps it running).'; break }
+        if ($null -eq $pending) { $pending = $listener.BeginGetContext($null, $null) }
+        if (-not $pending.AsyncWaitHandle.WaitOne(1000)) { continue }
+        $context = $listener.EndGetContext($pending)
+        $pending = $null
         $req = $context.Request
         $res = $context.Response
+        $path = $null
+        $requestStarted = [DateTime]::UtcNow
         try {
             $res.Headers.Add('X-Content-Type-Options','nosniff')
             $res.Headers.Add('X-Frame-Options','DENY')
             $res.Headers.Add('Referrer-Policy','no-referrer')
             $res.Headers.Add('Cache-Control','no-store')
-            $res.Headers.Add('Content-Security-Policy',"default-src 'none'; script-src 'nonce-$nonce'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'")
+            $res.Headers.Add('Content-Security-Policy',"default-src 'none'; script-src 'nonce-$nonce'; style-src 'unsafe-inline'; connect-src 'self'; worker-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'")
             if (-not (Test-KeystoneWebRequest -Request $req -Port $Port -Csrf $csrf)) {
                 Send-KeystoneWebJson -Response $res -Status 403 -Value @{ error = 'Request rejected by local session security policy.' }
                 continue
@@ -104,8 +193,38 @@ try {
                 $res.ContentLength64 = $bytes.Length
                 $res.OutputStream.Write($bytes,0,$bytes.Length)
             }
+            elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/heartbeat-worker.js') {
+                # Presence heartbeat worker: hidden tabs throttle main-thread timers, workers much less.
+                $bytes = [IO.File]::ReadAllBytes((Join-Path $root 'web\heartbeat-worker.js'))
+                $res.ContentType = 'text/javascript; charset=utf-8'
+                $res.ContentLength64 = $bytes.Length
+                $res.OutputStream.Write($bytes,0,$bytes.Length)
+            }
+            elseif ($req.HttpMethod -eq 'POST' -and $path -eq '/api/heartbeat') {
+                # Presence. Never log this body: the unload beacon carries the session token.
+                $body = Read-KeystoneWebBody -Request $req
+                if (-not $req.Headers['X-Keystone-Session']) {
+                    $bodyToken = $null
+                    if ($body.PSObject.Properties['session']) { $bodyToken = [string]$body.session }
+                    if (-not $bodyToken -or $bodyToken -cne $csrf) {
+                        Send-KeystoneWebJson -Response $res -Status 403 -Value @{ error = 'Request rejected by local session security policy.' }
+                        continue
+                    }
+                }
+                $tabId = $null
+                if ($body.PSObject.Properties['tab']) { $tabId = [string]$body.tab }
+                Register-KeystonePresence -TabId $tabId -Leaving:($body.leaving -eq $true)
+                Send-KeystoneWebJson -Response $res -Value (Get-KeystonePresenceState)
+            }
+            elseif ($req.HttpMethod -eq 'POST' -and $path -eq '/api/session/stop') {
+                if ($req.Headers['X-Keystone-Intent'] -cne 'end-session') { throw 'Ending the session requires the X-Keystone-Intent header.' }
+                Write-KeystoneLog -Level INFO -Message 'End session requested from the browser.'
+                Send-KeystoneWebJson -Response $res -Value @{ stopping = $true }
+                $stopReason = 'End session requested from the browser.'
+            }
             elseif ($req.HttpMethod -eq 'GET' -and $path -eq '/api/status') {
                 Send-KeystoneWebJson -Response $res -Value @{
+                    autoStop = $autoStop
                     connected = ($null -ne $session)
                     provider = $(if ($session) { $session.Provider } else { $null })
                     project = $(if ($session) { $session.ProjectPath } else { $null })
@@ -272,9 +391,20 @@ try {
             } catch { }
         } finally {
             try { $res.Close() } catch { }
+            # Heartbeats queue behind a long request (save, download, AI chat); let them
+            # arrive before deciding the tab is gone.
+            if (([DateTime]::UtcNow - $requestStarted).TotalSeconds -ge 2) { Register-KeystoneRequestFinished }
         }
+        if ($stopReason) { break }
     }
 } finally {
-    $listener.Stop()
-    $listener.Close()
+    if ($stopReason) {
+        Write-Host ''
+        Write-Host ('  ' + $stopReason) -ForegroundColor Yellow
+        Write-KeystoneLog -Level INFO -Message ('Web host stopping: ' + $stopReason)
+    }
+    try { $listener.Stop() } catch { }
+    try { $listener.Close() } catch { }
+    if ($stopEvent) { try { $stopEvent.Dispose() } catch { } }
+    Remove-KeystoneRuntimeFile -Path $runtimeFile
 }

@@ -4,7 +4,8 @@ Development-stage tool, NOT an accredited enterprise deployment.
 
 ## Browser
 - The PowerShell host listens on localhost and accepts only loopback requests.
-- Every POST needs a per-process cryptographically random CSRF token.
+- Every POST needs a per-process cryptographically random CSRF token in the `X-Keystone-Session` header. One exception: `POST /api/heartbeat` also accepts it as `session` in the JSON body, because the tab's unload beacon (`navigator.sendBeacon`) cannot set headers. The token never goes in a query string, the runtime file or the log, and request bodies are not logged. The Origin and Host checks apply to that route like any other, so another site cannot send the leaving signal.
+- `POST /api/session/stop` (End session) additionally requires `X-Keystone-Intent: end-session`.
 - Cross-origin requests are rejected; CSP, nosniff and frame restrictions are set.
 - Repository and AI tokens remain inside PowerShell and never reach JavaScript.
 - No arbitrary filesystem reader, script execution, or assistant tool execution endpoints.
