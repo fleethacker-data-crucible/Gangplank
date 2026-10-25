@@ -51,7 +51,7 @@ function Initialize-Gangplank {
     # -ConfigPath isolates settings (tests, LocalDev); normally config\ in the tool folder.
     param([string]$LogLevel = "INFO",[string]$ConfigPath)
     Initialize-GangplankLogging -LogDir (Join-Path $script:GangplankRoot "Logs") -Level $LogLevel
-    if (-not $ConfigPath) { $ConfigPath = Join-Path $script:GangplankRoot "config\keystone-config.json" }
+    if (-not $ConfigPath) { $ConfigPath = Join-Path $script:GangplankRoot "config\gangplank-config.json" }
     Initialize-GangplankConfig -ConfigPath $ConfigPath
     Write-GangplankLog -Level INFO -Message "Gangplank $($script:GangplankRoot)"
 }
@@ -269,6 +269,8 @@ Export-ModuleMember -Function @(
     "Write-GangplankError",
     "Get-GangplankLazaretteItemName",
     "Get-GangplankLazaretteCanonicalMap",
+    "Get-GangplankConfigLazaretteItems",
+    "Copy-GangplankLegacyConfigFiles",
     "Get-GangplankPathDiff",
     "Get-GangplankRemoteHead",
     "Get-GangplankSafeWorkspacePath",

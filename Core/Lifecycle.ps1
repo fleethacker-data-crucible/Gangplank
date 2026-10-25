@@ -112,7 +112,7 @@ function Get-GangplankPresenceState {
 function Test-GangplankAutoStopEnabled {
     <#
       -Stay, GANGPLANK_AUTO_STOP=0 (environment) or "AutoStop": false in
-      config\keystone-config.json turn auto-stop off. GANGPLANK_AUTO_STOP=1 forces it on.
+      config\gangplank-config.json turn auto-stop off. GANGPLANK_AUTO_STOP=1 forces it on.
     #>
     param([switch]$Stay, [object]$Config)
     if ($Stay) { return $false }
