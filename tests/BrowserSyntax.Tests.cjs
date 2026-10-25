@@ -28,7 +28,7 @@ for(const tab of ['overview','changes','branches','compare','activity','reviews'
  assert.match(html,new RegExp('data-tab="'+tab+'"'),'Missing navigation: '+tab);
  assert.ok(ids.has(tab),'Missing section: '+tab);
 }
-for(const route of ['/api/branches','/api/history','/api/compare','/api/reviews','/api/insights','/api/sentinel','/api/session','/api/jobs/','/api/credentials','/api/integrations/arc','/api/audit','/api/chat'])
+for(const route of ['/api/branches','/api/history','/api/compare','/api/reviews','/api/insights','/api/sentinel','/api/session','/api/jobs/','/api/credentials','/api/integrations/arc','/api/audit','/api/chat','/api/settings','/api/settings/workspace','/api/settings/intelligence','/api/ai/detect','/api/ai/test'])
  assert.ok(js.includes(route),'UI missing route: '+route);
 assert.match(js,/'X-Keystone-Client'/,'API calls must send the client header');
 console.log('Browser markup, element references, and JavaScript syntax passed.');

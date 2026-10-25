@@ -54,7 +54,7 @@ jobs:
         run: |
           $failed = $false
           # Each suite in its own process: ARC's engine and the module load once per process.
-          foreach ($t in @('SmartSave','Workspace','ProviderSafety','Credentials','Sentinel','RepositoryInsights','RepositoryIntegrity','ArcIntegration','ArcCoreOnly','Arc5Contract','Arc5Real','WebHost')) {
+          foreach ($t in @('SmartSave','Workspace','ProviderSafety','Credentials','Intelligence','Sentinel','RepositoryInsights','RepositoryIntegrity','ArcIntegration','ArcCoreOnly','Arc5Contract','Arc5Real','WebHost')) {
             Write-Host "== $t"
             .\.github\ci-run.ps1 -Title "$t tests" -Command "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\$t.Tests.ps1"
             if ($LASTEXITCODE -ne 0) { $failed = $true }

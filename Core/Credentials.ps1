@@ -15,7 +15,7 @@ $script:KeystoneCredentialProviders = @('GitHub','GitLab','GenAi')
 $script:KeystoneCredentialEnv = @{
     GitHub = @('GITHUB_TOKEN')
     GitLab = @('GITLAB_TOKEN')
-    GenAi  = @('KEYSTONE_AI_TOKEN','GENAI_TOKEN')
+    GenAi  = @('KEYSTONE_AI_TOKEN','GENAI_TOKEN','LLM_TOKEN','OPENAI_API_KEY')   # LLM_TOKEN/OPENAI_API_KEY: shared with Cascade
 }
 $script:KeystoneCredentialEntropy = [Text.Encoding]::UTF8.GetBytes('Keystone credential store v1')
 $script:KeystoneCredentialStorePath = $null
@@ -169,8 +169,13 @@ function Get-KeystoneLocalSettingsPath {
 }
 
 function Get-KeystoneLocalSettings {
+    # Per-workstation, non-secret settings (config\keystone.local.json, not committed).
     $path = Get-KeystoneLocalSettingsPath
-    $settings = [ordered]@{ Arc = [ordered]@{ Enabled = $false; Path = '' } }
+    $settings = [ordered]@{
+        Arc = [ordered]@{ Enabled = $false; Path = '' }
+        Workspaces = [ordered]@{ Root = '' }
+        Intelligence = [ordered]@{ Endpoint = ''; Profile = ''; Model = ''; ChatUrl = ''; Auth = '' }
+    }
     if (Test-Path -LiteralPath $path -PathType Leaf) {
         try {
             $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -178,9 +183,72 @@ function Get-KeystoneLocalSettings {
                 $settings.Arc.Enabled = ($raw.Arc.Enabled -eq $true)
                 if ($raw.Arc.Path -is [string]) { $settings.Arc.Path = $raw.Arc.Path }
             }
-        } catch { Write-KeystoneLog -Level WARN -Message 'keystone.local.json could not be read; ARC stays disabled.' }
+            if ($raw.Workspaces -and $raw.Workspaces.Root -is [string]) { $settings.Workspaces.Root = $raw.Workspaces.Root }
+            if ($raw.Intelligence) {
+                foreach ($k in @('Endpoint','Profile','Model','ChatUrl','Auth')) {
+                    $v = $raw.Intelligence.PSObject.Properties[$k]
+                    if ($v -and $v.Value -is [string]) { $settings.Intelligence[$k] = $v.Value }
+                }
+            }
+        } catch { Write-KeystoneLog -Level WARN -Message 'keystone.local.json could not be read; using defaults (ARC off).' }
     }
     return $settings
+}
+
+function Save-KeystoneLocalSettings {
+    param([Parameter(Mandatory)]$Settings)
+    $path = Get-KeystoneLocalSettingsPath
+    $tmp = "$path.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [IO.File]::WriteAllText($tmp, ($Settings | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $tmp -Destination $path -Force
+    } finally {
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Assert-KeystoneLocalFolderPath {
+    # A full, local folder path (no network shares, no control characters).
+    param([string]$Path,[string]$What)
+    $clean = ([string]$Path).Trim().Trim('"')
+    if (-not $clean -or $clean.Length -gt 400 -or $clean -match '[\x00-\x1f]') { throw "BAD_REQUEST|Enter the full $What path." }
+    if (-not [IO.Path]::IsPathRooted($clean)) { throw "BAD_REQUEST|Enter the full $What path, for example C:\Users\you\Keystone." }
+    if ($clean -match '^(\\\\|//)') { throw "BAD_REQUEST|The $What must be on this PC, not a network share." }
+    return $clean
+}
+
+function Get-KeystoneDefaultWorkspaceRoot {
+    # Like a normal clone location: a "Keystone" folder in the user's home, outside the tool.
+    $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } elseif ($env:HOME) { $env:HOME } else { [IO.Path]::GetTempPath() }
+    return (Join-Path $homeDir 'Keystone')
+}
+
+function Get-KeystoneWorkspaceRoot {
+    if (-not [string]::IsNullOrWhiteSpace($env:KEYSTONE_WORK_ROOT)) { return $env:KEYSTONE_WORK_ROOT.Trim().Trim('"') }
+    $configured = [string](Get-KeystoneLocalSettings).Workspaces.Root
+    if ($configured) { return $configured }
+    return (Get-KeystoneDefaultWorkspaceRoot)
+}
+
+function Set-KeystoneWorkspaceRoot {
+    [CmdletBinding()]
+    param([string]$Path)
+    $settings = Get-KeystoneLocalSettings
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        $settings.Workspaces.Root = ''
+    } else {
+        $clean = Assert-KeystoneLocalFolderPath -Path $Path -What 'workspace folder'
+        $full = [IO.Path]::GetFullPath($clean)
+        $toolRoot = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent)).TrimEnd('\','/')
+        if ($full.StartsWith($toolRoot + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -or $full.TrimEnd('\','/') -ieq $toolRoot) {
+            throw 'BAD_REQUEST|Choose a folder outside the Keystone program folder, so your work is never mixed with the tool.'
+        }
+        if (-not (Test-Path -LiteralPath $full)) { [void](New-Item -ItemType Directory -Path $full -Force) }
+        $settings.Workspaces.Root = $full
+    }
+    Save-KeystoneLocalSettings -Settings $settings
+    Write-KeystoneAudit -Action 'workspace.root' -Data @{ root = $(if ($settings.Workspaces.Root) { $settings.Workspaces.Root } else { '(default)' }) }
+    return (Get-KeystoneWorkspaceRoot)
 }
 
 function Set-KeystoneArcSettings {
@@ -198,14 +266,7 @@ function Set-KeystoneArcSettings {
     $settings = Get-KeystoneLocalSettings
     $settings.Arc.Enabled = [bool]$Enabled
     $settings.Arc.Path = $clean
-    $path = Get-KeystoneLocalSettingsPath
-    $tmp = "$path.$([guid]::NewGuid().ToString('N')).tmp"
-    try {
-        [IO.File]::WriteAllText($tmp, ($settings | ConvertTo-Json -Depth 4), (New-Object Text.UTF8Encoding($false)))
-        Move-Item -LiteralPath $tmp -Destination $path -Force
-    } finally {
-        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
-    }
+    Save-KeystoneLocalSettings -Settings $settings
     Write-KeystoneAudit -Action 'arc.settings' -Data @{ enabled = [bool]$Enabled }
     return $settings
 }

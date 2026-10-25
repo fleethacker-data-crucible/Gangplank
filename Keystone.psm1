@@ -22,6 +22,7 @@ if (-not $script:KeystoneRoot) {
 . (Join-Path $script:KeystoneRoot "Core\Workspace.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Sentinel.ps1")
 . (Join-Path $script:KeystoneRoot "Core\RepositoryInsights.ps1")
+. (Join-Path $script:KeystoneRoot "Core\Intelligence.ps1")
 . (Join-Path $script:KeystoneRoot "Core\AI.ps1")
 . (Join-Path $script:KeystoneRoot "ArcBridge.ps1")
 . (Join-Path $script:KeystoneRoot "Providers\GitProviderBase.ps1")
@@ -46,9 +47,11 @@ function Write-KeystoneBreadcrumb {
 }
 
 function Initialize-Keystone {
-    param([string]$LogLevel = "INFO")
+    # -ConfigPath isolates settings (tests, LocalDev); normally config\ in the tool folder.
+    param([string]$LogLevel = "INFO",[string]$ConfigPath)
     Initialize-KeystoneLogging -LogDir (Join-Path $script:KeystoneRoot "Logs") -Level $LogLevel
-    Initialize-KeystoneConfig -ConfigPath (Join-Path $script:KeystoneRoot "config\keystone-config.json")
+    if (-not $ConfigPath) { $ConfigPath = Join-Path $script:KeystoneRoot "config\keystone-config.json" }
+    Initialize-KeystoneConfig -ConfigPath $ConfigPath
     Write-KeystoneLog -Level INFO -Message "Keystone $($script:KeystoneRoot)"
 }
 
@@ -310,5 +313,11 @@ Export-ModuleMember -Function @(
     "Get-KeystoneAuditEntries",
     "Get-KeystoneHttpStatus",
     "ConvertTo-KeystoneRefPath",
-    "Start-KeystoneWebHost"
+    "Start-KeystoneWebHost",
+    "Get-KeystoneWorkspaceRoot",
+    "Find-KeystoneAiModels",
+    "Get-KeystoneAiSettingsView",
+    "Set-KeystoneAiSettings",
+    "Test-KeystoneAiConnection",
+    "ConvertTo-KeystoneBranchName"
 )

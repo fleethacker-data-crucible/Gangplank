@@ -10,12 +10,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startFakeGitHub } from '../../dev/fake-github.mjs';
+import { startFakeAi } from '../../dev/fake-ai.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const shell = process.env.KEYSTONE_PWSH || (process.platform === 'win32' ? 'powershell.exe' : 'pwsh');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'keystone-e2e-'));
 const workRoot = path.join(temp, 'work');
 const fake = await startFakeGitHub({ port: 0 });
+const fakeAi = await startFakeAi({ port: 0, mode: 'openai' });
 let host = null;
 
 function startHost() {
@@ -24,7 +26,7 @@ function startHost() {
     '-LocalDev', '-NoBrowser', '-Port', String(port), '-DevGitHubUrl', fake.url + '/', '-WorkRoot', workRoot];
   if (shell.toLowerCase().includes('powershell')) args.unshift('-STA');
   const env = { ...process.env, GITHUB_TOKEN: fake.token, LOCALAPPDATA: path.join(temp, 'appdata'), HOME: temp,
-    KEYSTONE_ARC_PATH: '', GITLAB_TOKEN: '', KEYSTONE_AI_TOKEN: '', GENAI_TOKEN: '' };
+    KEYSTONE_ARC_PATH: '', GITLAB_TOKEN: '', KEYSTONE_AI_TOKEN: fakeAi.token, GENAI_TOKEN: '', LLM_TOKEN: '', OPENAI_API_KEY: '', LLM_URL: '', KEYSTONE_AI_URL: '', KEYSTONE_WORK_ROOT: '' };
   const child = spawn(shell, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   return new Promise((resolve, reject) => {
@@ -51,7 +53,8 @@ async function stopHost(h) {
 after(async () => {
   await stopHost(host);
   await fake.close();
-  fs.rmSync(temp, { recursive: true, force: true });
+  await fakeAi.close();
+  fs.rmSync(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
 });
 
 let cookie = '';
@@ -142,10 +145,20 @@ test('connect, start, edit, Smart Save, review', async () => {
   assert.equal(r.status, 200, JSON.stringify(r));
   assert.equal(r.json.project, 'keystone-demo/sample');
   assert.ok(r.json.branches.includes('feature/demo'));
-  r = await job(h, '/api/start', {});
+  r = await job(h, '/api/start', { name: 'dummy dev' });
   assert.equal(r.status, 200, JSON.stringify(r));
   const branch = r.json.branch, folder = r.json.folder;
-  assert.match(branch, /^keystone\/work-/);
+  assert.equal(branch, 'dummy-dev', 'The work branch must use the name the user typed');
+  assert.equal(path.basename(folder), 'dummy-dev', 'The folder must be named after the branch');
+  assert.equal(path.basename(path.dirname(folder)), 'sample', 'The folder must sit under the repository name');
+  assert.ok(folder.startsWith(workRoot), 'Workspaces must go to the workspace folder');
+  const dup = await job(h, '/api/start', { name: 'dummy-dev' });
+  assert.equal(dup.status, 500, 'Starting a branch that already exists must fail');
+  assert.match(String(dup.error), /already exists/, 'Duplicate branch error must say so: ' + dup.error);
+  const badName = await call(h, 'POST', '/api/start', { name: 'bad..name' });
+  assert.equal(badName.status, 400, 'An invalid branch name must be refused before any work starts');
+  // the workspace from the first start is still current
+  r = { json: { branch, folder } };
   assert.ok(fs.existsSync(path.join(folder, 'scripts', 'build.sh')), 'Workspace not downloaded');
   const st = await fakeState();
   assert.equal(st.codeload.authorizationSent, false, 'Token must not be sent to the archive redirect host');
@@ -249,4 +262,33 @@ test('a disconnect during a job is not undone by the job', async () => {
   }
   const st = await call(host, 'GET', '/api/status');
   assert.equal(st.json.connected, false, 'Disconnect must stick');
+});
+
+test('AI: detect models, save, test and chat through a synthetic gateway', async () => {
+  const h = host;
+  let r = await job(h, '/api/ai/detect', { endpoint: fakeAi.url + '/v1' });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  assert.equal(r.json.profile, 'openai');
+  assert.ok(!r.json.models.includes('text-embedding-3-small') && !r.json.models.includes('whisper-1'), 'Non-chat models must be filtered out');
+  assert.equal(r.json.recommended, 'gpt-4.1', 'The best chat model should be preselected');
+  const s = await call(h, 'POST', '/api/settings/intelligence', { endpoint: fakeAi.url + '/v1', model: r.json.recommended, profile: r.json.profile, base: r.json.base, auth: r.json.auth });
+  assert.equal(s.status, 200, s.text);
+  assert.equal(s.json.intelligence.model, 'gpt-4.1');
+  const t = await job(h, '/api/ai/test', {});
+  assert.equal(t.status, 200, JSON.stringify(t));
+  assert.equal(t.json.reply, 'OK');
+  const start = await call(h, 'POST', '/api/chat', { message: 'What is a branch?' });
+  assert.equal(start.status, 202, start.text);
+  let text = '', after = 0, state = 'running';
+  for (let i = 0; i < 100 && state === 'running'; i++) {
+    await new Promise((res) => setTimeout(res, 200));
+    const j = await call(h, 'GET', `/api/jobs/${start.json.job}?after=${after}`);
+    text += j.json.chunks.join(''); after = j.json.next; state = j.json.state;
+  }
+  assert.equal(state, 'succeeded');
+  assert.match(text, /^Echo from gpt-4\.1: What is a branch\?/, 'Streamed answer should arrive in order: ' + text);
+  const bad = await call(h, 'POST', '/api/ai/detect', { endpoint: 'http://gateway.example.com/v1' });
+  assert.equal(bad.status, 400, 'Plain http to another host must be refused before any request');
+  const reset = await call(h, 'POST', '/api/settings/intelligence', { endpoint: '' });
+  assert.equal(reset.json.intelligence.endpoint, 'https://api.genai.mil/v1');
 });

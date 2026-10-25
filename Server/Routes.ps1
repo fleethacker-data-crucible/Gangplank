@@ -10,16 +10,29 @@ $script:KeystoneApp = @{
     Session = $null        # live session (with provider object) or $null
     Restored = $null       # snapshot from a previous run, waiting for a token
     WorkRoot = ''
+    WorkRootFixed = $false
+    StateRoot = ''
     LocalDev = $false
     Generation = 0         # bumped on connect/disconnect; stale job results are dropped
 }
 
 function Initialize-KeystoneApp {
-    param([Parameter(Mandatory)][string]$WorkRoot,[switch]$LocalDev)
+    # WorkRoot: where workspaces go. StateRoot: Keystone's own data (saved session).
+    # LegacyStateRoot: the old <tool>\work\.keystone, read once if nothing newer exists.
+    param([Parameter(Mandatory)][string]$WorkRoot,[Parameter(Mandatory)][string]$StateRoot,[string]$LegacyStateRoot,[switch]$WorkRootFixed,[switch]$LocalDev)
     $script:KeystoneApp.WorkRoot = $WorkRoot
+    $script:KeystoneApp.WorkRootFixed = [bool]$WorkRootFixed
+    $script:KeystoneApp.StateRoot = $StateRoot
     $script:KeystoneApp.LocalDev = [bool]$LocalDev
     $script:KeystoneApp.Session = $null
-    $script:KeystoneApp.Restored = Read-KeystoneSessionState -WorkRoot $WorkRoot
+    $script:KeystoneApp.Restored = Read-KeystoneSessionState -StateRoot $StateRoot
+    if (-not $script:KeystoneApp.Restored -and $LegacyStateRoot -and (Test-Path -LiteralPath (Get-KeystoneSessionStatePath -StateRoot $LegacyStateRoot))) {
+        $script:KeystoneApp.Restored = Read-KeystoneSessionState -StateRoot $LegacyStateRoot
+        if ($script:KeystoneApp.Restored) {
+            Write-KeystoneLog -Level INFO -Message 'Picked up the session saved by an earlier Keystone (work\.keystone). New workspaces now go to the workspace folder.'
+            try { Save-KeystoneSessionState -StateRoot $StateRoot -Session ([pscustomobject]$script:KeystoneApp.Restored) } catch { }
+        }
+    }
     if ($script:KeystoneApp.Restored) {
         Write-KeystoneLog -Level INFO -Message "Restored session for $($script:KeystoneApp.Restored.ProjectPath) (branch $($script:KeystoneApp.Restored.LastBranch))."
     }
@@ -57,7 +70,7 @@ function Set-KeystoneAppSession {
         $script:KeystoneApp.Restored = $null
     }
     # Saving state is best effort (antivirus, sync clients): never fail the request for it.
-    try { Save-KeystoneSessionState -WorkRoot $script:KeystoneApp.WorkRoot -Session $script:KeystoneApp.Session }
+    try { Save-KeystoneSessionState -StateRoot $script:KeystoneApp.StateRoot -Session $script:KeystoneApp.Session }
     catch { Write-KeystoneLog -Level WARN -Message "Session state could not be saved: $($_.Exception.Message)" }
 }
 
@@ -73,6 +86,17 @@ function Update-KeystoneSessionCredential {
         # No credential any more: keep the work as a restorable snapshot.
         $script:KeystoneApp.Restored = ConvertTo-KeystoneSessionSnapshot $s
         $script:KeystoneApp.Session = $null
+    }
+}
+
+function Get-KeystoneAppSettingsView {
+    return [ordered]@{
+        workspaces = [ordered]@{
+            root = $script:KeystoneApp.WorkRoot
+            default = (Get-KeystoneDefaultWorkspaceRoot)
+            fixed = [bool]($script:KeystoneApp.WorkRootFixed -or -not [string]::IsNullOrWhiteSpace($env:KEYSTONE_WORK_ROOT))
+        }
+        intelligence = (Get-KeystoneAiSettingsView)
     }
 }
 
@@ -147,7 +171,7 @@ $script:KeystoneOnReviewJob = {
     $s = $script:KeystoneApp.Session
     if ($s -and $Context.Generation -eq $script:KeystoneApp.Generation) {
         $s | Add-Member -MemberType NoteProperty -Name LastReviewUrl -Value $Result.Url -Force
-        try { Save-KeystoneSessionState -WorkRoot $script:KeystoneApp.WorkRoot -Session $s } catch { Write-KeystoneLog -Level WARN -Message 'Session state could not be saved.' }
+        try { Save-KeystoneSessionState -StateRoot $script:KeystoneApp.StateRoot -Session $s } catch { Write-KeystoneLog -Level WARN -Message 'Session state could not be saved.' }
     }
     return @{ url = $Result.Url; title = $Result.Title }
 }
@@ -216,6 +240,36 @@ function Invoke-KeystoneRouteCore {
         Send-KeystoneJson -Object (Get-KeystoneCredentialStatus)
         return
     }
+    if ($m -eq 'GET' -and $p -eq '/api/settings') {
+        Send-KeystoneJson -Object (Get-KeystoneAppSettingsView)
+        return
+    }
+    if ($m -eq 'POST' -and $p -eq '/api/settings/intelligence') {
+        $view = Set-KeystoneAiSettings -Endpoint ([string](Get-KeystoneBodyValue $Req 'endpoint')) -Flavor ([string](Get-KeystoneBodyValue $Req 'profile')) -Model ([string](Get-KeystoneBodyValue $Req 'model')) -Base ([string](Get-KeystoneBodyValue $Req 'base')) -Auth ([string](Get-KeystoneBodyValue $Req 'auth'))
+        Send-KeystoneJson -Object (Get-KeystoneAppSettingsView)
+        return
+    }
+    if ($m -eq 'POST' -and $p -eq '/api/ai/detect') {
+        $endpoint = [string](Get-KeystoneBodyValue $Req 'endpoint')
+        if (-not $endpoint) { $endpoint = (Get-KeystoneAiConfiguration).Endpoint }
+        [void](Assert-KeystoneAiEndpoint -Url $endpoint)   # refuse before any request leaves
+        $jobArgs = @{ Endpoint = $endpoint; AiToken = (Get-KeystoneAiToken); Current = [string](Get-KeystoneBodyValue $Req 'model') }
+        $id = Start-KeystoneJob -Kind 'ai-detect' -Group 'ai' -Function 'Invoke-KeystoneJobAiDetect' -Arguments $jobArgs
+        Send-KeystoneJobStarted $id
+        return
+    }
+    if ($m -eq 'POST' -and $p -eq '/api/ai/test') {
+        $id = Start-KeystoneJob -Kind 'ai-test' -Group 'ai' -Function 'Invoke-KeystoneJobAiTest' -Arguments @{ AiToken = (Get-KeystoneAiToken) }
+        Send-KeystoneJobStarted $id
+        return
+    }
+    if ($m -eq 'POST' -and $p -eq '/api/settings/workspace') {
+        if ($app.WorkRootFixed) { throw 'BAD_STATE|This Keystone was started with -WorkRoot; change the folder there.' }
+        if (-not [string]::IsNullOrWhiteSpace($env:KEYSTONE_WORK_ROOT)) { throw 'BAD_STATE|The workspace folder is set by KEYSTONE_WORK_ROOT.' }
+        $app.WorkRoot = Set-KeystoneWorkspaceRoot -Path ([string](Get-KeystoneBodyValue $Req 'root'))
+        Send-KeystoneJson -Object (Get-KeystoneAppSettingsView)
+        return
+    }
     if ($m -eq 'POST' -and $p -eq '/api/credentials') {
         $provider = [string](Get-KeystoneBodyValue $Req 'provider')
         $token = [string](Get-KeystoneBodyValue $Req 'token')
@@ -276,7 +330,10 @@ function Invoke-KeystoneRouteCore {
     }
     if ($m -eq 'POST' -and $p -eq '/api/start') {
         $session = Get-KeystoneLiveSession -Required
+        $name = [string](Get-KeystoneBodyValue $Req 'name')
+        if ($name) { $name = ConvertTo-KeystoneBranchName -Name $name }   # validate before starting a job
         $args2 = Get-KeystoneJobArguments $session
+        $args2.Name = $name
         $id = Start-KeystoneJob -Kind 'start' -Group 'workspace' -Function 'Invoke-KeystoneJobStart' -Arguments $args2 -OnComplete $script:KeystoneOnSessionJob -Context (Get-KeystoneJobContext -Token $args2.Token -Kind 'start')
         Send-KeystoneJobStarted $id
         return
@@ -380,7 +437,7 @@ function Invoke-KeystoneRouteCore {
         foreach ($sel in $selected) { if ($sel -cnotin $known) { throw 'BAD_REQUEST|Invalid selected file.' } }
         if ($selected.Count -eq 0) { throw 'BAD_REQUEST|Select changed files first.' }
         $ai = Get-KeystoneAiToken
-        if (-not $ai) { throw 'AI_NOT_CONFIGURED|AI is not connected. Add a GenAI token in Integrations.' }
+        if (-not $ai -and (Get-KeystoneAiConfiguration).Profile -ne 'ollama') { throw 'AI_NOT_CONFIGURED|AI is not connected. Add a GenAI token in Credentials.' }
         $kinds = @{}; foreach ($c in @($preview.Changes)) { $kinds[$c.Path] = $c.Kind }
         $jobArgs = @{
             New = @($selected | Where-Object { $kinds[$_] -eq 'New' })
@@ -397,7 +454,7 @@ function Invoke-KeystoneRouteCore {
         if ([string]::IsNullOrWhiteSpace($question)) { throw 'BAD_REQUEST|Enter a message.' }
         if ($question.Length -gt 6000) { throw 'BAD_REQUEST|AI message exceeds 6,000 characters.' }
         $ai = Get-KeystoneAiToken
-        if (-not $ai) { throw 'AI_NOT_CONFIGURED|AI is not connected. Add a GenAI token in Integrations.' }
+        if (-not $ai -and (Get-KeystoneAiConfiguration).Profile -ne 'ollama') { throw 'AI_NOT_CONFIGURED|AI is not connected. Add a GenAI token in Credentials.' }
         $snap = Get-KeystoneAppSnapshot
         $jobArgs = @{ Question = $question; AiToken = $ai; Project = $(if ($snap) { $snap.ProjectPath } else { '' }); Branch = $(if ($snap) { $(if ($snap.LastBranch) { $snap.LastBranch } else { $snap.DefaultBranch }) } else { '' }) }
         $id = Start-KeystoneJob -Kind 'chat' -Group 'chat' -Function 'Invoke-KeystoneJobChat' -Arguments $jobArgs

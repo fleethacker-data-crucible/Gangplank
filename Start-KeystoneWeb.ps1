@@ -18,13 +18,17 @@ param(
     [switch]$LocalDev,
     # LocalDev only: a synthetic GitHub server (dev/fake-github.mjs), http://127.0.0.1:<port>/
     [string]$DevGitHubUrl,
-    # Where workspaces and the saved session live (default: .\work). Tests use a temp folder.
+    # Where workspaces go for this run (tests and LocalDev). Normally the workspace folder
+    # from Settings (default %USERPROFILE%\Keystone); the saved session then lives in
+    # %LOCALAPPDATA%\Keystone. With -WorkRoot both live under that folder.
     [string]$WorkRoot
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 Import-Module (Join-Path $root 'Keystone.psm1') -Force -WarningAction SilentlyContinue
-Initialize-Keystone
+# With -WorkRoot (tests, LocalDev) every setting Keystone writes stays under that folder.
+if ($WorkRoot) { Initialize-Keystone -ConfigPath (Join-Path (Join-Path (Join-Path $WorkRoot '.keystone') 'config') 'keystone-config.json') }
+else { Initialize-Keystone }
 
 if ($LocalDev) {
     Write-Host '[LOCAL DEV] ARC is not imported; no unlock prompts. Use fictional data only.' -ForegroundColor Yellow
@@ -38,6 +42,16 @@ if ($LocalDev) {
     Write-Host '[i] ARC not configured (optional). Using saved Keystone or environment credentials.' -ForegroundColor DarkGray
 }
 
-if (-not $WorkRoot) { $WorkRoot = Join-Path $root 'work' }
-Start-KeystoneWebHost -Port $Port -NoBrowser:$NoBrowser -LocalDev:$LocalDev -DevGitHubUrl $DevGitHubUrl `
-    -WorkRoot $WorkRoot -UiRoot (Join-Path $root 'web')
+$hostArgs = @{ Port = $Port; NoBrowser = $NoBrowser; LocalDev = $LocalDev; DevGitHubUrl = $DevGitHubUrl; UiRoot = (Join-Path $root 'web') }
+if ($WorkRoot) {
+    $hostArgs.WorkRoot = $WorkRoot
+    $hostArgs.StateRoot = Join-Path $WorkRoot '.keystone'
+    $hostArgs.WorkRootFixed = $true
+} else {
+    $hostArgs.WorkRoot = Get-KeystoneWorkspaceRoot
+    $appData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } elseif ($env:HOME) { Join-Path $env:HOME '.local/share' } else { [IO.Path]::GetTempPath() }
+    $hostArgs.StateRoot = Join-Path $appData 'Keystone'
+    $hostArgs.LegacyStateRoot = Join-Path (Join-Path $root 'work') '.keystone'
+}
+Write-Host ("[i] Workspaces: {0}" -f $hostArgs.WorkRoot) -ForegroundColor DarkGray
+Start-KeystoneWebHost @hostArgs

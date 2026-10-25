@@ -24,6 +24,9 @@ needs a CAC, the real web.git.mil instance or workstation application control is
 | Providers (4) | One transport for GitHub, GitLab and AI: coded errors, GET-only retry with `Retry-After`, no token on cross-host redirects, UTF-8 bodies, GitHub empty-repo 409 handled |
 | LocalDev and e2e (5) | Synthetic GitHub (`dev/fake-github.mjs`), `Launch-LocalDev.bat`, and an end-to-end test that drives the real host through connect, start, Smart Save, review, stale branch and restart |
 | Audit (6) | `Logs\audit.jsonl` for every remote write and credential/ARC change, shown in the UI |
+| Work branches | Users name their work branch (friendly names become valid branch names; duplicates and invalid names are refused clearly) |
+| Workspace folder | Workspaces live in `%USERPROFILE%\Keystone\<repo>\<branch>` (configurable), outside the program folder; Keystone's own state in `%LOCALAPPDATA%\Keystone` |
+| AI model | One endpoint setting with discovery: OpenAI-compatible, Azure OpenAI, Databricks, Ollama; chat-model filter and ranking; Test; Cascade's `LLM_*` variables honoured |
 | CI (7) | Hygiene job (5.1 parse, non-ASCII without BOM, tracked logs/credentials), pinned actions, concurrency, 5.1 suites, e2e under Windows PowerShell 5.1 |
 
 ## Next — host follow-ups (off-workstation)
@@ -57,6 +60,8 @@ or a release zip is required.
 | 14 | Sentinel review flow | "Review" findings (possible SSN, CUI marking) can be acknowledged per file with an audited reason; images and other binaries allowed by verified type instead of blocked outright; one shared rule list |
 | 15 | Revert a file | Restore one file to the download baseline from the Workspace screen |
 | 16 | AI with explicit consent | Read-only actions (explain this diff, summarize this review) that show exactly what will be sent before sending; still no tool execution |
+| 16b | Use an existing folder | Adopt a git clone (base commit from `.git\HEAD`, file hashes compared with the remote tree) or a plain folder matched to a branch commit |
+| 16c | Shared AI module | Keystone's endpoint discovery (`Core/Intelligence.ps1`) could become the common AI setting for Cascade and Synapse |
 | 17 | Retire the legacy CLI bulk upload | `Invoke-KeystonePush` and the classic menu once the browser flow covers them |
 
 ## Workstation (CAC, real endpoints, application control)

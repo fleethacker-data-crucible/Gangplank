@@ -16,7 +16,7 @@ Double-click **Launch-Keystone.bat**. Keystone starts a local server on `http://
 
 ## Connect → Start → Edit → Smart Save
 1. Add a token in **Credentials** (or set an environment variable), paste a GitHub or GitLab project URL and connect.
-2. **Start my safe workspace** creates a work branch and downloads a fresh copy into a new folder under `work\`. Existing folders are never overwritten.
+2. Optionally name your branch (for example `dummy-dev`), then **Start my safe workspace**. Keystone creates that branch from the default branch and downloads it to `%USERPROFILE%\Keystone\<repository>\<branch>`, like a normal clone (change the folder in **Settings**). Existing folders are never overwritten. To just look at an existing branch, use **Explore this branch**.
 3. Edit files with your normal tools.
 4. In **Smart Save**, refresh and choose which added or modified files to publish. Deletions start unselected; likely secrets and files over 5 MB are blocked.
 5. Accept the generated commit title (or ask the AI for one from file names only) and publish.
@@ -24,7 +24,7 @@ Double-click **Launch-Keystone.bat**. Keystone starts a local server on `http://
 
 Keystone pins each download to a commit, checks the remote branch before saving and never force-updates a branch: if someone else changed it, saving stops. File modes are kept (scripts stay executable). Direct saves to the default branch are off unless `KEYSTONE_ALLOW_DEFAULT_BRANCH_WRITES=1`.
 
-Your project, work branch and download baseline are saved under `work\.keystone`, so restarting Keystone keeps pending work. Downloads, saves, reviews and AI answers run in the background; the page stays usable and shows progress.
+Your project, work branch and download baseline are saved in `%LOCALAPPDATA%\Keystone`, so restarting Keystone keeps pending work. Workspaces never live inside the Keystone program folder (an older `work\` folder there is still ignored by Git and its session is picked up once). Downloads, saves, reviews and AI answers run in the background; the page stays usable and shows progress.
 
 ## Credentials
 Keystone looks for a token in this order:
@@ -39,8 +39,19 @@ ARC is still in development, so Keystone never looks for it on its own. To use i
 
 When ARC is on, Keystone loads it once at startup and runs ARC's own unlock (`Unlock-ArcVaultInteractive`: passphrase or CAC PIN, then authenticator) in the Keystone PowerShell window, before the server starts. It then reads items with `Get-ArcSecret` (defaults: `github`, `gitmil`, `genapi`; change the mapping in Credentials). Keystone has no unlock code of its own and never unlocks from a browser request. Older ARC 3/4 installs (`pm.ps1`) are still supported.
 
-## AI assistant
-Advisory only: it cannot change files, run tools or publish. Endpoint `https://api.genai.mil/v1/chat/completions` by default (`KEYSTONE_AI_URL`, `KEYSTONE_AI_MODEL`; extra hosts need `KEYSTONE_AI_ALLOWED_HOSTS`). Chat sends your typed text and the project/branch name; commit-title help sends file names and statuses only. Source code is never sent automatically.
+## AI model
+Open **Settings → AI model**, enter your organisation's endpoint and select **Detect models**. Keystone asks the endpoint what it is and which chat models it offers, filters out embedding, speech and image models, and preselects the best match; **Test** sends one short message to prove it works. Supported:
+
+| Kind | Recognised by | Notes |
+|---|---|---|
+| OpenAI-compatible (genai.mil, OpenAI, LiteLLM, LM Studio, vLLM) | `/v1/models` answers | Bearer token, streaming |
+| Azure OpenAI | `*.openai.azure.com` | `api-key` header; models are your deployments |
+| Databricks model serving | `/serving-endpoints` or a Databricks host | Chat endpoints only; answers arrive in one piece |
+| Ollama on this PC | `/api/tags` (port 11434) | No token needed; plain http allowed for this PC only |
+
+The token is the **GenAI** credential (Settings, or `KEYSTONE_AI_TOKEN` / `GENAI_TOKEN`). The environment names Cascade uses also work, so one setup serves both apps: `LLM_URL` or `OPENAI_BASE_URL`, `LLM_MODEL` or `OPENAI_MODEL`, `LLM_TOKEN` or `OPENAI_API_KEY`. With nothing configured, Keystone uses `https://api.genai.mil/v1` and `gemini-3.8-flash`. Endpoints must be HTTPS; if `KEYSTONE_AI_ALLOWED_HOSTS` is set, only those hosts (and genai.mil) are allowed.
+
+The assistant is advisory only: it cannot change files, run tools or publish. Chat sends your typed text and the project/branch name; commit-title help sends file names and statuses only. Source code is never sent automatically.
 
 ## Audit
 Every remote write (branch, commit, review request) and every credential or ARC setting change is recorded in `Logs\audit.jsonl` and shown under **Credentials → Recent changes**: what, where and when, never contents or tokens.
@@ -54,11 +65,11 @@ Every remote write (branch, commit, review request) and every credential or ARC 
 |---|---|
 | `Start-KeystoneWeb.ps1`, `Launch-Keystone.bat` | Entry point and launcher |
 | `Server/` | Local server (`Http.ps1`), API (`Routes.ps1`), background jobs (`Jobs.ps1`, `JobWork.ps1`), saved session (`Session.ps1`) |
-| `Core/` | Workspace and Smart Save, Sentinel, HTTP transport, credentials, audit, AI, logging |
+| `Core/` | Workspace and Smart Save, Sentinel, HTTP transport, credentials, audit, AI (`Intelligence.ps1`: endpoint discovery), logging |
 | `Providers/` | GitHub and GitLab REST adapters |
 | `ArcBridge.ps1` | Optional ARC integration |
 | `web/` | Browser UI (`index.html`, `app.js`, `app.css`) |
-| `dev/` | LocalDev and the synthetic GitHub |
+| `dev/` | LocalDev, the synthetic GitHub and a synthetic AI gateway |
 | `Keystone.ps1` | Classic text menu |
 
 ## Important limits

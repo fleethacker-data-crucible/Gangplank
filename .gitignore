@@ -1,4 +1,5 @@
 Logs/
+# Older Keystone versions kept workspaces here; new ones go to %USERPROFILE%\Keystone.
 work/
 *.log
 *.tmp

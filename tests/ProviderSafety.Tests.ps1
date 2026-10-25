@@ -128,12 +128,12 @@ class KeystoneFakeGitHub : GitHubProvider {
     Assert (-not $live.BaselineMap.ContainsKey('b.txt')) 'Snapshots must copy the baseline map, not share it across threads'
     $sessDir = Join-Path ([IO.Path]::GetTempPath()) ('keystone-sess-' + [guid]::NewGuid().ToString('N'))
     try {
-        Save-KeystoneSessionState -WorkRoot $sessDir -Session $live
-        Assert ($null -ne (Read-KeystoneSessionState -WorkRoot $sessDir)) 'A github.com session should restore'
+        Save-KeystoneSessionState -StateRoot $sessDir -Session $live
+        Assert ($null -ne (Read-KeystoneSessionState -StateRoot $sessDir)) 'A github.com session should restore'
         $devLike = [pscustomobject]@{ Provider = 'GitHub'; BaseUrl = 'http://127.0.0.1:8791'; ProjectPath = 'keystone-demo/sample'; DefaultBranch = 'main'; BaselineMap = @{} }
-        Save-KeystoneSessionState -WorkRoot $sessDir -Session $devLike
+        Save-KeystoneSessionState -StateRoot $sessDir -Session $devLike
         $script:KeystoneDevGitHubUrl = $null
-        Assert ($null -eq (Read-KeystoneSessionState -WorkRoot $sessDir)) 'A LocalDev session must never restore in a normal run'
+        Assert ($null -eq (Read-KeystoneSessionState -StateRoot $sessDir)) 'A LocalDev session must never restore in a normal run'
     } finally { Remove-Item -LiteralPath $sessDir -Recurse -Force -ErrorAction SilentlyContinue }
 
     # --- GetPathModes walks only the needed directories ------------------------
