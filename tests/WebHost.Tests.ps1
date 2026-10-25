@@ -1,8 +1,16 @@
 #Requires -Version 5.1
-# Windows-only localhost smoke test. Does not use credentials or remote services.
+# Localhost smoke test of the real host under Windows PowerShell 5.1 (pwsh elsewhere).
+# LocalDev, no credentials, no remote services. The full flow against a synthetic
+# GitHub is tests/e2e/host.e2e.mjs.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-function Assert($value,[string]$message) { if (-not $value) { throw "FAIL: $message" } }
+function Assert([bool]$Condition,[string]$Message) { if (-not $Condition) { throw "FAILED: $Message" } }
+
+# The BAT entrypoint users double-click must keep its PowerShell switches.
+$batchText = [IO.File]::ReadAllText((Join-Path $root 'Launch-Keystone.bat'))
+Assert ($batchText -match '(?i)-ExecutionPolicy\s+Bypass') 'Keystone launcher is missing the process-scoped execution-policy option used by ARC/Cascade.'
+Assert ($batchText -match '(?i)-STA') 'Keystone launcher is missing the STA option.'
+Assert ($batchText -notmatch '(?i)set "ARC_PATH=') 'The launcher must not auto-configure ARC.'
 
 # ---- Lifecycle rule: the tab owns the server (simulated clock, no sleeping) ----
 . (Join-Path $root 'Core\Lifecycle.ps1')
@@ -56,154 +64,186 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $scratch 'Logs') -Force | Out-Null
     $stale = Join-Path $scratch 'Logs\keystone-server-999999.json'
     [IO.File]::WriteAllText($stale, '{"pid":999999,"port":1,"url":"http://localhost:1/","startedAt":"2000-01-01T00:00:00Z"}')
-    $mine = Write-KeystoneRuntimeFile -Root $scratch -Port 12345 -Url 'http://localhost:12345/'
+    $mine = Write-KeystoneRuntimeFile -Root $scratch -Port 12345 -Url 'http://localhost:12345/' -StateRoot (Join-Path $scratch 'state')
     $info = [IO.File]::ReadAllText($mine) | ConvertFrom-Json
     Assert ($info.pid -eq $PID -and $info.port -eq 12345 -and $info.url -and $info.startedAt) 'runtime file has pid, port, url, startedAt'
-    Assert (@($info.PSObject.Properties.Name).Count -eq 4) 'runtime file has nothing else (no session token)'
+    Assert (@($info.PSObject.Properties.Name).Count -eq 5 -and $info.PSObject.Properties['stateRoot']) 'runtime file has the saved-session folder and nothing else (no secrets)'
     $found = @(Get-KeystoneServerProcesses -Root $scratch -ThisCheckout)
     Assert ($found.Count -eq 0) 'own runtime file is not reported as another instance'
     Assert (-not (Test-Path -LiteralPath $stale)) 'stale runtime file removed'
     Assert (Test-Path -LiteralPath $mine) 'own runtime file kept'
     Remove-KeystoneRuntimeFile -Path $mine
     Assert (-not (Test-Path -LiteralPath $mine)) 'runtime file removed on stop'
+    # Instances are told apart by their saved-session folder.
+    Assert (Test-KeystoneSameStateRoot (Join-Path $scratch 'a') (Join-Path $scratch 'A')) 'state folders compare case-insensitively'
+    Assert (-not (Test-KeystoneSameStateRoot (Join-Path $scratch 'a') (Join-Path $scratch 'b'))) 'different state folders are different sessions'
+    Assert ((Get-KeystoneCommandLineStateRoot -CommandLine 'powershell -File "C:\k\Start-KeystoneWeb.ps1" -LocalDev -WorkRoot "C:\tmp\w x"') -eq [IO.Path]::Combine('C:\tmp\w x', '.keystone')) 'quoted -WorkRoot parsed from a command line'
 } finally { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
 Write-Host 'Browser presence rule, auto-stop switch and runtime files passed.' -ForegroundColor Green
 
-# A host left over from an earlier run in this folder would hold the port and DLLs.
-& (Join-Path $root 'Stop-Keystone.ps1') -ThisFolderOnly
 $port = Get-Random -Minimum 19000 -Maximum 29000
-$url = "http://localhost:$port/"
-# Test the same BAT entrypoint users double-click, not just the PS1 host.
-$launcher = Join-Path $root 'Launch-Keystone.bat'
-$batchText = [IO.File]::ReadAllText($launcher)
-if ($batchText -notmatch '(?i)-ExecutionPolicy\s+Bypass') { throw 'Keystone launcher is missing the process-scoped execution-policy option used by ARC/Cascade.' }
-if ($batchText -notmatch '(?i)-STA') { throw 'Keystone launcher is missing the STA option needed for ARC UI compatibility.' }
-$args = ('/d /c ""{0}" -NoBrowser {1}"' -f $launcher,$port)
-$process = Start-Process -FilePath 'cmd.exe' -ArgumentList $args -PassThru -WindowStyle Hidden
-$second = $null
+$temp = Join-Path ([IO.Path]::GetTempPath()) ('keystone-webhost-' + [guid]::NewGuid().ToString('N'))
+[void](New-Item -ItemType Directory -Path $temp)
+$out = Join-Path $temp 'host.out'
+$exe = if ($PSVersionTable.PSEdition -eq 'Core') { (Get-Process -Id $PID).Path } else { 'powershell.exe' }
+# Explicit LocalDev so an unattended runner never imports ARC or waits on an unlock prompt.
+$psArgs = @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',('"{0}"' -f (Join-Path $root 'Start-KeystoneWeb.ps1')),'-LocalDev','-NoBrowser','-Port',[string]$port,'-WorkRoot',('"{0}"' -f (Join-Path $temp 'work')))
+$second = $null; $third = $null; $fourth = $null
+$startArgs = @{ FilePath = $exe; ArgumentList = $psArgs; PassThru = $true; RedirectStandardOutput = $out; RedirectStandardError = (Join-Path $temp 'host.err') }
+if ($env:OS -eq 'Windows_NT') { $startArgs.WindowStyle = 'Hidden' }
+# The host is a separate process: give it a throwaway LOCALAPPDATA so it never sees
+# the real credential store or saved session of the account running the test.
+$savedAppData = $env:LOCALAPPDATA
+$env:LOCALAPPDATA = Join-Path $temp 'appdata'
+try { $process = Start-Process @startArgs } finally { $env:LOCALAPPDATA = $savedAppData }
 try {
-    $response = $null
-    for ($attempt = 0; $attempt -lt 40; $attempt++) {
+    $launch = $null
+    for ($i = 0; $i -lt 120 -and -not $launch; $i++) {
         Start-Sleep -Milliseconds 250
-        try {
-            $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2
-            break
-        } catch {
-            if ($process.HasExited) { throw "Keystone web host exited unexpectedly: $($process.ExitCode)" }
+        if ($process.HasExited) { throw "Keystone host exited early (exit $($process.ExitCode)). See $out." }
+        if (Test-Path -LiteralPath $out) {
+            # The host still has this file open for writing: read with shared access.
+            $fs = [IO.File]::Open($out,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+            try { $text = (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Dispose() }
+            $m = [regex]::Match($text,'Open: (http://127\.0\.0\.1:(\d+)/#k=([A-Za-z0-9_-]+))')
+            if ($m.Success) { $launch = $m }
         }
     }
-    if (-not $response -or $response.StatusCode -ne 200) { throw 'Local web host did not respond.' }
-    if ($response.Content -notmatch "const CSRF='([^']+)'") { throw 'Browser page has no CSRF bootstrap.' }
-    $csrf = $Matches[1]
-    if ($csrf -eq '__KEYSTONE_CSRF__' -or $csrf.Length -lt 20) { throw 'CSRF token not generated.' }
-    $status = Invoke-RestMethod -Uri ($url + 'api/status') -TimeoutSec 3
-    $integration = Invoke-RestMethod -Uri ($url + 'api/integrations') -TimeoutSec 3
-    if ($null -eq $integration.arcLoaded -or @($integration.integrations).Count -lt 2) {
-        throw 'Localhost ARC integrations status endpoint is missing provider metadata.'
-    }
-    $publicJson = $integration | ConvertTo-Json -Depth 6
-    if ($publicJson -match 'Authorization:|Bearer\s+[A-Za-z0-9]+') {
-        throw 'Integrations endpoint leaked authorization text.'
-    }
-    if ($status.connected) { throw 'Fresh workspace unexpectedly has a remote session.' }
-    $failedAsExpected = $false
-    try {
-        Invoke-RestMethod -Method Post -Uri ($url + 'api/connect') -ContentType 'application/json' -Body '{"url":"https://github.com/a/b"}' -TimeoutSec 4 | Out-Null
-    } catch {
-        if ([int]$_.Exception.Response.StatusCode -eq 403) { $failedAsExpected = $true }
-    }
-    if (-not $failedAsExpected) { throw 'CSRF-free POST was not rejected.' }
-    $rejectedHost = $false
-    try {
-        Invoke-RestMethod -Method Post -Uri ($url + 'api/connect') -Headers @{ 'X-Keystone-Session' = $csrf } -ContentType 'application/json' -Body '{"url":"https://untrusted.invalid/a/b"}' -TimeoutSec 4 | Out-Null
-    } catch {
-        if ([int]$_.Exception.Response.StatusCode -eq 400) { $rejectedHost = $true }
-    }
-    if (-not $rejectedHost) { throw 'Untrusted repository hostname was not rejected.' }
-    Write-Host 'Localhost browser host, status, CSRF and URL controls passed.' -ForegroundColor Green
+    Assert ([bool]$launch) 'Host never printed its launch link.'
+    $base = "http://127.0.0.1:$($launch.Groups[2].Value)"
+    $nonce = $launch.Groups[3].Value
+    $page = Invoke-WebRequest -Uri ($base + '/') -UseBasicParsing -TimeoutSec 5
+    Assert ($page.StatusCode -eq 200) 'UI not served.'
+    Assert ([string]$page.Headers['Content-Security-Policy'] -notmatch 'unsafe-inline') 'CSP must not allow inline code.'
 
-    # ---- Lifecycle: runtime file, heartbeat auth, auto-stop, one instance, Stop-Keystone ----
-    $runtime = @(Get-ChildItem -LiteralPath (Join-Path $root 'Logs') -Filter 'keystone-server-*.json' -ErrorAction SilentlyContinue |
-        Where-Object { ([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json).port -eq $port })
-    Assert ($runtime.Count -eq 1) 'host wrote one runtime file for its port'
-    $runtimeText = [IO.File]::ReadAllText($runtime[0].FullName)
-    Assert ($runtimeText.IndexOf($csrf) -lt 0) 'runtime file must not contain the session token'
-    $hostPid = [int]($runtimeText | ConvertFrom-Json).pid
+    $refused = $false
+    try { Invoke-RestMethod -Uri ($base + '/api/status') -Headers @{ 'X-Keystone-Client' = 'keystone-ui/1' } -TimeoutSec 5 | Out-Null }
+    catch { $refused = ([int]$_.Exception.Response.StatusCode -eq 401) }
+    Assert $refused 'API without a session must be refused.'
+
+    $web = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    $r = Invoke-WebRequest -Uri ($base + '/api/session') -Method Post -ContentType 'application/json' -Body ('{"nonce":"' + $nonce + '"}') -WebSession $web -UseBasicParsing -TimeoutSec 5
+    Assert ($r.StatusCode -eq 200) 'Launch nonce exchange failed.'
+    Assert ([string]$r.Headers['Set-Cookie'] -match 'HttpOnly; SameSite=Strict') 'Session cookie flags missing.'
+    $client = [string](($r.Content | ConvertFrom-Json).client)
+    Assert ($client.Length -ge 40) 'Session must return a per-session client secret.'
+    $guessed = $false
+    try { Invoke-RestMethod -Uri ($base + '/api/status') -Headers @{ 'X-Keystone-Client' = 'keystone-ui/1' } -WebSession $web -TimeoutSec 5 | Out-Null }
+    catch { $guessed = ([int]$_.Exception.Response.StatusCode -eq 401) }
+    Assert $guessed 'A replayed cookie without the client secret must be refused.'
+    $status = Invoke-RestMethod -Uri ($base + '/api/status') -Headers @{ 'X-Keystone-Client' = $client } -WebSession $web -TimeoutSec 5
+    Assert ($status.localDev -eq $true -and $status.connected -eq $false) 'Fresh LocalDev status wrong.'
+    $integration = Invoke-RestMethod -Uri ($base + '/api/integrations') -Headers @{ 'X-Keystone-Client' = $client } -WebSession $web -TimeoutSec 5
+    Assert (@($integration.credentials).Count -eq 3) 'Credential status missing providers.'
+    Assert (-not $integration.arc.enabled) 'ARC must be off unless configured.'
+
+    $replay = $false
+    try { Invoke-WebRequest -Uri ($base + '/api/session') -Method Post -ContentType 'application/json' -Body ('{"nonce":"' + $nonce + '"}') -UseBasicParsing -TimeoutSec 5 | Out-Null }
+    catch { $replay = ([int]$_.Exception.Response.StatusCode -eq 401) }
+    Assert $replay 'Launch nonce must work only once.'
+
+    $badOrigin = $false
+    try { Invoke-RestMethod -Uri ($base + '/api/status') -Headers @{ 'X-Keystone-Client' = $client; Origin = 'http://evil.example' } -WebSession $web -TimeoutSec 5 | Out-Null }
+    catch { $badOrigin = ([int]$_.Exception.Response.StatusCode -eq 400) }
+    Assert $badOrigin 'Foreign Origin must be refused.'
+    Write-Host 'TcpListener host, launch link, session cookie and request gate passed.' -ForegroundColor Green
+
+    # ---- Lifecycle on the live host: runtime file, heartbeat auth, End session gate ----
+    # Invoke-* keeps -Headers in the -WebSession (the evil Origin above, the client header):
+    # start clean so each call below sends exactly what it states.
+    $web.Headers.Clear()
     Assert ($status.autoStop -eq $true) 'auto-stop is on by default'
-    $worker = Invoke-WebRequest -Uri ($url + 'heartbeat-worker.js') -UseBasicParsing -TimeoutSec 3
+    $runtime = @(Get-ChildItem -LiteralPath (Join-Path $root 'Logs') -Filter 'keystone-server-*.json' -ErrorAction SilentlyContinue |
+        Where-Object { ([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json).pid -eq $process.Id })
+    Assert ($runtime.Count -eq 1) 'host wrote one runtime file'
+    $runtimeText = [IO.File]::ReadAllText($runtime[0].FullName)
+    Assert ($runtimeText.IndexOf($client) -lt 0 -and $runtimeText.IndexOf($nonce) -lt 0) 'runtime file must not contain the launch link or client secret'
+    Assert ((Test-KeystoneSameStateRoot ([string]($runtimeText | ConvertFrom-Json).stateRoot) (Join-Path (Join-Path $temp 'work') '.keystone'))) 'runtime file names the saved-session folder'
+    $worker = Invoke-WebRequest -Uri ($base + '/heartbeat-worker.js') -UseBasicParsing -TimeoutSec 5
     Assert ($worker.Content -match '/api/heartbeat') 'heartbeat worker is served'
-    $beat = Invoke-RestMethod -Method Post -Uri ($url + 'api/heartbeat') -Headers @{ 'X-Keystone-Session' = $csrf } -ContentType 'application/json' -Body '{"tab":"test1","leaving":false}' -TimeoutSec 3
-    Assert ($beat.autoStop -eq $true -and $beat.tabs -eq 1) 'heartbeat with the session header is accepted'
-    foreach ($bad in @('{"tab":"test1","leaving":true}', '{"tab":"test1","leaving":true,"session":"wrong"}')) {
-        $code = 0
-        try { Invoke-RestMethod -Method Post -Uri ($url + 'api/heartbeat') -ContentType 'application/json' -Body $bad -TimeoutSec 3 | Out-Null } catch { $code = [int]$_.Exception.Response.StatusCode }
-        Assert ($code -eq 403) ('heartbeat without a valid token must be rejected: ' + $bad)
-    }
+    Assert ([string]$page.Headers['Content-Security-Policy'] -match "worker-src 'self'") 'CSP allows the same-origin heartbeat worker'
+    $beat = Invoke-RestMethod -Method Post -Uri ($base + '/api/heartbeat') -Headers @{ 'X-Keystone-Client' = $client } -WebSession $web -ContentType 'application/json' -Body '{"tab":"test1","leaving":false}' -TimeoutSec 5
+    Assert ($beat.autoStop -eq $true -and $beat.tabs -eq 1) 'heartbeat with the session is accepted'
     $code = 0
-    try { Invoke-RestMethod -Method Post -Uri ($url + 'api/heartbeat') -Headers @{ Origin = 'http://evil.invalid' } -ContentType 'application/json' -Body ('{"leaving":true,"session":"' + $csrf + '"}') -TimeoutSec 3 | Out-Null } catch { $code = [int]$_.Exception.Response.StatusCode }
-    Assert ($code -eq 403) 'another site cannot send the leaving signal'
+    try { Invoke-RestMethod -Method Post -Uri ($base + '/api/heartbeat') -ContentType 'application/json' -Body ('{"tab":"x","leaving":true,"client":"' + $client + '"}') -TimeoutSec 5 | Out-Null } catch { $code = [int]$_.Exception.Response.StatusCode }
+    Assert ($code -eq 401) 'beacon without the session cookie must be refused'
     $code = 0
-    try { Invoke-RestMethod -Method Post -Uri ($url + 'api/connect') -ContentType 'application/json' -Body ('{"url":"https://github.com/a/b","session":"' + $csrf + '"}') -TimeoutSec 3 | Out-Null } catch { $code = [int]$_.Exception.Response.StatusCode }
-    Assert ($code -eq 403) 'the body token is accepted on the heartbeat route only'
+    $web.Headers.Clear()
+    try { Invoke-RestMethod -Method Post -Uri ($base + '/api/heartbeat') -WebSession $web -ContentType 'application/json' -Body '{"tab":"x","leaving":true,"client":"wrong"}' -TimeoutSec 5 | Out-Null } catch { $code = [int]$_.Exception.Response.StatusCode }
+    Assert ($code -eq 401) 'beacon with a wrong client secret must be refused'
     $code = 0
-    try { Invoke-RestMethod -Method Post -Uri ($url + 'api/session/stop') -Headers @{ 'X-Keystone-Session' = $csrf } -ContentType 'application/json' -Body '{}' -TimeoutSec 3 | Out-Null } catch { $code = [int]$_.Exception.Response.StatusCode }
+    $web.Headers.Clear()
+    try { Invoke-RestMethod -Method Post -Uri ($base + '/api/status') -WebSession $web -ContentType 'application/json' -Body ('{"client":"' + $client + '"}') -TimeoutSec 5 | Out-Null } catch { $code = [int]$_.Exception.Response.StatusCode }
+    Assert ($code -eq 401) 'the body secret is accepted on the heartbeat route only'
+    $code = 0
+    $web.Headers.Clear()
+    try { Invoke-RestMethod -Method Post -Uri ($base + '/api/session/stop') -Headers @{ 'X-Keystone-Client' = $client } -WebSession $web -ContentType 'application/json' -Body '{}' -TimeoutSec 5 | Out-Null } catch { $code = [int]$_.Exception.Response.StatusCode }
     Assert ($code -eq 400) 'End session needs its intent header'
 
-    # One instance: a second launch with --replace stops the first one and starts fresh.
-    $port2 = $port + 1
-    $url2 = "http://localhost:$port2/"
-    $args2 = ('/d /c ""{0}" -NoBrowser {1} --replace"' -f $launcher,$port2)
-    $second = Start-Process -FilePath 'cmd.exe' -ArgumentList $args2 -PassThru -WindowStyle Hidden
-    $up = $null
-    for ($attempt = 0; $attempt -lt 120 -and -not $up; $attempt++) {
-        Start-Sleep -Milliseconds 250
-        try { $up = Invoke-WebRequest -Uri $url2 -UseBasicParsing -TimeoutSec 2 } catch { if ($second.HasExited) { throw "Second Keystone exited unexpectedly: $($second.ExitCode)" } }
-    }
-    Assert $up 'second launch with --replace started'
-    Assert (-not (Get-Process -Id $hostPid -ErrorAction SilentlyContinue)) '--replace stopped the first host'
-    Assert (-not (Test-Path -LiteralPath $runtime[0].FullName)) 'first host runtime file removed'
-    if ($up.Content -notmatch "const CSRF='([^']+)'") { throw 'Second host page has no CSRF bootstrap.' }
-    $csrf2 = $Matches[1]
-
-    # Tab owns the server: the unload beacon (token in the body, no header) stops it after the 5 s grace.
-    $leaving = Invoke-RestMethod -Method Post -Uri ($url2 + 'api/heartbeat') -ContentType 'application/json' -Body ('{"tab":"closing","leaving":true,"session":"' + $csrf2 + '"}') -TimeoutSec 3
+    # Tab owns the server: the unload beacon (secret in the body, cookie sent) stops it after the 5 s grace.
+    $web.Headers.Clear()
+    $leaving = Invoke-RestMethod -Method Post -Uri ($base + '/api/heartbeat') -WebSession $web -ContentType 'application/json' -Body ('{"tab":"test1","leaving":true,"client":"' + $client + '"}') -TimeoutSec 5
     Assert ($leaving.tabs -eq 0) 'beacon marked the only tab as leaving'
-    $gone = $false
-    for ($attempt = 0; $attempt -lt 60 -and -not $gone; $attempt++) {
-        Start-Sleep -Milliseconds 250
-        try { Invoke-WebRequest -Uri $url2 -UseBasicParsing -TimeoutSec 1 | Out-Null } catch { $gone = $true }
-    }
-    Assert $gone 'host stopped itself after its tab left'
-    $left = @(Get-ChildItem -LiteralPath (Join-Path $root 'Logs') -Filter 'keystone-server-*.json' -ErrorAction SilentlyContinue |
-        Where-Object { ([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json).port -eq $port2 })
-    for ($attempt = 0; $attempt -lt 20 -and $left.Count -gt 0; $attempt++) {
-        Start-Sleep -Milliseconds 250
-        $left = @($left | Where-Object { Test-Path -LiteralPath $_.FullName })
-    }
-    Assert ($left.Count -eq 0) 'auto-stopped host removed its runtime file'
+    for ($i = 0; $i -lt 80 -and -not $process.HasExited; $i++) { Start-Sleep -Milliseconds 250 }
+    Assert $process.HasExited 'host stopped itself after its tab left'
+    Assert (-not (Test-Path -LiteralPath $runtime[0].FullName)) 'auto-stopped host removed its runtime file'
+    Write-Host 'Lifecycle: runtime file, heartbeat auth and auto-stop passed.' -ForegroundColor Green
 
-    # Stop-Keystone.ps1 finds a host without being told its PID.
-    $third = Start-Process -FilePath 'cmd.exe' -ArgumentList ('/d /c ""{0}" -NoBrowser {1} --replace"' -f $launcher,$port) -PassThru -WindowStyle Hidden
-    $second = $third
-    $up = $null
-    for ($attempt = 0; $attempt -lt 120 -and -not $up; $attempt++) {
-        Start-Sleep -Milliseconds 250
-        try { $up = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2 } catch { if ($third.HasExited) { throw "Third Keystone exited unexpectedly: $($third.ExitCode)" } }
+    # ---- One instance (--replace), End session and Stop-Keystone.ps1, through the launcher options ----
+    $hostScript = Join-Path $root 'Start-KeystoneWeb.ps1'
+    function Start-TestHost([string[]]$Extra,[string]$Out) {
+        $a = @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',('"{0}"' -f $hostScript),'-LocalDev','-NoBrowser','-WorkRoot',('"{0}"' -f (Join-Path $temp 'work'))) + $Extra
+        $sa = @{ FilePath = $exe; ArgumentList = $a; PassThru = $true; RedirectStandardOutput = $Out; RedirectStandardError = ($Out + '.err') }
+        if ($env:OS -eq 'Windows_NT') { $sa.WindowStyle = 'Hidden' }
+        $saved = $env:LOCALAPPDATA; $env:LOCALAPPDATA = Join-Path $temp 'appdata'
+        try { return (Start-Process @sa) } finally { $env:LOCALAPPDATA = $saved }
     }
-    Assert $up 'third launch started'
-    & (Join-Path $root 'Stop-Keystone.ps1') -ThisFolderOnly
-    $stillUp = $true
-    try { Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 1 | Out-Null } catch { $stillUp = $false }
-    Assert (-not $stillUp) 'Stop-Keystone.ps1 stopped the host'
-    Assert (@(Get-KeystoneServerProcesses -Root $root -ThisCheckout).Count -eq 0) 'no Keystone host left running from this folder'
-    Write-Host 'Lifecycle: runtime file, heartbeat auth, auto-stop, --replace and Stop-Keystone passed.' -ForegroundColor Green
-} finally {
-    foreach ($p in @($process, $second)) {
-        if ($p -and -not $p.HasExited) {
-            # Kill the cmd.exe launcher and its child PowerShell process to avoid orphan servers.
-            & taskkill.exe /PID $p.Id /T /F 2>$null | Out-Null
-            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+    function Wait-TestLink($Proc,[string]$Out) {
+        for ($i = 0; $i -lt 160; $i++) {
+            Start-Sleep -Milliseconds 250
+            if ($Proc.HasExited) { throw "Keystone host exited early (exit $($Proc.ExitCode)). See $Out." }
+            if (Test-Path -LiteralPath $Out) {
+                $fs = [IO.File]::Open($Out,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+                try { $t = (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Dispose() }
+                $m = [regex]::Match($t,'Open: (http://127\.0\.0\.1:(\d+)/#k=([A-Za-z0-9_-]+))')
+                if ($m.Success) { return $m }
+            }
         }
+        throw 'Host never printed its launch link.'
     }
-    & (Join-Path $root 'Stop-Keystone.ps1') -ThisFolderOnly -Quiet
+    $out2 = Join-Path $temp 'host2.out'
+    $second = Start-TestHost -Extra @([string]$port) -Out $out2
+    [void](Wait-TestLink $second $out2)
+    $out3 = Join-Path $temp 'host3.out'
+    $third = Start-TestHost -Extra @([string]($port + 1),'--replace') -Out $out3
+    $link3 = Wait-TestLink $third $out3
+    for ($i = 0; $i -lt 40 -and -not $second.HasExited; $i++) { Start-Sleep -Milliseconds 250 }
+    Assert $second.HasExited '--replace stopped the host using the same saved session'
+    # End session through the API.
+    $base3 = "http://127.0.0.1:$($link3.Groups[2].Value)"
+    $web3 = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    $r3 = Invoke-WebRequest -Uri ($base3 + '/api/session') -Method Post -ContentType 'application/json' -Body ('{"nonce":"' + $link3.Groups[3].Value + '"}') -WebSession $web3 -UseBasicParsing -TimeoutSec 5
+    $client3 = [string](($r3.Content | ConvertFrom-Json).client)
+    $stop = Invoke-RestMethod -Method Post -Uri ($base3 + '/api/session/stop') -Headers @{ 'X-Keystone-Client' = $client3; 'X-Keystone-Intent' = 'end-session' } -WebSession $web3 -ContentType 'application/json' -Body '{}' -TimeoutSec 5
+    Assert ($stop.stopping -eq $true) 'End session accepted'
+    for ($i = 0; $i -lt 40 -and -not $third.HasExited; $i++) { Start-Sleep -Milliseconds 250 }
+    Assert $third.HasExited 'End session stopped the host'
+    # Stop-Keystone.ps1 finds a host without its PID (scoped to this test's -WorkRoot).
+    $out4 = Join-Path $temp 'host4.out'
+    $fourth = Start-TestHost -Extra @([string]$port,'--stay') -Out $out4
+    [void](Wait-TestLink $fourth $out4)
+    & (Join-Path $root 'Stop-Keystone.ps1') -WorkRoot (Join-Path $temp 'work')
+    for ($i = 0; $i -lt 40 -and -not $fourth.HasExited; $i++) { Start-Sleep -Milliseconds 250 }
+    Assert $fourth.HasExited 'Stop-Keystone.ps1 stopped the host'
+    Assert (@(Get-KeystoneServerProcesses -Root $root -StateRoot (Join-Path (Join-Path $temp 'work') '.keystone')).Count -eq 0) 'no test host left running'
+    Write-Host 'Lifecycle: --replace, End session and Stop-Keystone passed.' -ForegroundColor Green
+} finally {
+    foreach ($p in @($second,$third,$fourth)) {
+        if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+    }
+    if ($process -and -not $process.HasExited) {
+        if ($env:OS -eq 'Windows_NT') { try { & taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null } catch { } }
+        if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+    }
+    Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
 }

@@ -13,17 +13,28 @@ if (-not $script:KeystoneRoot) {
 
 . (Join-Path $script:KeystoneRoot "Core\Logging.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Utils.ps1")
+. (Join-Path $script:KeystoneRoot "Core\HttpClient.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Configuration.ps1")
+. (Join-Path $script:KeystoneRoot "Core\Audit.ps1")
+. (Join-Path $script:KeystoneRoot "Core\Credentials.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Diff.ps1")
 . (Join-Path $script:KeystoneRoot "Core\SmartSave.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Workspace.ps1")
 . (Join-Path $script:KeystoneRoot "Core\Sentinel.ps1")
 . (Join-Path $script:KeystoneRoot "Core\RepositoryInsights.ps1")
+. (Join-Path $script:KeystoneRoot "Core\Intelligence.ps1")
 . (Join-Path $script:KeystoneRoot "Core\AI.ps1")
 . (Join-Path $script:KeystoneRoot "ArcBridge.ps1")
 . (Join-Path $script:KeystoneRoot "Providers\GitProviderBase.ps1")
 . (Join-Path $script:KeystoneRoot "Providers\GitLabProvider.ps1")
 . (Join-Path $script:KeystoneRoot "Providers\GitHubProvider.ps1")
+. (Join-Path $script:KeystoneRoot "Core\Lifecycle.ps1")
+. (Join-Path $script:KeystoneRoot "Server\Session.ps1")
+. (Join-Path $script:KeystoneRoot "Server\Jobs.ps1")
+. (Join-Path $script:KeystoneRoot "Server\JobWork.ps1")
+. (Join-Path $script:KeystoneRoot "Server\Http.ps1")
+. (Join-Path $script:KeystoneRoot "Server\Routes.ps1")
+. (Join-Path $script:KeystoneRoot "Server\WebHost.ps1")
 
 
 function Write-KeystoneBreadcrumb {
@@ -37,44 +48,21 @@ function Write-KeystoneBreadcrumb {
 }
 
 function Initialize-Keystone {
-    param([string]$LogLevel = "INFO")
+    # -ConfigPath isolates settings (tests, LocalDev); normally config\ in the tool folder.
+    param([string]$LogLevel = "INFO",[string]$ConfigPath)
     Initialize-KeystoneLogging -LogDir (Join-Path $script:KeystoneRoot "Logs") -Level $LogLevel
-    Initialize-KeystoneConfig -ConfigPath (Join-Path $script:KeystoneRoot "config\keystone-config.json")
+    if (-not $ConfigPath) { $ConfigPath = Join-Path $script:KeystoneRoot "config\keystone-config.json" }
+    Initialize-KeystoneConfig -ConfigPath $ConfigPath
     Write-KeystoneLog -Level INFO -Message "Keystone $($script:KeystoneRoot)"
 }
 
 function Get-KeystoneToken {
+    # Environment, then Keystone's DPAPI store, then ARC if explicitly configured.
     [CmdletBinding()]
     param([Parameter(Mandatory)][ValidateSet('GitHub','GitLab')][string]$Provider)
-    $envName = if ($Provider -eq 'GitHub') { 'GITHUB_TOKEN' } else { 'GITLAB_TOKEN' }
-    $existing = [Environment]::GetEnvironmentVariable($envName)
-    if (-not [string]::IsNullOrWhiteSpace($existing)) {
-        Write-KeystoneLog -Level INFO -Message "Using approved environment credentials for $Provider."
-        return $existing.Trim()
-    }
-
-    $name = Get-KeystoneArcItemName -Provider $Provider
-    $status = Get-KeystoneArcConnectionStatus
-    if (-not $status.arcFound -and -not $status.arcLoaded) {
-        throw "ARC_NOT_FOUND|ARC was not found. Set ARC_PATH to the folder containing pm.ps1, or configure $envName."
-    }
-    if (-not $status.arcLoaded) {
-        $reason = if ($status.message) { [string]$status.message } else { 'ARC module could not be loaded.' }
-        throw "ARC_UNAVAILABLE|$reason"
-    }
-    if (-not $status.arcUnlocked) {
-        throw 'ARC_LOCKED|ARC was found but the vault is locked. Restart Keystone and complete ARC CAC + TOTP authentication in its PowerShell window.'
-    }
-    $catalogNames = @($status.itemNames)
-    if ($catalogNames.Count -gt 0 -and $name -notin $catalogNames) {
-        throw "ARC_ITEM_MISSING|ARC vault has no item named '$name' for $Provider. Select an existing service in Keystone Integrations."
-    }
-    $token = Get-KeystoneArcSecretByName -ServiceName $name
-    if (-not $token) {
-        throw "ARC_ITEM_UNREADABLE|ARC item '$name' for $Provider was missing, empty, or could not be decrypted. Check it in ARC."
-    }
-    Write-KeystoneLog -Level INFO -Message "Credential source for $($Provider): ARC item '$name' (value not logged)."
-    return $token
+    $credential = Resolve-KeystoneCredential -Provider $Provider
+    Write-KeystoneLog -Level INFO -Message "Credential source for $($Provider): $($credential.Source) (value not logged)."
+    return $credential.Value
 }
 
 function Open-KeystoneRepository {
@@ -234,11 +222,13 @@ function New-KeystoneMergeRequest {
     if ($Session.Provider -eq 'GitHub') {
         $review = $Session.ProviderObj.CreatePullRequest($Session.ProjectPath,$SourceBranch,$TargetBranch,$Title,$Description)
         Write-KeystoneLog -Level INFO -Message "GitHub pull request created: $($review.html_url)"
+        Write-KeystoneAudit -Action 'review.created' -Data @{ provider = 'GitHub'; project = $Session.ProjectPath; source = $SourceBranch; target = $TargetBranch; url = [string]$review.html_url }
         return $review
     }
     if ($Session.Provider -eq 'GitLab') {
         $review = $Session.ProviderObj.CreateMergeRequest($Session.ProjectPath,$SourceBranch,$TargetBranch,$Title,$Description)
         Write-KeystoneLog -Level INFO -Message "GitLab merge request created: $($review.web_url)"
+        Write-KeystoneAudit -Action 'review.created' -Data @{ provider = 'GitLab'; project = $Session.ProjectPath; source = $SourceBranch; target = $TargetBranch; url = [string]$review.web_url }
         return $review
     }
     throw 'Unknown project provider.'
@@ -290,7 +280,6 @@ Export-ModuleMember -Function @(
     "New-KeystoneAiPayload",
     "Invoke-KeystoneAI",
     "Invoke-KeystoneAIStream",
-    "Send-KeystoneSseEvent",
     "Get-KeystoneWorkspacePreview",
     "Invoke-KeystoneWorkspaceSave",
     "New-KeystoneSmartMessage",
@@ -298,5 +287,54 @@ Export-ModuleMember -Function @(
     "Get-KeystoneLocalFileMap",
     "Get-KeystoneSafeName",
     "Clear-KeystoneInputBuffer",
-    "Write-KeystoneBreadcrumb"
+    "Write-KeystoneBreadcrumb",
+    # Used by Start-KeystoneWeb.ps1 (tests/ProviderSafety.Tests.ps1 checks the host
+    # only calls exported functions).
+    "Get-KeystoneRepositoryBranches",
+    "Get-KeystoneRepositoryHistory",
+    "Get-KeystoneRepositoryComparison",
+    "Get-KeystoneRepositoryReviews",
+    "Get-KeystoneRepositoryInsights",
+    "Get-KeystoneSentinelDestination",
+    "Test-KeystoneSentinelPublication",
+    "Get-KeystoneSafeErrorMessage",
+    "Get-KeystoneArcFlavor",
+    "Get-KeystoneArcCredential",
+    "Resolve-KeystoneCredential",
+    "Get-KeystoneCredentialStatus",
+    "Set-KeystoneStoredCredential",
+    "Remove-KeystoneStoredCredential",
+    "Get-KeystoneStoredCredential",
+    "Test-KeystoneCredentialStoreAvailable",
+    "Get-KeystoneLocalSettings",
+    "Set-KeystoneArcSettings",
+    "Get-KeystoneConfiguredArcPath",
+    "Test-KeystoneArcConfigured",
+    "Write-KeystoneAudit",
+    "Get-KeystoneAuditEntries",
+    "Get-KeystoneHttpStatus",
+    "ConvertTo-KeystoneRefPath",
+    "Start-KeystoneWebHost",
+    "Get-KeystoneWorkspaceRoot",
+    "Find-KeystoneAiModels",
+    "Get-KeystoneAiSettingsView",
+    "Set-KeystoneAiSettings",
+    "Test-KeystoneAiConnection",
+    "ConvertTo-KeystoneBranchName",
+    "Reset-KeystonePresence",
+    "Register-KeystonePresence",
+    "Register-KeystoneRequestFinished",
+    "Test-KeystoneBrowserGone",
+    "Get-KeystonePresenceState",
+    "Test-KeystoneAutoStopEnabled",
+    "Write-KeystoneRuntimeFile",
+    "Remove-KeystoneRuntimeFile",
+    "Get-KeystoneServerProcesses",
+    "Stop-KeystoneServerProcesses",
+    "Request-KeystoneServerStop",
+    "New-KeystoneStopEvent",
+    "Format-KeystoneServerProcess",
+    "Test-KeystoneJobsBusy",
+    "Request-KeystoneHostStop",
+    "Get-KeystoneHostLifecycleState"
 )

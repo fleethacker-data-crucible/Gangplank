@@ -6,6 +6,8 @@ function Assert-KeystoneTrustedRepositoryUrl {
     param([Parameter(Mandatory)][string]$Url)
     $uri = $null
     if (-not [uri]::TryCreate($Url,[UriKind]::Absolute,[ref]$uri)) { throw 'Enter a complete HTTPS GitHub or GitLab project URL.' }
+    # LocalDev synthetic provider (set only by Start-KeystoneWeb.ps1 -LocalDev).
+    if ((Test-KeystoneDevRepositoryUrl -Url $Url) -and -not $uri.UserInfo -and @($uri.AbsolutePath.Trim('/') -split '/').Count -ge 2) { return }
     if ($uri.Scheme -ne 'https' -or $uri.UserInfo -or $uri.Port -ne 443) { throw 'Only standard HTTPS project URLs without embedded credentials are supported.' }
     $hosts = @('github.com','web.git.mil')
     if ($env:KEYSTONE_GITLAB_ALLOWED_HOSTS) {
@@ -32,24 +34,47 @@ function Get-KeystoneRemoteHead {
     return [string]$ref.commit.id
 }
 
+function ConvertTo-KeystoneBranchName {
+    # A friendly name ("Dummy dev") becomes a valid branch name ("dummy-dev"); anything
+    # still invalid is refused with a message a non-Git user can act on.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name)
+    $n = $Name.Trim() -replace '\s+','-'
+    $n = $n.Trim('/','-','.')
+    if ($n.Length -lt 1 -or $n.Length -gt 100 -or $n -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$' -or $n -match '(\.\.|//|@\{|/\.|\.lock($|/)|/$|\.$)') {
+        throw 'BAD_REQUEST|Branch names can use letters, numbers, dashes, dots and slashes (for example dummy-dev or feature/login), up to 100 characters.'
+    }
+    return $n
+}
+
 function New-KeystoneWorkBranch {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session,[string]$Name)
     $base = $Session.DefaultBranch
     $head = Get-KeystoneRemoteHead -Session $Session -Branch $base
     if (-not $head) { throw 'The default branch has no commit. Initialize this repository through the provider first.' }
-    if (-not $Name) { $Name = 'keystone/work-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + ([guid]::NewGuid().ToString('N').Substring(0,6)) }
-    if ($Name.Length -gt 100 -or $Name -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]+$' -or $Name -match '(\.\.|//|@{|/\.|\.lock($|/)|/$)') {
-        throw 'Invalid work branch name.'
+    if ([string]::IsNullOrWhiteSpace($Name)) { $Name = 'keystone/work-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + ([guid]::NewGuid().ToString('N').Substring(0,6)) }
+    $Name = ConvertTo-KeystoneBranchName -Name $Name
+    if ($Name -eq $Session.DefaultBranch) { throw "BAD_REQUEST|'$Name' is the shared default branch. Choose a different name for your work." }
+    if (@($Session.Branches) -contains $Name) { throw "CONFLICT|A branch named '$Name' already exists. Choose another name, or use Explore to download it." }
+    try {
+        if ($Session.Provider -eq 'GitHub') {
+            $payload = @{ ref = "refs/heads/$Name"; sha = $head }
+            [void]$Session.ProviderObj.InvokeApi('POST',"repos/$($Session.ProjectPath)/git/refs",$payload)
+        } elseif ($Session.Provider -eq 'GitLab') {
+            $project = $Session.ProviderObj.EncodePath($Session.ProjectPath)
+            $payload = @{ branch = $Name; ref = $base }
+            [void]$Session.ProviderObj.InvokeApi('POST',"projects/$project/repository/branches",$payload)
+        } else { throw 'Unsupported provider.' }
+    } catch {
+        if ([string]$_.Exception.Message -match '^(CONFLICT|HTTP_400)\|') {
+            throw "CONFLICT|A branch named '$Name' already exists (or the provider does not allow that name). Choose another name."
+        }
+        throw
     }
-    if ($Session.Provider -eq 'GitHub') {
-        $payload = @{ ref = "refs/heads/$Name"; sha = $head }
-        [void]$Session.ProviderObj.InvokeApi('POST',"repos/$($Session.ProjectPath)/git/refs",$payload)
-    } elseif ($Session.Provider -eq 'GitLab') {
-        $project = $Session.ProviderObj.EncodePath($Session.ProjectPath)
-        $payload = @{ branch = $Name; ref = $base }
-        [void]$Session.ProviderObj.InvokeApi('POST',"projects/$project/repository/branches",$payload)
-    } else { throw 'Unsupported provider.' }
+    # Keep the known branch list current, so a second start with the same name is caught here.
+    $Session | Add-Member -MemberType NoteProperty -Name Branches -Value @(@($Session.Branches) + $Name | Where-Object { $_ } | Select-Object -Unique) -Force
+    Write-KeystoneAudit -Action 'branch.created' -Data @{ provider = $Session.Provider; project = $Session.ProjectPath; branch = $Name; from = $base; sha = $head }
     $Session.LastBranch = $Name
     $Session.BaselineSha = $null
     $Session.BaselineMap = @{}
@@ -60,7 +85,8 @@ function New-KeystoneWorkBranch {
 function Get-KeystoneSafeWorkspacePath {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Base, [Parameter(Mandatory)][string]$Project, [Parameter(Mandatory)][string]$Branch)
-    $folder = Get-KeystoneSafeName ($Project -replace '/', '-')
+    # <root>\<repository>\<branch>, like a normal clone (dumping-grounds\dummy-dev).
+    $folder = Get-KeystoneSafeName ((($Project -split '/') | Where-Object { $_ })[-1])
     $branchName = Get-KeystoneSafeName $Branch
     $path = Join-Path $Base (Join-Path $folder $branchName)
     if (Test-Path -LiteralPath $path) {
@@ -83,12 +109,12 @@ function Test-KeystoneSecretContent {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
-    $file = Get-Item -LiteralPath $Path
+    $file = Get-Item -LiteralPath $Path -Force
     if ($file.Length -gt 5242880) { return $true }
     if ($file.Extension.ToLowerInvariant() -notin @('.txt','.ps1','.psm1','.json','.yaml','.yml','.py','.js','.ts','.cs','.html','.xml','.config','.properties','.md','.sh','.bat','.cmd','.env')) { return $false }
     $text = [IO.File]::ReadAllText($file.FullName)
     if ($text -match '-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----') { return $true }
-    if ($text -match '\b(?:gh[pousr]_[A-Za-z0-9_]{24,}|github_pat_[A-Za-z0-9_]{24,}|AKIA[0-9A-Z]{16})\b') { return $true }
+    if ($text -match '\b(?:gh[pousr]_[A-Za-z0-9_]{24,}|github_pat_[A-Za-z0-9_]{24,}|(?:AKIA|ASIA)[0-9A-Z]{16})\b') { return $true }
     return $false
 }
 
@@ -113,7 +139,7 @@ function Get-KeystoneWorkspacePreview {
             $size = 0
             if ($kind -ne 'Deleted') {
                 $file = Join-Path $Session.LocalPath ($path.Replace('/',[IO.Path]::DirectorySeparatorChar))
-                if (Test-Path -LiteralPath $file -PathType Leaf) { $size = (Get-Item -LiteralPath $file).Length }
+                if (Test-Path -LiteralPath $file -PathType Leaf) { $size = (Get-Item -LiteralPath $file -Force).Length }
                 if ($size -gt 5242880) { $blocked = $true }
                 elseif (Test-KeystoneSecretContent -Path $file) { $blocked = $true }
             }
@@ -182,6 +208,11 @@ function Invoke-KeystoneWorkspaceSave {
     if ($Session.Provider -eq 'GitHub') {
         $provider = $Session.ProviderObj
         $prior = $provider.InvokeApi('GET', "repos/$($Session.ProjectPath)/git/commits/$head")
+        # Keep each modified file's existing Git mode (an executable script stays
+        # 100755). New files get the regular-file mode.
+        $modified = @($paths | Where-Object { $available[$_].Kind -eq 'Modified' })
+        $modes = @{}
+        if ($modified.Count -gt 0) { $modes = $provider.GetPathModes($Session.ProjectPath,[string]$prior.tree.sha,$modified) }
         $treeItems = New-Object System.Collections.Generic.List[object]
         foreach ($p in $paths) {
             if ($available[$p].Kind -eq 'Deleted') {
@@ -190,12 +221,13 @@ function Invoke-KeystoneWorkspaceSave {
             }
             $full = [IO.Path]::GetFullPath((Join-Path $root ($p.Replace('/',[IO.Path]::DirectorySeparatorChar))))
             if (-not $full.StartsWith(($root + [IO.Path]::DirectorySeparatorChar),[StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe file path.' }
-            $item = Get-Item -LiteralPath $full
+            $item = Get-Item -LiteralPath $full -Force
             if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Linked files are not supported: $p" }
             if ($item.Length -gt 5242880) { throw "File grew beyond 5 MB: $p" }
             if (Test-KeystoneSecretContent -Path $full) { throw "Potential secret detected. File not uploaded: $p" }
             $sha = $provider.CreateBlob($Session.ProjectPath,[IO.File]::ReadAllBytes($full))
-            [void]$treeItems.Add(@{ path = $p; mode = '100644'; type = 'blob'; sha = $sha })
+            $mode = if ($modes.ContainsKey($p)) { [string]$modes[$p] } else { '100644' }
+            [void]$treeItems.Add(@{ path = $p; mode = $mode; type = 'blob'; sha = $sha })
         }
         $tree = $provider.CreateTree($Session.ProjectPath,$treeItems.ToArray(),[string]$prior.tree.sha)
         $commit = $provider.CreateCommit($Session.ProjectPath,$Message,$tree,@($head))
@@ -212,7 +244,7 @@ function Invoke-KeystoneWorkspaceSave {
             }
             $full = [IO.Path]::GetFullPath((Join-Path $root ($p.Replace('/',[IO.Path]::DirectorySeparatorChar))))
             if (-not $full.StartsWith(($root + [IO.Path]::DirectorySeparatorChar),[StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe file path.' }
-            $item = Get-Item -LiteralPath $full
+            $item = Get-Item -LiteralPath $full -Force
             if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Linked files are not supported: $p" }
             if ($item.Length -gt 5242880) { throw "File grew beyond 5 MB: $p" }
             if (Test-KeystoneSecretContent -Path $full) { throw "Potential secret detected. File not uploaded: $p" }
@@ -249,6 +281,10 @@ function Invoke-KeystoneWorkspaceSave {
         }
     }
     $Session.BaselineSha = $newHead
+    Write-KeystoneAudit -Action 'commit.created' -Data @{
+        provider = $Session.Provider; project = $Session.ProjectPath; branch = $branch; parent = $head; commit = $newHead
+        message = $Message; added = @($added); modified = @($modified); deleted = @($deleted)
+    }
     return [pscustomobject]@{
         Saved = $true; Commit = $newHead; Message = $Message; FileCount = $paths.Count
         Url = $(if ($Session.Provider -eq 'GitHub') { "https://github.com/$($Session.ProjectPath)/commit/$newHead" } else { "$($Session.BaseUrl)/$($Session.ProjectPath)/-/commit/$newHead" })
