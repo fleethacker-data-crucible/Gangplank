@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Gangplank">
+  <title>Gangplank</title>
+  <circle cx="32" cy="32" r="29.5" fill="#0d2233" stroke="#c9a66b" stroke-width="3"/>
+  <path d="M38 47 V24 A6 6 0 0 1 50 24 V47 Z" fill="#071420" stroke="#f1e4c8" stroke-width="2"/>
+  <circle cx="35" cy="20.5" r="2.4" fill="#c9a66b"/>
+  <path d="M35 14.5 V18" stroke="#c9a66b" stroke-width="1.2"/>
+  <polygon points="12,44 39,34 39,40.5 14.5,50.5" fill="#c99566"/>
+  <path d="M19.5 41.3 L21.6 47.6 M27 38.6 L28.8 44.6 M33.5 36.2 L34.9 42" stroke="#071420" stroke-width="1.1"/>
+  <path d="M14 37 L39 28" stroke="#f1e4c8" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M15.5 36.5 V44.5 M27 32.4 V39.4 M38.5 28.2 V34.5" stroke="#f1e4c8" stroke-width="1.6" stroke-linecap="round"/>
+</svg>
