@@ -18,8 +18,16 @@ a{color:var(--fl-accent)}
 .shell{flex:1;min-height:0;display:grid;grid-template-columns:var(--fl-sidebar-width) minmax(0,1fr) 352px;grid-template-rows:minmax(0,1fr) var(--fl-statusbar-height)}
 .sidebar-collapsed .shell{grid-template-columns:var(--fl-sidebar-collapsed) minmax(0,1fr) 352px}
 .side{display:flex;flex-direction:column;gap:8px;min-height:0;overflow-y:auto;overflow-x:hidden;background:var(--fl-sidebar);border-right:1px solid var(--fl-border);padding:12px 0}
-.brand{display:flex;align-items:center;gap:12px;min-height:var(--fl-header-height);padding:0 12px 12px;border-bottom:1px solid var(--fl-border)}
-.brandMark{flex:none;display:block;width:40px;height:40px}
+/* Brand: the full emblem (with its wordmark) when expanded, the emblem's circle when collapsed. */
+.brand{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:var(--fl-header-height);padding:0 12px 8px;border-bottom:1px solid var(--fl-border)}
+.brandEmblem{display:block;width:184px;height:184px}
+.brandMark{flex:none;display:none;width:40px;height:40px}
+/* Theme-specific artwork: the Night watch or Chart room version of the emblem. */
+.only-dark{display:none}
+@media (prefers-color-scheme:dark){:root:not([data-theme='light']) .only-dark{display:block}:root:not([data-theme='light']) .only-light{display:none}}
+:root[data-theme='dark'] .only-dark{display:block}:root[data-theme='dark'] .only-light{display:none}
+.sidebar-collapsed .brand .brandEmblem{display:none}
+.sidebar-collapsed .brandMark{display:block}
 .wordmark{display:grid;gap:4px;line-height:1;min-width:0}
 .brandName{font:var(--fl-text-page) var(--fl-font-display);letter-spacing:.14em;color:var(--fl-foreground)}
 .wordmarkRule{display:flex;align-items:center;gap:4px;color:var(--fl-brass)}
@@ -42,9 +50,9 @@ a{color:var(--fl-accent)}
 .main{min-width:0;min-height:0;overflow-y:auto;background:var(--fl-background)}
 /* ---------- header (56 px): page title left, project context right ---------- */
 .top{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:16px;height:var(--fl-header-height);padding:0 24px;background:var(--fl-surface);border-bottom:1px solid var(--fl-border)}
-.pageTitle{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:var(--fl-text-page) var(--fl-font-display)}
+.pageTitle{flex:none;max-width:60%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:var(--fl-text-page) var(--fl-font-display)}
 .crumbContext{color:var(--fl-muted-foreground)}
-.headerActions{display:flex;align-items:center;gap:8px;min-width:0}
+.headerActions{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;flex:1 1 auto}
 .headerProject{display:inline-flex;align-items:center;gap:8px;min-width:0;height:32px;padding:0 12px;border:1px solid var(--fl-control-border);border-radius:var(--fl-radius-control);color:var(--fl-muted-foreground);font:var(--fl-text-secondary) var(--fl-font-mono)}
 .headerProject span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .content{max-width:920px;margin:0 auto;padding:24px}
