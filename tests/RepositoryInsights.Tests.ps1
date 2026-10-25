@@ -12,14 +12,14 @@ $github | Add-Member ScriptMethod InvokeApi {
     throw "Unexpected API call $path"
 }
 $session=[pscustomobject]@{Provider='GitHub';ProviderObj=$github;ProjectPath='example/repo';DefaultBranch='main';LastBranch='feature/test'}
-Assert (@(Get-KeystoneRepositoryBranches -Session $session).Count -eq 2) 'Branch list'
-Assert (@(Get-KeystoneRepositoryHistory -Session $session).Count -eq 1) 'History'
-$cmp=Get-KeystoneRepositoryComparison -Session $session -Base main -Head 'feature/test'
+Assert (@(Get-GangplankRepositoryBranches -Session $session).Count -eq 2) 'Branch list'
+Assert (@(Get-GangplankRepositoryHistory -Session $session).Count -eq 1) 'History'
+$cmp=Get-GangplankRepositoryComparison -Session $session -Base main -Head 'feature/test'
 Assert ($cmp.AheadBy -eq 2 -and @($cmp.Files).Count -eq 1) 'Compare'
-Assert (@(Get-KeystoneRepositoryReviews -Session $session).Count -eq 1) 'Reviews'
-$ins=Get-KeystoneRepositoryInsights -Session $session
+Assert (@(Get-GangplankRepositoryReviews -Session $session).Count -eq 1) 'Reviews'
+$ins=Get-GangplankRepositoryInsights -Session $session
 Assert ($ins.OpenReviewCount -eq 1 -and $ins.BranchCount -eq 2 -and $ins.Suggestions.Count -ge 2) 'Insights'
 $bad=$false
-try { [void](Get-KeystoneRepositoryComparison -Session $session -Base main -Head '../bad') } catch { $bad=$true }
+try { [void](Get-GangplankRepositoryComparison -Session $session -Base main -Head '../bad') } catch { $bad=$true }
 Assert $bad 'Unknown branches must be rejected'
 Write-Host 'Repository insights mock tests passed.' -ForegroundColor Green

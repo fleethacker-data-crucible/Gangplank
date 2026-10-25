@@ -21,7 +21,7 @@ class GitHubProvider : GitProviderBase {
         $h = @{
             "Authorization"        = "Bearer $($this.Token)"
             "Accept"               = "application/vnd.github+json"
-            "User-Agent"           = "Keystone"
+            "User-Agent"           = "Gangplank"
             "X-GitHub-Api-Version" = "2022-11-28"
         }
         if ($method -in @("POST", "PUT", "PATCH")) {
@@ -32,18 +32,18 @@ class GitHubProvider : GitProviderBase {
 
     [object] InvokeApi([string]$method, [string]$endpoint, [object]$body, [string]$outFile) {
         $uri = "$($this.ApiRoot)/$($endpoint.TrimStart('/'))"
-        Write-KeystoneLog -Level DEBUG -Message "GitHub $method $(Get-KeystoneSafeUrl $uri)"
+        Write-GangplankLog -Level DEBUG -Message "GitHub $method $(Get-GangplankSafeUrl $uri)"
         if (-not [string]::IsNullOrWhiteSpace($outFile)) {
-            [void](Invoke-KeystoneDownload -Provider 'GitHub' -Uri $uri -AuthHeaders $this.GetAuthHeaders('GET') -OutFile $outFile)
+            [void](Invoke-GangplankDownload -Provider 'GitHub' -Uri $uri -AuthHeaders $this.GetAuthHeaders('GET') -OutFile $outFile)
             return $true
         }
         $payload = $null
         if ($null -ne $body) {
             $payload = if ($body -is [string]) { $body } else { ($body | ConvertTo-Json -Depth 20 -Compress) }
         }
-        $response = Invoke-KeystoneHttpRequest -Method $method -Uri $uri -Headers $this.GetAuthHeaders($method) -Body $payload
+        $response = Invoke-GangplankHttpRequest -Method $method -Uri $uri -Headers $this.GetAuthHeaders($method) -Body $payload
         $endpointPath = ($endpoint.TrimStart('/') -split '\?')[0]
-        return (ConvertFrom-KeystoneApiResponse -Provider 'GitHub' -Method $method -Endpoint $endpointPath -Response $response)
+        return (ConvertFrom-GangplankApiResponse -Provider 'GitHub' -Method $method -Endpoint $endpointPath -Response $response)
     }
 
     [object] InvokeApi([string]$method, [string]$endpoint) {
@@ -56,11 +56,11 @@ class GitHubProvider : GitProviderBase {
 
     [void] DownloadArchive([string]$projectPath, [string]$ref, [string]$outZip) {
         # api.github.com answers with a redirect to codeload.github.com; the token
-        # is sent to the API host only (Invoke-KeystoneDownload).
+        # is sent to the API host only (Invoke-GangplankDownload).
         $refEnc = [uri]::EscapeDataString($ref)
         $uri = "$($this.ApiRoot)/repos/$projectPath/zipball/$refEnc"
-        Write-KeystoneLog -Level INFO -Message "GitHub zipball $(Get-KeystoneSafeUrl $uri)"
-        [void](Invoke-KeystoneDownload -Provider 'GitHub' -Uri $uri -AuthHeaders $this.GetAuthHeaders('GET') -OutFile $outZip)
+        Write-GangplankLog -Level INFO -Message "GitHub zipball $(Get-GangplankSafeUrl $uri)"
+        [void](Invoke-GangplankDownload -Provider 'GitHub' -Uri $uri -AuthHeaders $this.GetAuthHeaders('GET') -OutFile $outZip)
         if (-not (Test-Path -LiteralPath $outZip) -or (Get-Item -LiteralPath $outZip).Length -eq 0) {
             throw ("NOT_FOUND|GitHub archive for {0} @ '{1}' was empty. Empty repositories have no archive until the first commit." -f $projectPath, $ref)
         }
@@ -94,14 +94,14 @@ class GitHubProvider : GitProviderBase {
     [string] GetRefSha([string]$projectPath, [string]$branch) {
         # $null means the branch does not exist (404). Any other failure (401, 403,
         # network) is thrown, so callers do not mistake it for "the branch moved".
-        $refPath = ConvertTo-KeystoneRefPath -Ref $branch
+        $refPath = ConvertTo-GangplankRefPath -Ref $branch
         try {
             $ref = $this.InvokeApi("GET", "repos/$projectPath/git/ref/heads/$refPath")
         }
         catch {
             # 404: no such branch. 409: GitHub's answer for a repository with no commits yet.
             if ([string]$_.Exception.Message -match '^(NOT_FOUND|CONFLICT)\|') {
-                Write-KeystoneLog -Level DEBUG -Message "GetRefSha($branch): branch not found"
+                Write-GangplankLog -Level DEBUG -Message "GetRefSha($branch): branch not found"
                 return $null
             }
             throw
@@ -164,7 +164,7 @@ class GitHubProvider : GitProviderBase {
             content = [Convert]::ToBase64String($bytes)
             branch  = $branch
         }
-        Write-KeystoneLog -Level INFO -Message "Contents API init: $relativePath on $branch"
+        Write-GangplankLog -Level INFO -Message "Contents API init: $relativePath on $branch"
         $r = $this.InvokeApi("PUT", "repos/$projectPath/contents/$pathEnc", $body)
         if ($r.commit -and $r.commit.sha) {
             return [string]$r.commit.sha
@@ -214,7 +214,7 @@ class GitHubProvider : GitProviderBase {
 
     [void] CreateOrUpdateBranchRef([string]$projectPath, [string]$branch, [string]$commitSha, [bool]$force) {
         $existing = $this.GetRefSha($projectPath, $branch)
-        Write-KeystoneLog -Level INFO -Message ("Ref heads/{0} existing={1} new={2}" -f $branch, $existing, $commitSha)
+        Write-GangplankLog -Level INFO -Message ("Ref heads/{0} existing={1} new={2}" -f $branch, $existing, $commitSha)
 
         # Never forced: a branch that moved since our parent commit is rejected
         # as a non-fast-forward. The $force parameter is kept for API stability.
@@ -222,7 +222,7 @@ class GitHubProvider : GitProviderBase {
             sha   = $commitSha
             force = $false
         }
-        $refPath = ConvertTo-KeystoneRefPath -Ref $branch
+        $refPath = ConvertTo-GangplankRefPath -Ref $branch
         if ($existing) {
             $this.InvokeApi("PATCH", "repos/$projectPath/git/refs/heads/$refPath", $body) | Out-Null
             return
@@ -238,7 +238,7 @@ class GitHubProvider : GitProviderBase {
             # Only "already exists" (created meanwhile) falls back to a non-forced update;
             # any other failure (invalid name, permissions) is reported as it is.
             if ([string]$_.Exception.Message -notmatch '^CONFLICT\|') { throw }
-            Write-KeystoneLog -Level WARN -Message "Branch $branch appeared while saving; updating it without force."
+            Write-GangplankLog -Level WARN -Message "Branch $branch appeared while saving; updating it without force."
             $this.InvokeApi("PATCH", "repos/$projectPath/git/refs/heads/$refPath", $body) | Out-Null
         }
     }
@@ -275,7 +275,7 @@ class GitHubProvider : GitProviderBase {
             $excludeSet[$d.ToLowerInvariant()] = $true
         }
 
-        Write-KeystoneLog -Level INFO -Message "Scanning $localPath for push"
+        Write-GangplankLog -Level INFO -Message "Scanning $localPath for push"
         $fileList = New-Object System.Collections.Generic.List[object]
         foreach ($f in @(Get-ChildItem -LiteralPath $localPath -Recurse -File -Force -ErrorAction SilentlyContinue)) {
             $relDir = $f.DirectoryName.Substring($localPath.Length).TrimStart('\', '/').Replace('\', '/')
@@ -285,16 +285,16 @@ class GitHubProvider : GitProviderBase {
         if ($fileList.Count -eq 0) {
             throw "No files to push under $localPath (after excludes)"
         }
-        Write-KeystoneLog -Level INFO -Message ("Files to push: {0}" -f $fileList.Count)
+        Write-GangplankLog -Level INFO -Message ("Files to push: {0}" -f $fileList.Count)
 
         # Empty repo: Git Data API blobs return 409 - seed with Contents API first
         $parentSha = $this.GetRefSha($projectPath, $branch)
         if (-not $parentSha) {
-            Write-KeystoneLog -Level INFO -Message "No ref for '$branch' - treating as empty / uninitialized"
+            Write-GangplankLog -Level INFO -Message "No ref for '$branch' - treating as empty / uninitialized"
             $seed = $fileList[0]
             $seedRel = $seed.FullName.Substring($localPath.Length).TrimStart('\', '/').Replace('\', '/')
             $seedBytes = [IO.File]::ReadAllBytes($seed.FullName)
-            $initMsg = "Initialize repository (Keystone)"
+            $initMsg = "Initialize repository (Gangplank)"
             try {
                 $null = $this.InitializeWithContentsApi($projectPath, $branch, $seedRel, $seedBytes, $initMsg)
             }
@@ -310,7 +310,7 @@ class GitHubProvider : GitProviderBase {
             if (-not $parentSha) {
                 throw "Repo still has no branch ref after Contents API init. Check default branch name on GitHub."
             }
-            Write-KeystoneLog -Level INFO -Message "Initialized empty repo; parent=$parentSha"
+            Write-GangplankLog -Level INFO -Message "Initialized empty repo; parent=$parentSha"
         }
 
         $baseTree = $null
@@ -336,18 +336,18 @@ class GitHubProvider : GitProviderBase {
                 sha  = $sha
             })
             if (($n % 10) -eq 0 -or $n -eq $fileList.Count) {
-                Write-KeystoneLog -Level INFO -Message ("Blobbed {0}/{1}: {2}" -f $n, $fileList.Count, $rel)
+                Write-GangplankLog -Level INFO -Message ("Blobbed {0}/{1}: {2}" -f $n, $fileList.Count, $rel)
             }
         }
 
         $treeSha = $this.CreateTree($projectPath, $treeItems.ToArray(), $baseTree)
-        Write-KeystoneLog -Level INFO -Message "Tree $treeSha"
+        Write-GangplankLog -Level INFO -Message "Tree $treeSha"
 
         $commitSha = $this.CreateCommit($projectPath, $message, $treeSha, @($parentSha))
-        Write-KeystoneLog -Level INFO -Message "Commit $commitSha"
+        Write-GangplankLog -Level INFO -Message "Commit $commitSha"
 
         $this.CreateOrUpdateBranchRef($projectPath, $branch, $commitSha, $false)
-        Write-KeystoneLog -Level INFO -Message "Branch $branch -> $commitSha"
+        Write-GangplankLog -Level INFO -Message "Branch $branch -> $commitSha"
 
         return [PSCustomObject]@{
             Branch    = $branch

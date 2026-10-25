@@ -1,31 +1,31 @@
 #Requires -Version 5.1
 # ============================================================
-#  Keystone.ps1 - Phase A/B host (ASCII)
+#  Gangplank.ps1 - Phase A/B host (ASCII)
 # ============================================================
 
 $ErrorActionPreference = "Stop"
 $here = $PSScriptRoot
 if (-not $here) { $here = (Get-Location).Path }
 
-Import-Module (Join-Path $here "Keystone.psm1") -Force -Global
-Initialize-Keystone -LogLevel "INFO"
+Import-Module (Join-Path $here "Gangplank.psm1") -Force -Global
+Initialize-Gangplank -LogLevel "INFO"
 
-Show-KeystoneBanner
-# Use same-process ARC CAC/TOTP authentication as the browser host.
-$arcAuth = Initialize-KeystoneArcAuthentication
+Show-GangplankBanner
+# Use same-process Lazarette CAC/TOTP authentication as the browser host.
+$arcAuth = Initialize-GangplankLazaretteAuthentication
 if ($arcAuth.Unlocked) {
-    Write-Host '[+] ARC ready for GitHub and GitLab credentials.' -ForegroundColor Green
+    Write-Host '[+] Lazarette ready for GitHub and GitLab credentials.' -ForegroundColor Green
 } elseif ($arcAuth.Loaded) {
-    Write-Host '[!] ARC loaded but locked. Only configured environment tokens can be used.' -ForegroundColor Yellow
+    Write-Host '[!] Lazarette loaded but locked. Only configured environment tokens can be used.' -ForegroundColor Yellow
 } elseif ($arcAuth.PSObject.Properties['Configured'] -and -not $arcAuth.Configured) {
-    Write-Host '[i] ARC not configured (optional). Using environment or saved Keystone credentials.' -ForegroundColor DarkGray
+    Write-Host '[i] Lazarette not configured (optional). Using environment or saved Gangplank credentials.' -ForegroundColor DarkGray
 } else {
-    Write-Host '[!] ARC is configured but not available. Check the ARC folder in Integrations.' -ForegroundColor Yellow
+    Write-Host '[!] Lazarette is configured but not available. Check the Lazarette folder in Integrations.' -ForegroundColor Yellow
 }
-$cfg = Get-KeystoneConfig
+$cfg = Get-GangplankConfig
 Write-Host "    gitmil -> $($cfg.ArcItems.GitLab) | github -> $($cfg.ArcItems.GitHub)" -ForegroundColor DarkGray
 Write-Host ""
-Wait-KeystoneEnter
+Wait-GangplankEnter
 
 $session = $null
 
@@ -47,7 +47,7 @@ function Show-Session {
 }
 
 while ($true) {
-    Show-KeystoneBanner
+    Show-GangplankBanner
     Show-Session $session
 
     $opts = @(
@@ -59,7 +59,7 @@ while ($true) {
         "Show session / open local folder",
         "Exit"
     )
-    $choice = Show-KeystoneMenu -Title "Keystone" -Options $opts -AllowCancel
+    $choice = Show-GangplankMenu -Title "Gangplank" -Options $opts -AllowCancel
     if ($choice -lt 0 -or $choice -eq 6) {
         Write-Host "Goodbye." -ForegroundColor Cyan
         break
@@ -72,25 +72,25 @@ while ($true) {
                 $url = Read-Host
                 if ([string]::IsNullOrWhiteSpace($url)) { continue }
                 Write-Host "Connecting..." -ForegroundColor DarkGray
-                $session = Open-KeystoneRepository -Url $url.Trim()
+                $session = Open-GangplankRepository -Url $url.Trim()
                 Show-Session $session
                 if ($session.Branches.Count -eq 0) {
                     Write-Host "This repository has no branches yet. First-commit workflow is not supported in Smart Save." -ForegroundColor Yellow
                 }
-                Wait-KeystoneEnter
+                Wait-GangplankEnter
             }
             1 {
                 if (-not $session) {
                     Write-Host "Open a project first." -ForegroundColor Yellow
-                    Wait-KeystoneEnter; continue
+                    Wait-GangplankEnter; continue
                 }
                 $br = $session.DefaultBranch
                 Write-Host "Branch to download [$br]:" -ForegroundColor Cyan
                 $in = Read-Host
                 if (-not [string]::IsNullOrWhiteSpace($in)) { $br = $in.Trim() }
 
-                $suggest = Get-KeystoneSafeWorkspacePath -Base (Join-Path $here 'work') -Project $session.ProjectPath -Branch $br
-                $fp = Show-KeystoneMenu -Title "Local folder" -Options @(
+                $suggest = Get-GangplankSafeWorkspacePath -Base (Join-Path $here 'work') -Project $session.ProjectPath -Branch $br
+                $fp = Show-GangplankMenu -Title "Local folder" -Options @(
                     "Use suggested (created on download)",
                     "Choose folder (popup)",
                     "Cancel"
@@ -98,69 +98,69 @@ while ($true) {
                 if ($fp -lt 0 -or $fp -eq 2) { continue }
                 $dest = $suggest
                 if ($fp -eq 1) {
-                    $picked = Select-KeystoneFolder -Description "Keystone download folder" -InitialDirectory $here
+                    $picked = Select-GangplankFolder -Description "Gangplank download folder" -InitialDirectory $here
                     if (-not $picked) { continue }
                     $dest = $picked
                 }
                 Write-Host "Downloading..." -ForegroundColor Cyan
-                $path = Invoke-KeystonePull -Session $session -Branch $br -LocalPath $dest
+                $path = Invoke-GangplankPull -Session $session -Branch $br -LocalPath $dest
                 $session.LocalPath = $path
                 $session.LastBranch = $br
                 Write-Host "[OK] $path" -ForegroundColor Green
-                Wait-KeystoneEnter
+                Wait-GangplankEnter
             }
             2 {
                 if (-not $session -or -not $session.LocalPath) {
                     Write-Host 'Open and download a project first (option 1, then 2).' -ForegroundColor Yellow
-                    Wait-KeystoneEnter
+                    Wait-GangplankEnter
                     continue
                 }
-                $preview = Get-KeystoneWorkspacePreview -Session $session
+                $preview = Get-GangplankWorkspacePreview -Session $session
                 if ($preview.RemoteChanged) {
                     Write-Host 'Your branch changed online. Saving is blocked to protect your teammates.' -ForegroundColor Yellow
                     Write-Host 'Download a fresh workspace and reconcile local edits.' -ForegroundColor Gray
-                    Wait-KeystoneEnter
+                    Wait-GangplankEnter
                     continue
                 }
                 $selected = @($preview.Changes | Where-Object { $_.Selected })
                 if ($selected.Count -eq 0) {
                     Write-Host 'No safe changes to save.' -ForegroundColor Green
-                    Wait-KeystoneEnter
+                    Wait-GangplankEnter
                     continue
                 }
-                Write-Host 'Keystone Smart Save' -ForegroundColor Cyan
+                Write-Host 'Gangplank Smart Save' -ForegroundColor Cyan
                 Write-Host 'The following files will be saved (deletions are excluded):' -ForegroundColor Gray
                 foreach ($file in $selected) { Write-Host ("  {0}: {1}" -f $file.Kind,$file.Path) }
                 $added = @($selected | Where-Object { $_.Kind -eq 'New' } | ForEach-Object Path)
                 $modified = @($selected | Where-Object { $_.Kind -eq 'Modified' } | ForEach-Object Path)
-                $msg = New-KeystoneSmartMessage -Added $added -Modified $modified
+                $msg = New-GangplankSmartMessage -Added $added -Modified $modified
                 Write-Host ("Automatic message: {0}" -f $msg.Title) -ForegroundColor Green
                 $yes = Read-Host 'Type YES to publish these selected changes'
                 if ($yes -cne 'YES') {
                     Write-Host 'Save cancelled.' -ForegroundColor Yellow
-                    Wait-KeystoneEnter
+                    Wait-GangplankEnter
                     continue
                 }
                 # Plain-language public destination acknowledgement is separate from the general save prompt.
-                $destination = Get-KeystoneSentinelDestination -Session $session
+                $destination = Get-GangplankSentinelDestination -Session $session
                 $publicConfirmed = $false
                 if ($destination.Public) {
-                    if ($env:KEYSTONE_ALLOW_PUBLIC_PUBLISH -ne '1') {
-                        throw 'Public repository publishing is disabled by Keystone policy.'
+                    if ((Get-GangplankEnv ALLOW_PUBLIC_PUBLISH) -ne '1') {
+                        throw 'Public repository publishing is disabled by Gangplank policy.'
                     }
                     Write-Host 'WARNING: This repository is PUBLIC. Anyone may read uploaded files and commit history.' -ForegroundColor Yellow
                     $publicConfirmed = ((Read-Host 'Type PUBLIC to confirm you have authorization for release') -ceq 'PUBLIC')
                     if (-not $publicConfirmed) { Write-Host 'Publication cancelled.'; continue }
                 }
-                $saved = Invoke-KeystoneWorkspaceSave -Session $session -SelectedPaths @($selected | ForEach-Object Path) -PublicConfirmed:$publicConfirmed
+                $saved = Invoke-GangplankWorkspaceSave -Session $session -SelectedPaths @($selected | ForEach-Object Path) -PublicConfirmed:$publicConfirmed
                 Write-Host ("Saved {0} files: {1}" -f $saved.FileCount,$saved.Message) -ForegroundColor Green
                 Write-Host $saved.Url -ForegroundColor Cyan
-                Wait-KeystoneEnter
+                Wait-GangplankEnter
             }
             3 {
                 if (-not $session) {
                     Write-Host "Open a GitLab project first." -ForegroundColor Yellow
-                    Wait-KeystoneEnter; continue
+                    Wait-GangplankEnter; continue
                 }
                 if ($session.Provider -ne "GitLab") {
                 }
@@ -175,10 +175,10 @@ while ($true) {
                 if ([string]::IsNullOrWhiteSpace($title)) { continue }
                 Write-Host "Description (optional):" -ForegroundColor Cyan
                 $desc = Read-Host
-                $mr = New-KeystoneMergeRequest -Session $session -SourceBranch $src -TargetBranch $tgt -Title $title -Description $desc
+                $mr = New-GangplankMergeRequest -Session $session -SourceBranch $src -TargetBranch $tgt -Title $title -Description $desc
                 $reviewUrl = if ($mr.html_url) { $mr.html_url } else { $mr.web_url }
                 Write-Host "[OK] $reviewUrl" -ForegroundColor Green
-                Wait-KeystoneEnter
+                Wait-GangplankEnter
             }
             4 {
                 if (-not $session) {
@@ -188,20 +188,20 @@ while ($true) {
                 } else {
                     $session.Branches | ForEach-Object { Write-Host "  $_" }
                 }
-                Wait-KeystoneEnter
+                Wait-GangplankEnter
             }
             5 {
                 Show-Session $session
                 if ($session -and $session.LocalPath -and (Test-Path $session.LocalPath) -and $env:OS -eq "Windows_NT") {
-                    $o = Show-KeystoneMenu -Title "Open in Explorer?" -Options @("Yes","No") -DefaultIndex 0
+                    $o = Show-GangplankMenu -Title "Open in Explorer?" -Options @("Yes","No") -DefaultIndex 0
                     if ($o -eq 0) { try { Start-Process explorer.exe $session.LocalPath } catch {} }
                 }
-                Wait-KeystoneEnter
+                Wait-GangplankEnter
             }
         }
     }
     catch {
-        Write-KeystoneError -ErrorRecord $_ -Context "Menu"
+        Write-GangplankError -ErrorRecord $_ -Context "Menu"
         $em = $_.Exception.Message
         if ($em -match '^EMPTY_REPO\|') {
             $em = $em -replace '^EMPTY_REPO\|', ''
@@ -212,8 +212,8 @@ while ($true) {
         }
         else {
             Write-Host "ERROR: $em" -ForegroundColor Red
-            Write-Host "See Logs\keystone-*.log" -ForegroundColor Yellow
+            Write-Host "See Logs\gangplank-*.log" -ForegroundColor Yellow
         }
-        Wait-KeystoneEnter
+        Wait-GangplankEnter
     }
 }

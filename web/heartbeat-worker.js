@@ -1,4 +1,4 @@
-// Keystone presence heartbeat, run in a dedicated worker.
+// Gangplank presence heartbeat, run in a dedicated worker.
 // Browsers throttle timers on a hidden page's main thread (Chrome: to once a minute
 // after 5 minutes hidden), which would make the host think the tab had closed and
 // stop. The page starts this worker and falls back to its own timer if it cannot.
@@ -9,7 +9,7 @@ let timer=0,cfg=null,inflight=false;
 function beat(){
  if(!cfg||inflight)return;
  inflight=true;
- fetch('/api/heartbeat',{method:'POST',headers:{'Content-Type':'application/json','X-Keystone-Client':cfg.token},body:JSON.stringify({tab:cfg.tab,leaving:false}),cache:'no-store',credentials:'same-origin'})
+ fetch('/api/heartbeat',{method:'POST',headers:{'Content-Type':'application/json','X-Gangplank-Client':cfg.token},body:JSON.stringify({tab:cfg.tab,leaving:false}),cache:'no-store',credentials:'same-origin'})
   .then(r=>{inflight=false;postMessage({ok:r.ok,status:r.status})},()=>{inflight=false;postMessage({ok:false,status:0})});
 }
 onmessage=e=>{
