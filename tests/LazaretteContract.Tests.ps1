@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 # Offline Lazarette bridge contract test (Lazarette docs/INTEGRATION.md). Uses a stub
-# lib\Arc.ps1 with an in-memory vault: no secrets, CAC, network or real vault.
+# lib\Arc.ps1 with an in-memory vault: no secrets, smart card, network or real vault.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-lazarette-contract5-' + [guid]::NewGuid().ToString('N'))
@@ -23,7 +23,7 @@ try {
 $script:StubUnlocked = $false
 $script:StubRecords = @(
     [pscustomobject]@{ Service = 'github'; User = 'me'; Secret = 'fake-lazarette5-github-token' },
-    [pscustomobject]@{ Service = 'gitmil'; User = 'me'; Secret = 'fake-lazarette5-gitlab-token' },
+    [pscustomobject]@{ Service = 'legacy-gitlab-item'; User = 'me'; Secret = 'fake-lazarette5-gitlab-token' },
     [pscustomobject]@{ Service = 'twice'; User = 'a'; Secret = 'one' },
     [pscustomobject]@{ Service = 'twice'; User = 'b'; Secret = 'two' }
 )
@@ -47,6 +47,11 @@ function Get-ArcSecret {
     $env:GANGPLANK_LAZARETTE_PATH = $stubOnly
     Import-Module (Join-Path $root 'Gangplank.psm1') -Force -WarningAction SilentlyContinue
     . (Join-Path $PSScriptRoot 'TestIsolation.ps1')
+    # The stub vault holds the GitLab token under the legacy default item name only.
+    $legacyGitLabItem = & (Get-Module Gangplank) { Get-GangplankLegacyItemName -Purpose GitLab }
+    Assert ([bool]$legacyGitLabItem) 'A legacy GitLab item name should be defined'
+    $arcStub = Join-Path (Join-Path $laz 'lib') 'Arc.ps1'
+    [IO.File]::WriteAllText($arcStub,[IO.File]::ReadAllText($arcStub).Replace('legacy-gitlab-item',$legacyGitLabItem))
     Initialize-Gangplank -LogLevel ERROR
     $env:ARC_HOME = $null
     Assert ((Get-GangplankLazaretteFlavor -LazaretteRoot $stubOnly) -eq '') 'The Lazarette pm.ps1 stub must not be treated as ARC 3/4'
@@ -73,12 +78,13 @@ function Get-ArcSecret {
 
     $status = Get-GangplankLazaretteConnectionStatus
     Assert ($status.lazaretteUnlocked) 'Unlocked state not reported'
-    Assert ((@($status.itemNames) -join ',') -eq 'github,gitmil,twice') ('Item names wrong: ' + (@($status.itemNames) -join ','))
+    Assert ((@($status.itemNames) -join ',') -eq ('github,' + $legacyGitLabItem + ',twice')) ('Item names wrong: ' + (@($status.itemNames) -join ','))
+    Assert ((Get-GangplankLazaretteItemName -Provider GitLab) -eq 'gitlab') 'The default GitLab item name should be gitlab'
     $json = $status | ConvertTo-Json -Depth 6
     Assert ($json -notmatch 'fake-lazarette5') 'Connection status leaked a secret'
 
     Assert ((Get-GangplankToken -Provider GitHub) -eq 'fake-lazarette5-github-token') 'GitHub token not read via Get-ArcSecret'
-    Assert ((Get-GangplankToken -Provider GitLab) -eq 'fake-lazarette5-gitlab-token') 'GitLab token not read via Get-ArcSecret'
+    Assert ((Get-GangplankToken -Provider GitLab) -eq 'fake-lazarette5-gitlab-token') 'GitLab token not read from the legacy default item'
     Assert ($null -eq (Get-GangplankLazaretteSecretByName -ServiceName 'twice')) 'Ambiguous items must not return a secret'
     Assert ((Get-GangplankLazaretteConnectionStatus).message -ne $null) 'Status must still render after an ambiguous lookup'
 

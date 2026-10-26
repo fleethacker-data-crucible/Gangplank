@@ -206,7 +206,7 @@ function Invoke-GangplankRouteCore {
         $session = Get-GangplankLiveSession
         $snap = Get-GangplankAppSnapshot
         $creds = Get-GangplankCredentialStatus
-        $ai = @($creds.credentials | Where-Object { $_.provider -eq 'GenAi' })[0]
+        $ai = @($creds.credentials | Where-Object { $_.provider -eq 'AI' })[0]
         Send-GangplankJson -Object @{
             connected = ($null -ne $session)
             restoredWaiting = ($null -eq $session -and $null -ne $snap)
@@ -308,7 +308,8 @@ function Invoke-GangplankRouteCore {
     if ($m -eq 'POST' -and $p -eq '/api/integrations/map') {
         $provider = [string](Get-GangplankBodyValue $Req 'provider')
         $item = [string](Get-GangplankBodyValue $Req 'item')
-        if ($provider -notin @('GitHub','GitLab','GenAi')) { throw 'BAD_REQUEST|Unsupported credential provider.' }
+        $provider = Resolve-GangplankPurposeName $provider -Strict   # legacy purpose names still accepted
+        if ($provider -notin @('GitHub','GitLab','AI')) { throw 'BAD_REQUEST|Unsupported credential provider.' }
         if (-not (Test-GangplankLazaretteConfigured)) { throw 'ARC_NOT_CONFIGURED|Enable Lazarette first.' }
         $names = @(Get-GangplankLazaretteServiceNames)
         if ($names.Count -gt 0 -and $item -notin $names) { throw 'BAD_REQUEST|Select an item that exists in the unlocked Lazarette vault.' }
@@ -449,7 +450,7 @@ function Invoke-GangplankRouteCore {
         foreach ($sel in $selected) { if ($sel -cnotin $known) { throw 'BAD_REQUEST|Invalid selected file.' } }
         if ($selected.Count -eq 0) { throw 'BAD_REQUEST|Select changed files first.' }
         $ai = Get-GangplankAiToken
-        if (-not $ai -and (Get-GangplankAiConfiguration).Profile -ne 'ollama') { throw 'AI_NOT_CONFIGURED|AI is not connected. Add a GenAI token in Credentials.' }
+        if (-not $ai -and (Get-GangplankAiConfiguration).Profile -ne 'ollama') { throw 'AI_NOT_CONFIGURED|AI is not connected. Add an AI token in Credentials.' }
         $kinds = @{}; foreach ($c in @($preview.Changes)) { $kinds[$c.Path] = $c.Kind }
         $jobArgs = @{
             New = @($selected | Where-Object { $kinds[$_] -eq 'New' })
@@ -466,7 +467,7 @@ function Invoke-GangplankRouteCore {
         if ([string]::IsNullOrWhiteSpace($question)) { throw 'BAD_REQUEST|Enter a message.' }
         if ($question.Length -gt 6000) { throw 'BAD_REQUEST|AI message exceeds 6,000 characters.' }
         $ai = Get-GangplankAiToken
-        if (-not $ai -and (Get-GangplankAiConfiguration).Profile -ne 'ollama') { throw 'AI_NOT_CONFIGURED|AI is not connected. Add a GenAI token in Credentials.' }
+        if (-not $ai -and (Get-GangplankAiConfiguration).Profile -ne 'ollama') { throw 'AI_NOT_CONFIGURED|AI is not connected. Add an AI token in Credentials.' }
         $snap = Get-GangplankAppSnapshot
         $jobArgs = @{ Question = $question; AiToken = $ai; Project = $(if ($snap) { $snap.ProjectPath } else { '' }); Branch = $(if ($snap) { $(if ($snap.LastBranch) { $snap.LastBranch } else { $snap.DefaultBranch }) } else { '' }) }
         $id = Start-GangplankJob -Kind 'chat' -Group 'chat' -Function 'Invoke-GangplankJobChat' -Arguments $jobArgs

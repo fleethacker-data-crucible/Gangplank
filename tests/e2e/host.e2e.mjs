@@ -311,5 +311,6 @@ test('AI: detect models, save, test and chat through a synthetic gateway', async
   const bad = await call(h, 'POST', '/api/ai/detect', { endpoint: 'http://gateway.example.com/v1' });
   assert.equal(bad.status, 400, 'Plain http to another host must be refused before any request');
   const reset = await call(h, 'POST', '/api/settings/intelligence', { endpoint: '' });
-  assert.equal(reset.json.intelligence.endpoint, 'https://api.genai.mil/v1');
+  assert.equal(reset.json.intelligence.endpoint, '', 'Reset leaves no built-in AI endpoint');
+  assert.equal(reset.json.intelligence.source, 'none');
 });

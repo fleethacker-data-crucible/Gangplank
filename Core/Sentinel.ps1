@@ -30,7 +30,7 @@ function Get-GangplankSentinelFindings {
         @{ Code='PRIVATE_KEY'; Severity='Block'; Pattern='-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'; Detail='Private key detected.' },
         @{ Code='GITHUB_TOKEN'; Severity='Block'; Pattern='\b(?:gh[pousr]_[A-Za-z0-9_]{24,}|github_pat_[A-Za-z0-9_]{24,})\b'; Detail='Possible GitHub credential.' },
         @{ Code='AWS_ACCESS_KEY'; Severity='Block'; Pattern='\b(?:AKIA|ASIA)[0-9A-Z]{16}\b'; Detail='Possible AWS credential.' },
-        @{ Code='CUI_MARKING'; Severity='Review'; Pattern='(?i)(?<![A-Za-z])(?:CONTROLLED UNCLASSIFIED INFORMATION|CUI//[A-Z/-]+)(?![A-Za-z])'; Detail='Possible CUI marking. Authorized handling review required.' },
+        @{ Code='DATA_MARKING'; Severity='Review'; Pattern='(?i)(?<![A-Za-z])(?:CONTROLLED UNCLASSIFIED INFORMATION|CUI//[A-Z/-]+)(?![A-Za-z])'; Detail='Possible data-handling marking. Authorized handling review required.' },
         @{ Code='SSN_CANDIDATE'; Severity='Review'; Pattern='\b(?!000|666|9\d\d)\d{3}[- ]?(?!00)\d{2}[- ]?(?!0000)\d{4}\b'; Detail='Possible personal identifier; could be synthetic.' },
         @{ Code='EMAIL_CANDIDATE'; Severity='Info'; Pattern='\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'; Detail='Email address present. Consider whether release is appropriate.' }
     )

@@ -13,7 +13,7 @@
 All original launchers, PowerShell modules, GitHub/GitLab providers, ARC integration, workspaces, configuration, docs, tests, and GitHub workflow definitions.
 
 ## Improvements retained / added
-- Sentinel local selected-file scan before Smart Save writes remote commits; warnings for credentials, candidate PII/CUI, unscannable files and public repository visibility.
+- Sentinel local selected-file scan before Smart Save writes remote commits; warnings for credentials, candidate PII or sensitive or regulated data, unscannable files and public repository visibility.
 - GitHub and GitLab visibility verification, with explicit public repository confirmation and policy gate.
 - Read-only GitHub/GitLab branch lists, 30 recent commits, branch-to-branch change summaries, open pull/merge requests, and basic repository recommendations.
 - Plain-language browser descriptions and tooltips, without separate beginner/developer modes.
@@ -23,9 +23,9 @@ All original launchers, PowerShell modules, GitHub/GitLab providers, ARC integra
 - **No full Git engine:** remote snapshot download and Smart Save are not equivalent to a complete local `git clone`/fetch/rebase/merge/stash implementation.
 - AI remains advisory and cannot execute Git operations.
 - Sentinel is not accredited DLP; it does not inspect full outgoing commit history, binary attachments, OCR, or all metadata. Unsupported binary files are blocked from Smart Save.
-- Even a clean scan or a private repository does not establish public-release/CUI authorization.
+- Even a clean scan or a private repository does not establish public-release authorization for sensitive or regulated data.
 - Modern Svelte/TypeScript, WASM, .NET, and SQLite migration was not undertaken during this emergency restoration.
-- GitHub Actions CI validates Windows PowerShell fixtures and browser script syntax. Actual Nautilus/CAC integration still requires workstation acceptance testing.
+- GitHub Actions CI validates Windows PowerShell fixtures and browser script syntax. Actual managed-workstation and smart card integration still requires workstation acceptance testing.
 
 ## Before merging
 1. Confirm the PR has **no deleted files** and retains the original repository folders.

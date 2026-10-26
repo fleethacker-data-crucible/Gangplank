@@ -3,18 +3,19 @@
 #  Core/Intelligence.ps1 - one AI setting, any gateway
 #  The user gives an endpoint; Gangplank works out what it is and which chat
 #  models it offers:
-#    openai      OpenAI-compatible (/v1/models + /v1/chat/completions): genai.mil,
-#                OpenAI, LiteLLM, LM Studio, vLLM, most gateways
+#    openai      OpenAI-compatible (/v1/models + /v1/chat/completions): your
+#                organization's AI endpoint, OpenAI, LiteLLM, LM Studio, vLLM, most gateways
 #    azure       Azure OpenAI (*.openai.azure.com): deployments, api-key header
 #    databricks  Databricks model serving (/serving-endpoints/<name>/invocations)
 #    ollama      local Ollama (/api/tags; chat through its /v1 endpoint)
 #  Settings (non-secret) live in config\gangplank.local.json Intelligence; the token
-#  is the GenAi credential (environment, Gangplank's store, or Lazarette).
+#  is the AI credential (environment, Gangplank's store, or Lazarette).
 #  Environment names shared with Halyard are honoured: LLM_URL / OPENAI_BASE_URL,
 #  LLM_MODEL / OPENAI_MODEL, LLM_TOKEN / OPENAI_API_KEY.
 # ============================================================
 
-$script:GangplankAiDefaultEndpoint = 'https://api.genai.mil/v1'
+# No built-in endpoint: until one is configured, AI reports AI_NOT_CONFIGURED and no token is sent.
+$script:GangplankAiDefaultEndpoint = ''
 $script:GangplankAiDefaultModel = 'gemini-3.8-flash'
 $script:GangplankAiAzureApiVersion = '2024-10-21'
 # Not chat models: never offered, never auto-picked.
@@ -46,12 +47,12 @@ function Assert-GangplankAiEndpoint {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Url)
     $u = $null
-    if (-not [uri]::TryCreate($Url.Trim(),[UriKind]::Absolute,[ref]$u) -or $u.UserInfo) { throw 'BAD_REQUEST|Enter the AI endpoint as a full address, for example https://api.genai.mil/v1.' }
+    if (-not [uri]::TryCreate($Url.Trim(),[UriKind]::Absolute,[ref]$u) -or $u.UserInfo) { throw 'BAD_REQUEST|Enter the AI endpoint as a full address, for example https://ai.example.com/v1.' }
     $hostName = $u.Host.ToLowerInvariant()
     $loopback = $hostName -in @('127.0.0.1','localhost','[::1]','::1')
     if ($u.Scheme -ne 'https' -and -not ($u.Scheme -eq 'http' -and $loopback)) { throw 'BAD_REQUEST|The AI endpoint must use HTTPS (plain http only for a model running on this PC).' }
     $allowed = @(Get-GangplankAiAllowedHosts)
-    if ($allowed.Count -gt 0 -and -not $loopback -and $hostName -notin ($allowed + @('api.genai.mil'))) {
+    if ($allowed.Count -gt 0 -and -not $loopback -and $hostName -notin $allowed) {
         throw "FORBIDDEN|Your administrator limits AI to: $($allowed -join ', '). $hostName is not on that list."
     }
     return $u
@@ -122,7 +123,7 @@ function Find-GangplankAiModels {
         param($Url,$AuthStyle)
         $r = Invoke-GangplankHttpRequest -Method GET -Uri $Url -Headers (Get-GangplankAiAuthHeaders -Auth $AuthStyle -Token $Token) -TimeoutSec 20 -MaxAttempts 1
         if ($r.Status -ge 200 -and $r.Status -lt 300 -and $r.Text) { return ($r.Text | ConvertFrom-Json) }
-        if ($r.Status -in @(401,403)) { throw ("{0}|The endpoint refused the GenAI token (HTTP {1}). Check the token in Credentials." -f (Get-GangplankProviderErrorCode -Status $r.Status -Headers $r.Headers), $r.Status) }
+        if ($r.Status -in @(401,403)) { throw ("{0}|The endpoint refused the AI token (HTTP {1}). Check the token in Credentials." -f (Get-GangplankProviderErrorCode -Status $r.Status -Headers $r.Headers), $r.Status) }
         return $null
     }
     if ($flavor -eq 'azure') {
@@ -165,14 +166,14 @@ function Find-GangplankAiModels {
 function Get-GangplankAiSettingsView {
     $s = (Get-GangplankLocalSettings).Intelligence
     $envAi = Get-GangplankAiEnvironment
-    $cred = @((Get-GangplankCredentialStatus).credentials | Where-Object { $_.provider -eq 'GenAi' })[0]
+    $cred = @((Get-GangplankCredentialStatus).credentials | Where-Object { $_.provider -eq 'AI' })[0]
     $cfg = $null; $problem = ''
     try { $cfg = Get-GangplankAiConfiguration } catch { $problem = ([string]$_.Exception.Message -split '\|',2)[-1] }
     return [ordered]@{
         endpoint = $(if ($cfg) { $cfg.Endpoint } else { [string]$s.Endpoint })
         profile = $(if ($cfg) { $cfg.Profile } else { [string]$s.Profile })
         model = $(if ($cfg) { $cfg.Model } else { [string]$s.Model })
-        source = $(if ($envAi.Endpoint -or $envAi.Model) { 'environment' } elseif ($s.Endpoint) { 'settings' } else { 'default' })
+        source = $(if ($envAi.Endpoint -or $envAi.Model) { 'environment' } elseif ($s.Endpoint) { 'settings' } elseif ($script:GangplankAiDefaultEndpoint) { 'default' } else { 'none' })
         tokenReady = [bool]$cred.configured
         allowedHosts = @(Get-GangplankAiAllowedHosts)
         problem = $problem
@@ -205,7 +206,7 @@ function Set-GangplankAiSettings {
 
 function Get-GangplankAiConfiguration {
     # The chat call to make: environment first (shared with Halyard), then saved
-    # settings, then the genai.mil default. Every address passes the same checks.
+    # settings, then the built-in default if one is set. Every address passes the same checks.
     $envAi = Get-GangplankAiEnvironment
     $saved = (Get-GangplankLocalSettings).Intelligence
     if ($envAi.Endpoint) {
@@ -221,11 +222,13 @@ function Get-GangplankAiConfiguration {
         $flavorName = [string]$saved.Profile; $model = [string]$saved.Model; $chat = [string]$saved.ChatUrl
         $auth = if ($saved.Auth -eq 'api-key') { 'api-key' } else { 'bearer' }
         $endpoint = [string]$saved.Endpoint
-    } else {
+    } elseif ($script:GangplankAiDefaultEndpoint) {
         $flavorName = 'openai'
         $model = if ($envAi.Model) { $envAi.Model } else { $script:GangplankAiDefaultModel }
         $chat = $script:GangplankAiDefaultEndpoint + '/chat/completions'
         $auth = 'bearer'; $endpoint = $script:GangplankAiDefaultEndpoint
+    } else {
+        throw 'AI_NOT_CONFIGURED|No AI endpoint is set. Enter your organization''s AI endpoint in Settings, or set LLM_URL.'
     }
     return [pscustomobject]@{
         Endpoint = $endpoint; Profile = $flavorName; Model = $model; Url = $chat; Auth = $auth

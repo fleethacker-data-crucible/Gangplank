@@ -11,8 +11,25 @@ foreach ($file in $sourceFiles) {
     Assert (@($errors).Count -eq 0) ("Parse failed: " + $file.FullName + ' ' + ($errors -join '; '))
 }
 Write-Host ("Parsed {0} PowerShell scripts" -f $sourceFiles.Count)
-Assert-GangplankTrustedRepositoryUrl -Url 'https://github.com/sun-of-anton/Gangplank'
-Assert-GangplankTrustedRepositoryUrl -Url 'https://web.git.mil/group/project'
+Assert-GangplankTrustedRepositoryUrl -Url 'https://github.com/fleethacker-data-crucible/Gangplank'
+# Legacy alias: the GitLab host trusted before it became a setting is still accepted.
+$legacyGitLabHost = & (Get-Module Gangplank) { @($script:GangplankLegacyAliases.GitLabHost)[0] }
+Assert-GangplankTrustedRepositoryUrl -Url ('https://' + $legacyGitLabHost + '/group/project')
+# The organization's GitLab host is a setting with no default.
+$savedGitLabHost = $env:GANGPLANK_GITLAB_HOST
+try {
+    $env:GANGPLANK_GITLAB_HOST = $null
+    Assert ((& (Get-Module Gangplank) { Get-GangplankGitLabHost }) -eq '') 'No GitLab host should be configured by default'
+    $rejected = $false
+    try { Assert-GangplankTrustedRepositoryUrl -Url 'https://gitlab.example.org/group/project' } catch { $rejected = $true }
+    Assert $rejected 'An unconfigured GitLab host must be refused'
+    $noHost = $false
+    try { [void](New-GangplankProvider -Provider GitLab) } catch { $noHost = ($_.Exception.Message -match 'GANGPLANK_GITLAB_HOST') }
+    Assert $noHost 'A GitLab provider without a base URL or configured host must explain the setting'
+    $env:GANGPLANK_GITLAB_HOST = 'https://GitLab.Example.org/'
+    Assert ((& (Get-Module Gangplank) { Get-GangplankGitLabHost }) -eq 'gitlab.example.org') 'A configured URL should be reduced to its host'
+    Assert-GangplankTrustedRepositoryUrl -Url 'https://gitlab.example.org/group/project'
+} finally { $env:GANGPLANK_GITLAB_HOST = $savedGitLabHost }
 foreach ($url in @('http://github.com/a/b','https://github.com.evil.invalid/a/b','https://localhost/a/b','https://user:secret@github.com/a/b')) {
     $rejected = $false
     try { Assert-GangplankTrustedRepositoryUrl -Url $url } catch { $rejected = $true }
