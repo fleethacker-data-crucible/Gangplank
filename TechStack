@@ -15,7 +15,7 @@ Local web apps: PowerShell 5.1 serves a browser UI on `127.0.0.1` (Edge/Chrome).
 | Storage | IndexedDB (data), localStorage (settings) |
 | Offline | Service workers, Web Workers |
 | Encryption | Web Crypto (AES-GCM) in browser; DPAPI from PowerShell for secrets at rest |
-| Native Windows | C# via `Add-Type` (.NET 4.8.1); WinForms/WPF from PowerShell if needed |
+| Native Windows | C# ships as source and is compiled at start by Windows PowerShell 5.1 `Add-Type` (inbox .NET Framework compiler, C# 5 only); framework assemblies only; P/Invoke only into OS DLLs; WinForms/WPF from PowerShell if needed |
 
 ## Local server note
 
@@ -29,6 +29,8 @@ Tested on the workstation with the Nautilus Test Suite (Windows 11 Enterprise 26
 ## Build rules
 
 - Build off-workstation; ship compiled JS/CSS/WASM only
+- Never ship or load a prebuilt or custom DLL (`Add-Type -Path *.dll`, `Assembly.Load*`, a compiled DLL cached on disk): the workstation's application control blocks them (confirmed on the workstation 2026-10-26)
+- No third-party DLLs or NuGet packages; use framework assemblies only
 - Bundle all deps — no CDNs or runtime network calls
 - No admin, installers, or services on the workstation
 
