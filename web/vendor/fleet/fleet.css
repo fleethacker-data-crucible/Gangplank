@@ -1,0 +1,108 @@
+/* Fleet UI v0.1 - shared tokens and components for the Fleet apps (docs/UNIFIED-UI.md).
+   Identical in every Fleet repo; change it in one place and copy it everywhere. When the
+   fleet-design repo exists it becomes the source of truth.
+   Themes: Night watch (dark) and Chart room (light). Follows prefers-color-scheme unless
+   <html data-theme="dark|light"> overrides it. <html data-app="<app>"> picks the signature accent. */
+
+/* ---- signature accents (section 3.3): night / chart, with readable ink on an accent fill ---- */
+:root { --fl-accent-night: #c9a66b; --fl-accent-chart: #8a6b45; --fl-accent-ink-night: #071a26; --fl-accent-ink-chart: #fbfaf2; }
+[data-app='scrimshaw']   { --fl-accent-night: #f1e4c8; --fl-accent-chart: #7d6a48; }
+[data-app='lazarette']   { --fl-accent-night: #c9a66b; --fl-accent-chart: #8a6b45; }
+[data-app='halyard']     { --fl-accent-night: #3fb6a8; --fl-accent-chart: #0f766e; }
+[data-app='shellback']   { --fl-accent-night: #5cf1cb; --fl-accent-chart: #0b7a62; }
+[data-app='snapshackle'] { --fl-accent-night: #ef6a5a; --fl-accent-chart: #b8382b; }
+[data-app='gangplank']   { --fl-accent-night: #c99566; --fl-accent-chart: #8b5a2b; }
+[data-app='packetrat']   { --fl-accent-night: #6aa7e0; --fl-accent-chart: #1f5fa3; }
+[data-app='eight-bells'] { --fl-accent-night: #d6a258; --fl-accent-chart: #8f5e22; }
+[data-app='capstan']     { --fl-accent-night: #d9845a; --fl-accent-chart: #a14f28; }
+[data-app='bowerbird']   { --fl-accent-night: #9b98f3; --fl-accent-chart: #4b45b8; }
+
+/* ---- Night watch (default, and explicit data-theme="dark") ---- */
+:root,
+:root[data-theme='dark'] {
+  --fl-background: #071a26;
+  --fl-sidebar: #0a2130;
+  --fl-surface: #0d2636;
+  --fl-card: #112d40;
+  --fl-popover: #14334a;
+  --fl-muted: #183a52;
+  --fl-border: #24465e;
+  --fl-border-strong: #34597a;
+  --fl-control-border: #5f8199;
+  --fl-foreground: #f4ead6;
+  --fl-muted-foreground: #a9b4ba;
+  --fl-brass: #c9a66b;
+  --fl-success: #4fb386;
+  --fl-warning: #e0a443;
+  --fl-danger: #ef6a5a;
+  --fl-info: #6aa7e0;
+  --fl-accent: var(--fl-accent-night);
+  --fl-accent-ink: var(--fl-accent-ink-night);
+  --fl-shadow: 0 12px 40px -10px rgb(0 0 0 / 0.55);
+  color-scheme: dark;
+}
+
+/* ---- Chart room (system light, unless overridden to dark; or explicit data-theme="light") ---- */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    --fl-background: #fbfaf2; --fl-sidebar: #f3efe2; --fl-surface: #ffffff; --fl-card: #ffffff; --fl-popover: #ffffff;
+    --fl-muted: #efe9d9; --fl-border: #dcd3bd; --fl-border-strong: #c4b79a; --fl-control-border: #8c8370;
+    --fl-foreground: #132633; --fl-muted-foreground: #4f5d66; --fl-brass: #8a6b45;
+    --fl-success: #2f7d57; --fl-warning: #9a6412; --fl-danger: #b8382b; --fl-info: #1f5fa3;
+    --fl-accent: var(--fl-accent-chart); --fl-accent-ink: var(--fl-accent-ink-chart);
+    --fl-shadow: 0 12px 40px -12px rgb(19 38 51 / 0.25);
+    color-scheme: light;
+  }
+}
+:root[data-theme='light'] {
+  --fl-background: #fbfaf2; --fl-sidebar: #f3efe2; --fl-surface: #ffffff; --fl-card: #ffffff; --fl-popover: #ffffff;
+  --fl-muted: #efe9d9; --fl-border: #dcd3bd; --fl-border-strong: #c4b79a; --fl-control-border: #8c8370;
+  --fl-foreground: #132633; --fl-muted-foreground: #4f5d66; --fl-brass: #8a6b45;
+  --fl-success: #2f7d57; --fl-warning: #9a6412; --fl-danger: #b8382b; --fl-info: #1f5fa3;
+  --fl-accent: var(--fl-accent-chart); --fl-accent-ink: var(--fl-accent-ink-chart);
+  --fl-shadow: 0 12px 40px -12px rgb(19 38 51 / 0.25);
+  color-scheme: light;
+}
+
+/* ---- type, spacing, radii (sections 4 and 5) ---- */
+:root {
+  --fl-font-body: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --fl-font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, ui-monospace, monospace;
+  /* Display serif for wordmarks, page titles and empty-state headlines only. Interim: Cambria
+     ships with Windows; the vendored woff2 chosen in fleet-design replaces it (open decision). */
+  --fl-font-display: Cambria, 'Cambria Math', Georgia, 'Times New Roman', serif;
+  --fl-text-caption: 12px; --fl-text-secondary: 13px; --fl-text-body: 14px;
+  --fl-text-section: 16px; --fl-text-page: 20px; --fl-text-display: 28px;
+  --fl-radius-control: 6px; --fl-radius-card: 10px; --fl-radius-dialog: 14px;
+  --fl-sidebar-width: 240px; --fl-sidebar-collapsed: 64px; --fl-header-height: 56px; --fl-statusbar-height: 28px;
+  --fl-duration: 160ms;
+}
+
+/* ---- focus and motion (section 7) ---- */
+:focus-visible { outline: 2px solid var(--fl-brass); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
+}
+
+/* ---- components (section 6), for plain-HTML apps; framework apps match their look ---- */
+.fl-btn { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: var(--fl-radius-control); border: 1px solid transparent; font: 500 var(--fl-text-secondary)/1 var(--fl-font-body); cursor: pointer; background: transparent; color: var(--fl-foreground); transition: background-color var(--fl-duration); }
+.fl-btn--lg { height: 36px; padding: 0 16px; font-size: var(--fl-text-body); }
+.fl-btn--primary { background: var(--fl-accent); color: var(--fl-accent-ink); }
+.fl-btn--secondary { border-color: var(--fl-control-border); }
+.fl-btn--ghost:hover, .fl-btn--secondary:hover { background: var(--fl-muted); }
+.fl-btn--danger { background: var(--fl-danger); color: var(--fl-background); }
+.fl-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.fl-input { height: 32px; padding: 0 10px; border-radius: var(--fl-radius-control); border: 1px solid var(--fl-control-border); background: var(--fl-surface); color: var(--fl-foreground); font: var(--fl-text-body) var(--fl-font-body); }
+textarea.fl-input { height: auto; padding: 8px 10px; }
+.fl-card { background: var(--fl-card); border: 1px solid var(--fl-border); border-radius: var(--fl-radius-card); padding: 16px; }
+.fl-table { width: 100%; border-collapse: collapse; font-size: var(--fl-text-body); }
+.fl-table th { position: sticky; top: 0; background: var(--fl-surface); text-align: left; font-weight: 600; color: var(--fl-muted-foreground); }
+.fl-table td, .fl-table th { height: 36px; padding: 0 12px; border-bottom: 1px solid var(--fl-border); }
+.fl-table tr:hover td { background: var(--fl-muted); }
+.fl-table .num { text-align: right; font-family: var(--fl-font-mono); }
+.fl-badge { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: 999px; font-size: var(--fl-text-caption); font-weight: 600; border: 1px solid currentColor; }
+.fl-dialog { background: var(--fl-popover); border: 1px solid var(--fl-border-strong); border-radius: var(--fl-radius-dialog); box-shadow: var(--fl-shadow); }
+.fl-nav a, .fl-nav button { display: flex; align-items: center; gap: 12px; min-height: 32px; padding: 0 12px; border-left: 3px solid transparent; color: var(--fl-muted-foreground); }
+.fl-nav [aria-current='page'] { color: var(--fl-accent); border-left-color: var(--fl-accent); }
+.fl-empty { display: grid; justify-items: center; gap: 12px; text-align: center; }
+.fl-empty h2 { font: var(--fl-text-display) var(--fl-font-display); }
