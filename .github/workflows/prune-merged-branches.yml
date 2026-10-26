@@ -6,16 +6,17 @@ name: Prune safely merged branches
 # Rule: delete a branch only if it is the head of a merged same-repo PR into the default branch
 # and its tip is exactly that PR's merged head SHA. Any commit after the merge keeps it.
 # Never: the default branch, main, master, protected, hub/ preview/ release/, an open PR's head or base.
-# No stale, age-based or no-PR deletes.
+# No stale, age-based or no-PR deletes. Manual runs default to dry_run (log only); push-to-main runs are live.
+# Right before each delete the branch tip is re-read and the branch is kept if it moved.
 on:
   push:
     branches: [main]
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Log what would be deleted without deleting anything
+        description: Log what would be deleted without deleting anything (uncheck to delete for real)
         type: boolean
-        default: false
+        default: true
 permissions:
   contents: write
   pull-requests: read
@@ -49,6 +50,18 @@ jobs:
             if ([string]::IsNullOrEmpty($r.Content)) { return $null }
             return (New-Object PSObject -Property @{ Raw = $r.Content; Json = ($r.Content | ConvertFrom-Json) })
           }
+          function Get-HttpStatus($ErrRecord) {
+            # 5.1 throws WebException, 7 throws HttpResponseException; both carry .Response.StatusCode.
+            $resp = $ErrRecord.Exception.Response
+            if ($null -eq $resp) { return 0 }
+            try { return [int]$resp.StatusCode } catch { return 0 }
+          }
+          function Test-SameRepoHead($Pr, [string]$Name) {
+            # A deleted fork leaves head.repo null: never a match, never an exception.
+            if ($null -eq $Pr -or $null -eq $Pr.head) { return $false }
+            if ($null -eq $Pr.head.repo) { return $false }
+            return ([string]$Pr.head.ref -ceq $Name -and [string]$Pr.head.repo.full_name -ceq $repo)
+          }
           function Get-GhPages([string]$Path) {
             # 50 per page, up to 40 pages (2000 items, as before). A 100-PR page can pass 2 MB,
             # which is near Windows PowerShell 5.1's ConvertFrom-Json size limit.
@@ -78,15 +91,21 @@ jobs:
             if ($name.StartsWith('hub/') -or $name.StartsWith('preview/') -or $name.StartsWith('release/')) { Write-Host "KEEP hard-coded exclusion (hub/, preview/, release/): $name"; continue }
             if ($branch.protected -eq $true) { Write-Host "KEEP protected branch: $name"; continue }
             $sha = [string]$branch.commit.sha
-            $open = @($openPrs | Where-Object { $_.head.ref -ceq $name -and $_.head.repo -and $_.head.repo.full_name -ceq $repo })
+            $open = @($openPrs | Where-Object { Test-SameRepoHead $_ $name })
             if ($open.Count -gt 0) { Write-Host "KEEP open PR: $name"; continue }
-            $isBase = @($openPrs | Where-Object { $_.base.ref -ceq $name })
+            $isBase = @($openPrs | Where-Object { $null -ne $_.base -and [string]$_.base.ref -ceq $name })
             if ($isBase.Count -gt 0) { Write-Host "KEEP base of an open PR (deleting it would close that PR): $name"; continue }
-            $hits = @($merged | Where-Object { $_.merged_at -and $_.base.ref -ceq $default -and $_.head.ref -ceq $name -and $_.head.repo -and $_.head.repo.full_name -ceq $repo -and $_.head.sha -ceq $sha })
+            $hits = @($merged | Where-Object { $_.merged_at -and $null -ne $_.base -and [string]$_.base.ref -ceq $default -and (Test-SameRepoHead $_ $name) -and [string]$_.head.sha -ceq $sha })
             if ($hits.Count -eq 0) { Write-Host "KEEP unverified or changed branch: $name"; continue }
-            $ref = '/git/refs/heads/' + [uri]::EscapeDataString($name).Replace('%2F', '/')
+            $mergedSha = [string]$hits[0].head.sha
+            $enc = [uri]::EscapeDataString($name).Replace('%2F', '/')
             Write-Host ("PLAN delete {0} at {1} (merged PR #{2})" -f $name, $sha.Substring(0, [Math]::Min(7, $sha.Length)), $hits[0].number)
             if ($dryRun) { Write-Host "DRY RUN would delete: $name"; continue }
-            $null = Invoke-GhApi $ref 'DELETE'
+            # Re-read the tip right before deleting; keep the branch if anything moved it.
+            $tip = $null
+            try { $tip = [string](Invoke-GhApi ('/git/ref/heads/' + $enc)).Json.object.sha }
+            catch { if ((Get-HttpStatus $_) -eq 404) { Write-Host "SKIP branch already gone: $name"; continue }; throw }
+            if (-not ($tip -ceq $mergedSha)) { Write-Host ("SKIP tip moved since the merge (now {0}): {1}" -f $tip, $name); continue }
+            $null = Invoke-GhApi ('/git/refs/heads/' + $enc) 'DELETE'
             Write-Host "DELETED safely merged branch: $name"
           }
