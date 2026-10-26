@@ -46,8 +46,11 @@ if not "%ERR%"=="0" (
   echo.
   echo Gangplank exited with code %ERR%.
   echo If a script is blocked by organization policy, contact IT.
-  echo If you see "Access is denied" while starting localhost, check
-  echo HttpListener URL reservations and port usage with your administrator.
+  echo If the message above says the port is in use or access is denied,
+  echo another program holds that port: Gangplank listens only on 127.0.0.1
+  echo with TcpListener, so it needs no URL reservation and no administrator.
+  echo Close that program, run Launch-Gangplank.bat --replace to stop an
+  echo older Gangplank, or pick another port: Launch-Gangplank.bat -NoBrowser 19000
   pause
 )
 exit /b %ERR%
