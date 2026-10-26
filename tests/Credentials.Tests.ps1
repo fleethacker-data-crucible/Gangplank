@@ -5,7 +5,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-cred-' + [guid]::NewGuid().ToString('N'))
-$names = @('GITHUB_TOKEN','GITLAB_TOKEN','GENAI_TOKEN','GANGPLANK_AI_TOKEN','GANGPLANK_LAZARETTE_PATH','ARC_PATH','ARC_ROOT','ARC_HOME')
+$names = @('GITHUB_TOKEN','GITLAB_TOKEN','GENAI_TOKEN','GANGPLANK_AI_TOKEN','LLM_TOKEN','OPENAI_API_KEY','GANGPLANK_LAZARETTE_PATH','ARC_PATH','ARC_ROOT','ARC_HOME')
 $saved = @{}
 foreach ($n in $names) { $saved[$n] = [Environment]::GetEnvironmentVariable($n); [Environment]::SetEnvironmentVariable($n,$null) }
 try {
