@@ -73,6 +73,9 @@ Lazarette is still in development, so Gangplank never looks for it on its own. T
 When Lazarette is on, Gangplank loads it once at startup and runs Lazarette's own unlock (`Unlock-LazaretteVaultInteractive`, or the matching command on an older Lazarette that still uses its earlier command names: passphrase or smart card PIN, then authenticator) in the Gangplank PowerShell window, before the server starts. It then reads items with `Get-LazaretteSecret` (or its earlier-named equivalent). By default it reads one item each for GitHub, GitLab and the AI model; Credentials shows the item names and lets you change the mapping. Gangplank has no unlock code of its own and never unlocks from a browser request. Older vault installs that use `pm.ps1` (versions 3 and 4) are still supported.
 
 ## AI model
+
+> **Intelligence router:** the AI endpoint (default `https://api.genai.mil/v1`, `Core/Intelligence.ps1:17`) and the GitHub/GitLab API hosts (defaults `https://api.github.com` and `https://web.git.mil`) will move behind the Fleet intelligence router, [Fairlead](https://github.com/fleethacker-data-crucible/Fairlead), so Gangplank defaults to the router instead of a hard-coded endpoint. Until then the settings below stay as they are. See [TechStack](TechStack), "Intelligence router".
+
 Open **Settings → AI model**, enter your organisation's endpoint and select **Detect models**. Gangplank asks the endpoint what it is and which chat models it offers, filters out embedding, speech and image models, and preselects the best match; **Test** sends one short message to prove it works. Supported:
 
 | Kind | Recognised by | Notes |
