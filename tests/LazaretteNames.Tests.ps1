@@ -87,9 +87,20 @@ function Test-ArcVaultUnlocked { $global:ArcNameCalls += 1; return $script:StubU
         try { Assert ((Get-GangplankLazaretteItemName -Provider AI) -eq 'alt-gh') 'An item variable with the legacy purpose suffix should still map AI' }
         finally { [Environment]::SetEnvironmentVariable($legacyVar,$null) }
         $legacyItem = Get-GangplankLegacyItemName -Purpose GitLab
+        $savedHost = $env:GANGPLANK_GITLAB_HOST
+        try {
+            # A legacy GitLab token is never used unless a GitLab host was explicitly configured.
+            $env:GANGPLANK_GITLAB_HOST = $null
+            Assert ((Resolve-GangplankLazaretteItemInCatalog -Provider GitLab -Name 'gitlab' -Catalog @('github',$legacyItem)) -eq 'gitlab') 'No configured GitLab host: the legacy item must not be used'
+            $env:GANGPLANK_GITLAB_HOST = 'gitlab.example.org'
+            Assert ((Resolve-GangplankLazaretteItemInCatalog -Provider GitLab -Name 'gitlab' -Catalog @('github',$legacyItem) -TargetHost 'other.example.org') -eq 'gitlab') 'The legacy item must not go to a host other than the configured one'
+            Assert ((Resolve-GangplankLazaretteItemInCatalog -Provider GitLab -Name 'gitlab' -Catalog @('github',$legacyItem) -TargetHost 'gitlab.example.org') -eq $legacyItem) 'Configured host: fall back to the legacy default item'
+        } finally { $env:GANGPLANK_GITLAB_HOST = $savedHost }
+        $env:GANGPLANK_GITLAB_HOST = 'gitlab.example.org'
         Assert ((Resolve-GangplankLazaretteItemInCatalog -Provider GitLab -Name 'gitlab' -Catalog @('github',$legacyItem)) -eq $legacyItem) 'Default item missing: fall back to the legacy default item'
         Assert ((Resolve-GangplankLazaretteItemInCatalog -Provider GitLab -Name 'gitlab' -Catalog @('gitlab',$legacyItem)) -eq 'gitlab') 'The current default item wins when both exist'
         Assert ((Resolve-GangplankLazaretteItemInCatalog -Provider GitLab -Name 'my-gitlab' -Catalog @($legacyItem)) -eq 'my-gitlab') 'A custom item name never falls back'
+        $env:GANGPLANK_GITLAB_HOST = $savedHost
     }
     Write-Host 'Gangplank Lazarette names, lib\Lazarette.ps1 and pre-rename opt-ins passed.' -ForegroundColor Green
 } finally {
