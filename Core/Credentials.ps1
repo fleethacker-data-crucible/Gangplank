@@ -122,7 +122,9 @@ function Set-GangplankStoredCredential {
 
 function Remove-GangplankStoredCredential {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Provider)
+    # -TargetHost: the host the token will be sent to (GitLab), so a legacy vault item is
+    # only used for the explicitly configured GitLab host.
+    param([Parameter(Mandatory)][string]$Provider,[string]$TargetHost)
     $Provider = Resolve-GangplankPurposeName $Provider -Strict
     Assert-GangplankCredentialProvider $Provider
     $items = Read-GangplankCredentialFile
@@ -139,7 +141,9 @@ function Remove-GangplankStoredCredential {
 
 function Get-GangplankStoredCredential {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Provider)
+    # -TargetHost: the host the token will be sent to (GitLab), so a legacy vault item is
+    # only used for the explicitly configured GitLab host.
+    param([Parameter(Mandatory)][string]$Provider,[string]$TargetHost)
     $Provider = Resolve-GangplankPurposeName $Provider -Strict
     Assert-GangplankCredentialProvider $Provider
     $items = Read-GangplankCredentialFile
@@ -317,7 +321,9 @@ function Test-GangplankLazaretteConfigured { return [bool](Get-GangplankConfigur
 function Resolve-GangplankCredential {
     # Returns @{ Value; Source } or throws a coded error the UI can explain.
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Provider)
+    # -TargetHost: the host the token will be sent to (GitLab), so a legacy vault item is
+    # only used for the explicitly configured GitLab host.
+    param([Parameter(Mandatory)][string]$Provider,[string]$TargetHost)
     $Provider = Resolve-GangplankPurposeName $Provider -Strict
     Assert-GangplankCredentialProvider $Provider
     $fromEnv = Get-GangplankEnvironmentCredential -Provider $Provider
@@ -325,7 +331,7 @@ function Resolve-GangplankCredential {
     $stored = Get-GangplankStoredCredential -Provider $Provider
     if ($stored) { return [pscustomobject]@{ Value = $stored; Source = 'stored' } }
     if (Test-GangplankLazaretteConfigured) {
-        $token = Get-GangplankLazaretteCredential -Provider $Provider
+        $token = Get-GangplankLazaretteCredential -Provider $Provider -TargetHost $TargetHost
         if ($token) { return [pscustomobject]@{ Value = $token; Source = 'lazarette' } }
     }
     $envName = $script:GangplankCredentialEnv[$Provider][0]

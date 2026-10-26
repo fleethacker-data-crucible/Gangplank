@@ -39,7 +39,6 @@ $script:GangplankLazarettePurposes = @('GitHub','GitLab','AI','DataPlatform')
 $script:GangplankLegacyAliases = @{
     Purpose    = @{ 'GenAi' = 'AI'; 'Advana' = 'DataPlatform' }                            # legacy alias: purpose names
     ItemName   = @{ GitLab = 'gitmil'; AI = 'genapi'; DataPlatform = 'advana-api' }       # legacy alias: default vault item names
-    GitLabHost = @('web.git.mil')                                                           # legacy alias: GitLab host trusted before it became a setting
     TokenEnv   = @{ AI = @('GENAI_TOKEN') }                                                 # legacy alias: AI token variable
     ItemEnvPrefix = @('CASCADE_ARC_ITEM_')                                                  # legacy alias: sibling tool's former item variable prefix
 }
@@ -72,7 +71,8 @@ function Get-GangplankLegacyItemName {
 
 function Get-GangplankGitLabHost {
     # Your organization's GitLab host: GANGPLANK_GITLAB_HOST, else config GitLabHost, else '' (none).
-    # A full URL is accepted; only its host is used.
+    # A full URL is accepted; only its host is used. A bare host may contain only letters,
+    # digits, dots and hyphens.
     $v = Get-GangplankEnv GITLAB_HOST
     if (-not $v) {
         try { $cfg = Get-GangplankConfig; $p = $cfg.PSObject.Properties['GitLabHost']; if ($p -and $p.Value) { $v = [string]$p.Value } } catch { }
@@ -80,20 +80,27 @@ function Get-GangplankGitLabHost {
     $v = ([string]$v).Trim()
     if (-not $v) { return '' }
     $u = $null
-    if ($v -match '://' -and [uri]::TryCreate($v,[UriKind]::Absolute,[ref]$u)) { return $u.Host.ToLowerInvariant() }
-    return $v.Trim('/').ToLowerInvariant()
+    if ($v -match '://') {
+        if ([uri]::TryCreate($v,[UriKind]::Absolute,[ref]$u) -and $u.Host) { return $u.Host.ToLowerInvariant() }
+        throw "GitLab host setting is not a valid URL. Set GANGPLANK_GITLAB_HOST (or GitLabHost in config\gangplank-config.json) to a host name such as gitlab.example.org."
+    }
+    $h = $v.TrimEnd('/')
+    if ($h -cnotmatch '^[A-Za-z0-9.-]+$') {
+        throw "GitLab host setting may contain only letters, digits, dots and hyphens (for example gitlab.example.org). Check GANGPLANK_GITLAB_HOST or GitLabHost in config\gangplank-config.json."
+    }
+    return $h.ToLowerInvariant()
 }
 
 function Get-GangplankTrustedGitLabHosts {
-    # The configured GitLab host, administrator-approved GANGPLANK_GITLAB_ALLOWED_HOSTS,
-    # and the legacy host (so existing workspaces keep working).
+    # No GitLab host is trusted by default. Only the host the user configured
+    # (GANGPLANK_GITLAB_HOST / config GitLabHost) and administrator-approved
+    # GANGPLANK_GITLAB_ALLOWED_HOSTS are trusted.
     $hosts = @()
     $configured = Get-GangplankGitLabHost
     if ($configured) { $hosts += $configured }
     if ((Get-GangplankEnv GITLAB_ALLOWED_HOSTS)) {
         $hosts += @((Get-GangplankEnv GITLAB_ALLOWED_HOSTS) -split ',' | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
     }
-    $hosts += @($script:GangplankLegacyAliases.GitLabHost)
     return @($hosts | Select-Object -Unique)
 }
 
@@ -314,9 +321,18 @@ function Get-GangplankLazaretteItemName {
 function Resolve-GangplankLazaretteItemInCatalog {
     # The item to read for a purpose. When the name is the current default and the vault has
     # no such item but has the item earlier releases used by default, that legacy item is used.
-    param([Parameter(Mandatory)][string]$Provider,[Parameter(Mandatory)][string]$Name,[string[]]$Catalog = @())
+    # The legacy GitLab item holds a token issued for a host earlier releases trusted, so it is
+    # used only when a GitLab host was explicitly configured (GANGPLANK_GITLAB_HOST / GitLabHost)
+    # and, when -TargetHost is given, only for that configured host.
+    param([Parameter(Mandatory)][string]$Provider,[Parameter(Mandatory)][string]$Name,[string[]]$Catalog = @(),[string]$TargetHost)
     $Provider = Resolve-GangplankPurposeName $Provider
     if ($Catalog.Count -eq 0 -or $Name -in $Catalog) { return $Name }
+    if ($Provider -eq 'GitLab') {
+        $configuredHost = ''
+        try { $configuredHost = Get-GangplankGitLabHost } catch { $configuredHost = '' }
+        if (-not $configuredHost) { return $Name }
+        if ($TargetHost -and $TargetHost.Trim().ToLowerInvariant() -ne $configuredHost) { return $Name }
+    }
     $legacy = Get-GangplankLegacyItemName -Purpose $Provider
     if ($legacy -and $Name -ieq [string]$script:GangplankLazaretteCanonical[$Provider] -and $legacy -in $Catalog) { return $legacy }
     return $Name

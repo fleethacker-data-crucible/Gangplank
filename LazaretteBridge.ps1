@@ -513,7 +513,7 @@ function Get-GangplankLazaretteCredential {
     # Token for a provider from the configured Lazarette vault, or a coded error that
     # says exactly why not. Never prompts: unlock happens at startup only.
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Provider)
+    param([Parameter(Mandatory)][string]$Provider,[string]$TargetHost)
     $Provider = Resolve-GangplankPurposeName $Provider   # accepts legacy purpose names
     if ($Provider -notin @('GitHub','GitLab','AI')) { throw "Unsupported credential provider '$Provider'." }
     $name = Get-GangplankLazaretteItemName -Provider $Provider
@@ -527,7 +527,7 @@ function Get-GangplankLazaretteCredential {
         throw 'ARC_LOCKED|Lazarette is configured but locked. Restart Gangplank and complete the Lazarette unlock in its PowerShell window.'
     }
     $catalogNames = @($status.itemNames)
-    $name = Resolve-GangplankLazaretteItemInCatalog -Provider $Provider -Name $name -Catalog $catalogNames   # legacy default item name
+    $name = Resolve-GangplankLazaretteItemInCatalog -Provider $Provider -Name $name -Catalog $catalogNames -TargetHost $TargetHost   # legacy default item name
     if ($catalogNames.Count -gt 0 -and $name -notin $catalogNames) {
         throw "ARC_ITEM_MISSING|Lazarette vault has no item named '$name' for $Provider. Choose an existing item in Integrations."
     }

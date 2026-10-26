@@ -43,12 +43,18 @@ function Get-GangplankAppSnapshot {
     return $script:GangplankApp.Restored
 }
 
+function Get-GangplankSnapshotHost {
+    # The host a session's token is sent to (so a legacy GitLab vault item only goes to the configured host).
+    param($Snapshot)
+    try { return ([uri]([string]$Snapshot.BaseUrl)).Host } catch { return '' }
+}
+
 function Get-GangplankLiveSession {
     # The live session, rebuilding a restored one once a credential is available.
     param([switch]$Required)
     if (-not $script:GangplankApp.Session -and $script:GangplankApp.Restored) {
         try {
-            $token = (Resolve-GangplankCredential -Provider $script:GangplankApp.Restored.Provider).Value
+            $token = (Resolve-GangplankCredential -Provider $script:GangplankApp.Restored.Provider -TargetHost (Get-GangplankSnapshotHost $script:GangplankApp.Restored)).Value
             $script:GangplankApp.Session = New-GangplankSessionFromSnapshot -Snapshot $script:GangplankApp.Restored -Token $token
             $script:GangplankApp.Restored = $null
         } catch {
@@ -65,7 +71,7 @@ function Set-GangplankAppSession {
         $script:GangplankApp.Session = $null
         $script:GangplankApp.Restored = $null
     } else {
-        if (-not $Token) { $Token = (Resolve-GangplankCredential -Provider $Snapshot.Provider).Value }
+        if (-not $Token) { $Token = (Resolve-GangplankCredential -Provider $Snapshot.Provider -TargetHost (Get-GangplankSnapshotHost $Snapshot)).Value }
         $script:GangplankApp.Session = New-GangplankSessionFromSnapshot -Snapshot $Snapshot -Token $Token
         $script:GangplankApp.Restored = $null
     }
@@ -80,7 +86,7 @@ function Update-GangplankSessionCredential {
     $s = $script:GangplankApp.Session
     if (-not $s -or $s.Provider -ne $Provider) { return }
     try {
-        $token = (Resolve-GangplankCredential -Provider $Provider).Value
+        $token = (Resolve-GangplankCredential -Provider $Provider -TargetHost (Get-GangplankSnapshotHost (ConvertTo-GangplankSessionSnapshot $s))).Value
         $script:GangplankApp.Session = New-GangplankSessionFromSnapshot -Snapshot (ConvertTo-GangplankSessionSnapshot $s) -Token $token
     } catch {
         # No credential any more: keep the work as a restorable snapshot.
@@ -138,7 +144,7 @@ function Get-GangplankJobArguments {
     param([Parameter(Mandatory)]$Session)
     return @{
         Session = (ConvertTo-GangplankSessionSnapshot $Session)
-        Token = (Resolve-GangplankCredential -Provider $Session.Provider).Value
+        Token = (Resolve-GangplankCredential -Provider $Session.Provider -TargetHost (Get-GangplankSnapshotHost (ConvertTo-GangplankSessionSnapshot $Session))).Value
         WorkRoot = $script:GangplankApp.WorkRoot
         DevGitHubUrl = (Get-GangplankDevProvider)
     }
@@ -330,7 +336,7 @@ function Invoke-GangplankRouteCore {
         if (-not $url -or $url.Length -gt 500) { throw 'BAD_REQUEST|Enter a valid GitHub or GitLab project URL.' }
         Assert-GangplankTrustedRepositoryUrl -Url $url
         $parsed = Parse-GangplankRepoUrl -Url $url
-        $token = (Resolve-GangplankCredential -Provider $parsed.Provider).Value
+        $token = (Resolve-GangplankCredential -Provider $parsed.Provider -TargetHost (Get-GangplankSnapshotHost $parsed)).Value
         $id = Start-GangplankJob -Kind 'connect' -Group 'workspace' -Function 'Invoke-GangplankJobConnect' -Arguments @{ Url = $url; Token = $token; DevGitHubUrl = (Get-GangplankDevProvider) } -OnComplete $script:GangplankOnSessionJob -Context (Get-GangplankJobContext -Token $token -Kind 'connect')
         Send-GangplankJobStarted $id
         return
