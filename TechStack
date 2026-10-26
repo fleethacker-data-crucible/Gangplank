@@ -55,3 +55,13 @@ Notes:
 - A hidden PowerShell console counts: if the window is hidden or minimised, the user has no Ctrl+C.
 - To find what holds a DLL, use the Windows Restart Manager (`RmRegisterResources` + `RmGetList`); `Process.Modules` misses .NET-mapped assemblies.
 - Reference implementation: Halyard (`web/src/lib/api.ts` `startHeartbeat`, `Host/HalyardHost.cs`, `scripts/Halyard-Process.ps1`, `Stop-Halyard.ps1`, `Start-Halyard.ps1`).
+
+## Intelligence router
+
+Direction (2026-10-26): Fleet tools stop hard-coding external endpoints and default to the Fleet intelligence router, [Fairlead](https://github.com/fleethacker-data-crucible/Fairlead), for AI/LLM endpoints, git repository access and database connections. Fairlead will own endpoint selection, credentials (through Lazarette / Windows Credential Manager, never in tool config), policy and routing. Until Gangplank is moved behind it, the current settings in the table below stay as they are; nothing has changed in code yet.
+
+| Access | Today | Where | Settings |
+| --- | --- | --- | --- |
+| AI/LLM | OpenAI-compatible chat completions (openai, azure, databricks, ollama flavors); hard-coded default `https://api.genai.mil/v1` (model `gemini-3.8-flash`), always allowlisted | `Core/Intelligence.ps1:17` (allowlist `:43-58`); requests `Core/AI.ps1:41`, `:49` via `Core/HttpClient.ps1:108` | `GANGPLANK_AI_URL`/`LLM_URL`/`OPENAI_BASE_URL`, `GANGPLANK_AI_MODEL`/`LLM_MODEL`/`OPENAI_MODEL`, `GANGPLANK_AI_ALLOWED_HOSTS`, `GANGPLANK_AI_TOKEN`/`GENAI_TOKEN`/`LLM_TOKEN`/`OPENAI_API_KEY` (`Core/Credentials.ps1:16-18`); vault item `genapi` |
+| Git repositories | GitHub REST (hard-coded default `https://api.github.com`) and GitLab REST `/api/v4` (hard-coded default `https://web.git.mil`); sync by archive download, push through the commits API, no git.exe | `Providers/GitProviderBase.ps1:67`, `:71`; host allowlist `Core/Workspace.ps1:12` | `GITHUB_TOKEN`, `GITLAB_TOKEN`, `GANGPLANK_GITLAB_ALLOWED_HOSTS`; vault items `github`, `gitmil` (`Core/Configuration.ps1:25-30`, `config/gangplank-config.json` `LazaretteItems`) |
+| Databases | none |  |  |
