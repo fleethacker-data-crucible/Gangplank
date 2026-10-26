@@ -18,6 +18,12 @@ A gangplank is how people who aren't sailors get aboard a ship without falling i
 - Config files are copied forward once, the originals left as they were: `config\keystone-config.json` → `config\gangplank-config.json` (if you edited it), `config\keystone.local.json` → `config\gangplank.local.json` (workspace folder, AI model and the Lazarette, formerly ARC, setting) and `config\arc-items.local.json` → `config\lazarette-items.local.json`. The old `ArcItems` / `Arc` keys inside them are still read.
 - New work branches are named `gangplank/work-…`; existing `keystone/work-…` branches open, download and save like any other branch.
 
+| Night watch (dark) |
+| --- |
+| ![Gangplank workspace in the Night watch theme](docs/screenshots/workspace-night-watch.png) |
+
+Gangplank has one theme, Night watch (dark); there is no Chart room (light) theme yet.
+
 ## Launch
 Double-click **Launch-Gangplank.bat**. Gangplank starts a local server on `http://127.0.0.1:8769/` (another free port if that one is taken) and opens your browser with a one-time launch link. The link works once, for two minutes; if you close the tab, press **L** in the Gangplank window for a new link.
 
