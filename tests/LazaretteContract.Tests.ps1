@@ -1,11 +1,11 @@
 #Requires -Version 5.1
 # Offline Lazarette bridge contract test (Lazarette docs/INTEGRATION.md). Uses a stub
-# lib\Arc.ps1 with an in-memory vault: no secrets, CAC, network or real vault.
+# lib\Arc.ps1 with an in-memory vault: no secrets, smart card, network or real vault.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-lazarette-contract5-' + [guid]::NewGuid().ToString('N'))
 $saved = @{}
-foreach ($n in @('ARC_PATH','ARC_ROOT','ARC_HOME','GANGPLANK_LAZARETTE_PATH','GITHUB_TOKEN','GITLAB_TOKEN','GANGPLANK_LAZARETTE_ITEM_GitHub','ARC_ITEM_GitHub','CASCADE_ARC_ITEM_GitHub')) {
+foreach ($n in @('ARC_PATH','ARC_ROOT','ARC_HOME','GANGPLANK_LAZARETTE_PATH','GITHUB_TOKEN','GITLAB_TOKEN','GANGPLANK_GITLAB_HOST','GANGPLANK_GITLAB_ALLOWED_HOSTS','GANGPLANK_LAZARETTE_ITEM_GitHub','ARC_ITEM_GitHub','CASCADE_ARC_ITEM_GitHub')) {
     $saved[$n] = [Environment]::GetEnvironmentVariable($n)
     [Environment]::SetEnvironmentVariable($n,$null)
 }
@@ -23,7 +23,7 @@ try {
 $script:StubUnlocked = $false
 $script:StubRecords = @(
     [pscustomobject]@{ Service = 'github'; User = 'me'; Secret = 'fake-lazarette5-github-token' },
-    [pscustomobject]@{ Service = 'gitmil'; User = 'me'; Secret = 'fake-lazarette5-gitlab-token' },
+    [pscustomobject]@{ Service = 'legacy-gitlab-item'; User = 'me'; Secret = 'fake-lazarette5-gitlab-token' },
     [pscustomobject]@{ Service = 'twice'; User = 'a'; Secret = 'one' },
     [pscustomobject]@{ Service = 'twice'; User = 'b'; Secret = 'two' }
 )
@@ -47,6 +47,11 @@ function Get-ArcSecret {
     $env:GANGPLANK_LAZARETTE_PATH = $stubOnly
     Import-Module (Join-Path $root 'Gangplank.psm1') -Force -WarningAction SilentlyContinue
     . (Join-Path $PSScriptRoot 'TestIsolation.ps1')
+    # The stub vault holds the GitLab token under the legacy default item name only.
+    $legacyGitLabItem = & (Get-Module Gangplank) { Get-GangplankLegacyItemName -Purpose GitLab }
+    Assert ([bool]$legacyGitLabItem) 'A legacy GitLab item name should be defined'
+    $arcStub = Join-Path (Join-Path $laz 'lib') 'Arc.ps1'
+    [IO.File]::WriteAllText($arcStub,[IO.File]::ReadAllText($arcStub).Replace('legacy-gitlab-item',$legacyGitLabItem))
     Initialize-Gangplank -LogLevel ERROR
     $env:ARC_HOME = $null
     Assert ((Get-GangplankLazaretteFlavor -LazaretteRoot $stubOnly) -eq '') 'The Lazarette pm.ps1 stub must not be treated as ARC 3/4'
@@ -73,12 +78,24 @@ function Get-ArcSecret {
 
     $status = Get-GangplankLazaretteConnectionStatus
     Assert ($status.lazaretteUnlocked) 'Unlocked state not reported'
-    Assert ((@($status.itemNames) -join ',') -eq 'github,gitmil,twice') ('Item names wrong: ' + (@($status.itemNames) -join ','))
+    Assert ((@($status.itemNames) -join ',') -eq ('github,' + $legacyGitLabItem + ',twice')) ('Item names wrong: ' + (@($status.itemNames) -join ','))
+    Assert ((Get-GangplankLazaretteItemName -Provider GitLab) -eq 'gitlab') 'The default GitLab item name should be gitlab'
     $json = $status | ConvertTo-Json -Depth 6
     Assert ($json -notmatch 'fake-lazarette5') 'Connection status leaked a secret'
 
     Assert ((Get-GangplankToken -Provider GitHub) -eq 'fake-lazarette5-github-token') 'GitHub token not read via Get-ArcSecret'
-    Assert ((Get-GangplankToken -Provider GitLab) -eq 'fake-lazarette5-gitlab-token') 'GitLab token not read via Get-ArcSecret'
+    # The legacy GitLab item is never sent unless its host was explicitly configured.
+    $noLegacy = ''
+    try { [void](Get-GangplankToken -Provider GitLab -TargetHost 'gitlab.example.org') } catch { $noLegacy = $_.Exception.Message }
+    Assert ($noLegacy -match '^ARC_ITEM_MISSING\|') "No configured GitLab host: the legacy item must not be read, got: $noLegacy"
+    $env:GANGPLANK_GITLAB_ALLOWED_HOSTS = 'other.example.org'
+    $env:GANGPLANK_GITLAB_HOST = 'gitlab.example.org'
+    $noLegacy = ''
+    try { [void](Get-GangplankToken -Provider GitLab -TargetHost 'other.example.org') } catch { $noLegacy = $_.Exception.Message }
+    Assert ($noLegacy -match '^ARC_ITEM_MISSING\|') "An allowlisted but not configured host must not get the legacy item, got: $noLegacy"
+    Assert ((Get-GangplankToken -Provider GitLab -TargetHost 'gitlab.example.org') -eq 'fake-lazarette5-gitlab-token') 'GitLab token not read from the legacy default item for the configured host'
+    $env:GANGPLANK_GITLAB_HOST = $null
+    $env:GANGPLANK_GITLAB_ALLOWED_HOSTS = $null
     Assert ($null -eq (Get-GangplankLazaretteSecretByName -ServiceName 'twice')) 'Ambiguous items must not return a secret'
     Assert ((Get-GangplankLazaretteConnectionStatus).message -ne $null) 'Status must still render after an ambiguous lookup'
 

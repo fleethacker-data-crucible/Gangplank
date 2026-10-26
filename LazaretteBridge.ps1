@@ -9,10 +9,10 @@
 # Lazarette (ARC 5) ships a pm.ps1 stub that only throws; it is never treated as ARC 3/4.
 # The ARC_* status codes (ARC_NOT_FOUND, ARC_LOCKED, ...) are a wire format the UI
 # reads; they keep their names.
-# Gangplank never implements unlock itself: CAC PIN, passphrase and TOTP prompts are
+# Gangplank never implements unlock itself: smart card PIN, passphrase and TOTP prompts are
 # Lazarette's own console flow, run once before the web host starts.
 # Lazarette is imported exactly once in the same PowerShell process as Gangplank.
-# Never unlock the CAC/TOTP vault from an HTTP request handler.
+# Never unlock the smart card/TOTP vault from an HTTP request handler.
 # Never return credentials to browser, diagnostic output, or a log file.
 
 $script:GangplankLazaretteBridgeRoot = $PSScriptRoot
@@ -161,7 +161,7 @@ function Import-GangplankLazaretteSession {
     [CmdletBinding()]
     param([switch]$Quiet)
     # Never source pm.ps1 again once the Lazarette functions have been loaded;
-    # reloading resets the vault's CAC/TOTP in-memory state.
+    # reloading resets the vault's smart card/TOTP in-memory state.
     if (Test-GangplankLazaretteHelpersAvailable) {
         $script:GangplankLazaretteLoaded = $true
         $script:GangplankLazaretteErrorCode = ''
@@ -309,12 +309,12 @@ function Initialize-GangplankLazaretteAuthentication {
     if (-not $SkipUnlock -and -not (Test-GangplankLazaretteVaultUnlocked)) {
         if (-not $Quiet) {
             Write-Host ''
-            Write-Host '[*] Lazarette authentication: complete the standard CAC + TOTP steps in this PowerShell window.' -ForegroundColor Cyan
+            Write-Host '[*] Lazarette authentication: complete the standard smart card + TOTP steps in this PowerShell window.' -ForegroundColor Cyan
             Write-Host '[*] You can cancel to launch Gangplank without Lazarette; env credentials will still work.' -ForegroundColor DarkGray
         }
         try {
             # This is called BEFORE starting the listener, never on an HTTP request.
-            # The prompts (CAC PIN or passphrase, then authenticator) are Lazarette's own.
+            # The prompts (smart card PIN or passphrase, then authenticator) are Lazarette's own.
             $unlocked = if (Test-GangplankLazarette5HelpersAvailable) { [bool](& (Get-GangplankLazaretteCommandName -Names $script:GangplankLazaretteApi.Unlock)) } else { [bool](Ensure-VaultUnlocked) }
             if (-not $unlocked) { $script:GangplankLazaretteLastError = 'Lazarette authentication was cancelled or declined.' }
         } catch {
@@ -326,7 +326,7 @@ function Initialize-GangplankLazaretteAuthentication {
         $script:GangplankLazaretteLastError = ''
         if (-not $Quiet) { Write-Host '[+] Lazarette vault unlocked in the Gangplank host process.' -ForegroundColor Green }
     } elseif (-not $Quiet) {
-        Write-Warning 'Lazarette is locked. Restart Gangplank and complete CAC/TOTP, or use an approved environment credential.'
+        Write-Warning 'Lazarette is locked. Restart Gangplank and complete smart card/TOTP, or use an approved environment credential.'
     }
     return [pscustomobject]@{
         Found = $true; Loaded = $true; Unlocked = [bool]$ready
@@ -389,17 +389,16 @@ function Get-GangplankLazaretteConnectionStatus {
     $names = @()
     if ($unlocked) { $names = @(Get-GangplankLazaretteServiceNames) }
     $bindings = @()
-    foreach ($purpose in @('GitHub','GitLab','GenAi')) {
+    foreach ($purpose in @('GitHub','GitLab','AI')) {
         $item = Get-GangplankLazaretteItemName -Provider $purpose
-        $envName = switch ($purpose) {
-            'GitHub' { 'GITHUB_TOKEN' }
-            'GitLab' { 'GITLAB_TOKEN' }
-            'GenAi' { 'GENAI_TOKEN' }
+        if ($unlocked) { $item = Resolve-GangplankLazaretteItemInCatalog -Provider $purpose -Name $item -Catalog $names }
+        $envNames = switch ($purpose) {
+            'GitHub' { @('GITHUB_TOKEN') }
+            'GitLab' { @('GITLAB_TOKEN') }
+            'AI' { @('GANGPLANK_AI_TOKEN','KEYSTONE_AI_TOKEN') + @($script:GangplankLegacyAliases.TokenEnv['AI']) }
         }
-        $envPresent = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($envName))
-        if ($purpose -eq 'GenAi') {
-            $envPresent = $envPresent -or -not [string]::IsNullOrWhiteSpace((Get-GangplankEnv AI_TOKEN))
-        }
+        $envPresent = $false
+        foreach ($envName in $envNames) { if (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($envName))) { $envPresent = $true } }
         $present = [bool]($unlocked -and ($names -contains $item))
         $bindings += [pscustomobject]@{
             provider = $purpose; item = $item
@@ -420,7 +419,7 @@ function Get-GangplankLazaretteConnectionStatus {
         configured = [bool]$configured
         message = $(if (-not $configured) { 'Lazarette is not configured. It is optional: enable it in Integrations with the Lazarette folder path.' }
                     elseif ($loaded -and $unlocked) { 'Lazarette is unlocked.' }
-                    elseif ($loaded) { 'Lazarette loaded but locked. Restart Gangplank and complete CAC + TOTP in its console.' }
+                    elseif ($loaded) { 'Lazarette loaded but locked. Restart Gangplank and complete smart card + TOTP in its console.' }
                     elseif ($script:GangplankLazaretteLastError) { $script:GangplankLazaretteLastError }
                     elseif (-not $root) { 'Lazarette not found. Turn on Lazarette in Integrations with its folder (the one containing lib\Lazarette.ps1 or lib\Arc.ps1), or set GANGPLANK_LAZARETTE_PATH.' }
                     else { 'Lazarette was located but could not be loaded. Check the Gangplank console and Lazarette installation.' })
@@ -433,7 +432,7 @@ function Get-GangplankLazaretteConnectionStatus {
 function Get-GangplankLazaretteSecretByName {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ServiceName)
-    # Never prompt for CAC/TOTP as a side effect of a browser request.
+    # Never prompt for smart card/TOTP as a side effect of a browser request.
     if (-not (Test-GangplankLazaretteVaultUnlocked)) { return $null }
     if ($ServiceName.Length -gt 100) { return $null }
     if (Test-GangplankLazarette5HelpersAvailable) {
@@ -514,7 +513,9 @@ function Get-GangplankLazaretteCredential {
     # Token for a provider from the configured Lazarette vault, or a coded error that
     # says exactly why not. Never prompts: unlock happens at startup only.
     [CmdletBinding()]
-    param([Parameter(Mandatory)][ValidateSet('GitHub','GitLab','GenAi')][string]$Provider)
+    param([Parameter(Mandatory)][string]$Provider,[string]$TargetHost)
+    $Provider = Resolve-GangplankPurposeName $Provider   # accepts legacy purpose names
+    if ($Provider -notin @('GitHub','GitLab','AI')) { throw "Unsupported credential provider '$Provider'." }
     $name = Get-GangplankLazaretteItemName -Provider $Provider
     $status = Get-GangplankLazaretteConnectionStatus
     if (-not $status.lazaretteFound) { throw "ARC_NOT_FOUND|$($status.message)" }
@@ -526,6 +527,7 @@ function Get-GangplankLazaretteCredential {
         throw 'ARC_LOCKED|Lazarette is configured but locked. Restart Gangplank and complete the Lazarette unlock in its PowerShell window.'
     }
     $catalogNames = @($status.itemNames)
+    $name = Resolve-GangplankLazaretteItemInCatalog -Provider $Provider -Name $name -Catalog $catalogNames -TargetHost $TargetHost   # legacy default item name
     if ($catalogNames.Count -gt 0 -and $name -notin $catalogNames) {
         throw "ARC_ITEM_MISSING|Lazarette vault has no item named '$name' for $Provider. Choose an existing item in Integrations."
     }
