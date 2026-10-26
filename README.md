@@ -73,7 +73,7 @@ Open **Settings → AI model**, enter your organisation's endpoint and select **
 | Databricks model serving | `/serving-endpoints` or a Databricks host | Chat endpoints only; answers arrive in one piece |
 | Ollama on this PC | `/api/tags` (port 11434) | No token needed; plain http allowed for this PC only |
 
-The token is the **AI** credential (Settings, or `GANGPLANK_AI_TOKEN`). The environment names Halyard uses also work, so one setup serves both apps: `LLM_URL` or `OPENAI_BASE_URL`, `LLM_MODEL` or `OPENAI_MODEL`, `LLM_TOKEN` or `OPENAI_API_KEY`. There is no default endpoint: until one is set, AI is reported as not configured (the default model name is `gemini-3.8-flash`). Endpoints must be HTTPS; if `GANGPLANK_AI_ALLOWED_HOSTS` is set, only those hosts are allowed.
+The token is the **AI** credential (Settings, or `GANGPLANK_AI_TOKEN`). The environment names Halyard uses also work, so one setup serves both apps: `LLM_URL` or `OPENAI_BASE_URL`, `LLM_MODEL` or `OPENAI_MODEL`, `LLM_TOKEN` or `OPENAI_API_KEY`. By default Gangplank uses the local phoenix-lai server on this PC (`http://127.0.0.1:1234/v1/chat/completions`); `GANGPLANK_AI_URL` / `LLM_URL` or a saved setting overrides it. On a loopback endpoint the token is optional (no `Authorization` header is sent without one) and, when no model variable is set, the model is `phoenixlai`. Any other endpoint must use HTTPS, needs a token and a configured model; if `GANGPLANK_AI_ALLOWED_HOSTS` is set, only those hosts (and this PC) are allowed.
 
 The assistant is advisory only: it cannot change files, run tools or publish. Chat sends your typed text and the project/branch name; commit-title help sends file names and statuses only. Source code is never sent automatically.
 

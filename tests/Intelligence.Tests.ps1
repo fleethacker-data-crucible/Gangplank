@@ -75,8 +75,56 @@ try {
         $script:GangplankHttpTransport = $null
 
         # --- settings and precedence ---------------------------------------------
-        Assert ((Get-Code { Get-GangplankAiConfiguration }) -eq 'AI_NOT_CONFIGURED') 'With nothing set there is no built-in endpoint'
-        Assert ((Get-GangplankAiSettingsView).source -eq 'none') 'Settings view should report no AI source'
+        # Default: the local phoenix-lai server on this PC, no token, model phoenixlai.
+        $cfg = Get-GangplankAiConfiguration
+        Assert ($cfg.Url -eq 'http://127.0.0.1:1234/v1/chat/completions') ('Default AI endpoint should be local phoenix-lai, got ' + $cfg.Url)
+        Assert ($cfg.Model -eq 'phoenixlai' -and $cfg.Loopback -and $cfg.Profile -eq 'openai') ('Default model should be phoenixlai on loopback, got ' + $cfg.Model)
+        Assert ((Get-GangplankAiSettingsView).source -eq 'default') 'Settings view should report the built-in default'
+        Assert (-not (Get-GangplankAiSettingsView).tokenRequired) 'No token is required for the local default'
+        Assert ($null -eq (Get-GangplankAiRequestToken -Config $cfg)) 'Loopback without a token: no token, no error'
+        $script:Seen = New-Object System.Collections.Generic.List[object]
+        $script:Routes = @{ 'http://127.0.0.1:1234/v1/chat/completions' = (Reply 200 @{ choices = @(@{ message = @{ content = 'local answer' } }) }) }
+        $script:GangplankHttpTransport = {
+            param($Request)
+            $script:Seen.Add($Request)
+            foreach ($k in $script:Routes.Keys) { if ($Request.Uri -like $k) { return $script:Routes[$k] } }
+            return [pscustomobject]@{ Status = 404; Headers = @{}; Text = '{}'; File = $null; NetworkError = '' }
+        }
+        Assert ((Invoke-GangplankAI -Question 'hi') -eq 'local answer') 'Chat should reach the local default endpoint'
+        Assert ($script:Seen.Count -eq 1 -and [string]$script:Seen[0].Uri -eq 'http://127.0.0.1:1234/v1/chat/completions') 'Chat went to the wrong endpoint'
+        Assert (-not $script:Seen[0].Headers.ContainsKey('Authorization')) 'No Authorization header may be sent to loopback without a token'
+        Assert ((($script:Seen[0].Body | ConvertFrom-Json).model) -eq 'phoenixlai') 'The default request should name the phoenixlai model'
+        $env:GANGPLANK_AI_TOKEN = 'local-opt-token'
+        $script:Seen.Clear()
+        [void](Invoke-GangplankAI -Question 'hi')
+        Assert ([string]$script:Seen[0].Headers['Authorization'] -eq 'Bearer local-opt-token') 'An optional loopback token is sent when set'
+        $env:GANGPLANK_AI_TOKEN = $null
+        $script:GangplankHttpTransport = $null
+        # The administrator list never blocks this PC, and still blocks other hosts.
+        $env:GANGPLANK_AI_ALLOWED_HOSTS = 'ai.example.com'
+        Assert ((Get-GangplankAiConfiguration).Url -eq 'http://127.0.0.1:1234/v1/chat/completions') 'The local default must pass an administrator list'
+        $env:LLM_URL = 'https://gateway.example.com/v1'; $env:LLM_MODEL = 'm'
+        Assert ((Get-Code { Get-GangplankAiConfiguration }) -eq 'FORBIDDEN') 'An override outside the administrator list must be refused'
+        $env:LLM_URL = $null; $env:LLM_MODEL = $null; $env:GANGPLANK_AI_ALLOWED_HOSTS = $null
+        # Any loopback override without a model variable uses phoenixlai.
+        $env:LLM_URL = 'http://localhost:8080/v1'
+        $cfg = Get-GangplankAiConfiguration
+        Assert ($cfg.Url -eq 'http://localhost:8080/v1/chat/completions' -and $cfg.Model -eq 'phoenixlai' -and $cfg.Loopback) ('Loopback override wrong: ' + $cfg.Url + ' ' + $cfg.Model)
+        $env:LLM_MODEL = 'local-other'
+        Assert ((Get-GangplankAiConfiguration).Model -eq 'local-other') 'LLM_MODEL overrides the loopback model'
+        # A remote override needs its own model and a token; no external model name is built in.
+        $env:LLM_URL = 'https://gateway.example.com/v1'; $env:LLM_MODEL = $null
+        Assert ((Get-Code { Get-GangplankAiConfiguration }) -eq 'AI_MODEL_MISSING') 'A remote endpoint without a model must not fall back to a built-in model'
+        $env:LLM_MODEL = 'gw-model'
+        $cfg = Get-GangplankAiConfiguration
+        Assert ($cfg.Url -eq 'https://gateway.example.com/v1/chat/completions' -and $cfg.Model -eq 'gw-model' -and -not $cfg.Loopback) 'Remote override not used'
+        Assert ((Get-Code { Get-GangplankAiRequestToken -Config $cfg }) -eq 'AI_TOKEN_MISSING') 'A remote endpoint without a token must be refused'
+        Assert ((Get-Code { Invoke-GangplankAI -Question 'hi' }) -eq 'AI_TOKEN_MISSING') 'Chat to a remote endpoint without a token must be refused before any request'
+        $env:LLM_TOKEN = 'remote-token'
+        Assert ((Get-GangplankAiRequestToken -Config $cfg) -eq 'remote-token') 'A remote endpoint uses the AI token'
+        $env:LLM_TOKEN = $null; $env:LLM_URL = $null; $env:LLM_MODEL = $null
+        Assert (Test-GangplankAiLoopbackUrl -Url 'http://127.0.0.5:1234/v1') '127.0.0.0/8 is loopback'
+        Assert (-not (Test-GangplankAiLoopbackUrl -Url 'https://127.0.0.1.example.com/v1')) 'A look-alike host is not loopback'
         [void](Set-GangplankAiSettings -Endpoint 'https://gateway.example.com/v1' -Flavor 'openai' -Model 'gpt-4.1')
         $cfg = Get-GangplankAiConfiguration
         Assert ($cfg.Model -eq 'gpt-4.1' -and $cfg.Url -eq 'https://gateway.example.com/v1/chat/completions') 'Saved setting not used'
@@ -90,7 +138,7 @@ try {
         Assert ((Get-GangplankAiToken) -eq 'shared-token-123') 'LLM_TOKEN (Halyard) should be accepted as the AI token'
         $env:LLM_TOKEN = $null
         [void](Set-GangplankAiSettings -Endpoint '')
-        Assert ((Get-Code { Get-GangplankAiConfiguration }) -eq 'AI_NOT_CONFIGURED') 'Reset should return to not configured'
+        Assert ((Get-GangplankAiConfiguration).Url -eq 'http://127.0.0.1:1234/v1/chat/completions') 'Reset should return to the local phoenix-lai default'
         Assert ((Get-Code { Set-GangplankAiSettings -Endpoint 'https://gateway.example.com/v1' -Model '' }) -eq 'BAD_REQUEST') 'A model is required'
 
         # --- branch names -----------------------------------------------------------

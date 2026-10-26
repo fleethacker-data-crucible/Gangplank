@@ -14,9 +14,13 @@
 #  LLM_MODEL / OPENAI_MODEL, LLM_TOKEN / OPENAI_API_KEY.
 # ============================================================
 
-# No built-in endpoint: until one is configured, AI reports AI_NOT_CONFIGURED and no token is sent.
-$script:GangplankAiDefaultEndpoint = ''
-$script:GangplankAiDefaultModel = 'gemini-3.8-flash'
+# Built-in default: the local phoenix-lai server's OpenAI-compatible API on this PC
+# (http://127.0.0.1:1234/v1/chat/completions). GANGPLANK_AI_URL / LLM_URL / OPENAI_BASE_URL or a
+# saved setting overrides it. A loopback endpoint needs no token; any other endpoint does.
+$script:GangplankAiDefaultEndpoint = 'http://127.0.0.1:1234/v1'
+# Model for any loopback endpoint when no model variable is set (phoenix-lai's model id).
+# Remote endpoints never get a built-in model name: the model must be configured.
+$script:GangplankAiLoopbackModel = 'phoenixlai'
 $script:GangplankAiAzureApiVersion = '2024-10-21'
 # Not chat models: never offered, never auto-picked.
 $script:GangplankAiNotChat = '(?i)(embed|whisper|tts|speech|audio|transcri|dall-?e|image-gen|moderation|rerank|davinci-00|babbage|ada-00|text-similarity|search-)'
@@ -30,6 +34,41 @@ function Get-GangplankAiEnvironment {
     $model = ''
     foreach ($n in @('GANGPLANK_AI_MODEL','LLM_MODEL','OPENAI_MODEL')) { $v = [Environment]::GetEnvironmentVariable($n); if ($v) { $model = $v.Trim(); break } }
     return @{ Endpoint = $endpoint; Model = $model }
+}
+
+function Test-GangplankAiLoopbackUrl {
+    # True when the URL points at this PC (127.0.0.0/8, ::1 or localhost).
+    param([AllowEmptyString()][AllowNull()][string]$Url)
+    $u = $null
+    if ([string]::IsNullOrWhiteSpace($Url) -or -not [uri]::TryCreate($Url.Trim(),[UriKind]::Absolute,[ref]$u)) { return $false }
+    return [bool]$u.IsLoopback
+}
+
+function Get-GangplankAiAuthToken {
+    # The token to send to an AI endpoint, or $null when none is available. A loopback endpoint
+    # (such as the local phoenix-lai server, API key off by default) only uses a token from the
+    # environment or Gangplank's store: the vault is not opened, and no header is sent without one.
+    # Any other endpoint uses the AI credential (environment, store, or Lazarette).
+    param([AllowEmptyString()][AllowNull()][string]$Url)
+    if (Test-GangplankAiLoopbackUrl -Url $Url) {
+        $fromEnv = Get-GangplankEnvironmentCredential -Provider AI
+        if ($fromEnv) { return [string]$fromEnv.Value }
+        $stored = $null
+        try { $stored = Get-GangplankStoredCredential -Provider AI } catch { $stored = $null }
+        if ($stored) { return [string]$stored }
+        return $null
+    }
+    return (Get-GangplankAiToken)
+}
+
+function Get-GangplankAiRequestToken {
+    # Token for a chat request to the resolved configuration. Remote endpoints need one.
+    param([Parameter(Mandatory)]$Config)
+    $token = Get-GangplankAiAuthToken -Url ([string]$Config.Url)
+    if (-not $token -and -not $Config.Loopback -and $Config.Profile -ne 'ollama') {
+        throw 'AI_TOKEN_MISSING|This AI endpoint needs a token. Add the AI token in Settings, or set GANGPLANK_AI_TOKEN.'
+    }
+    return $token
 }
 
 function Get-GangplankAiAllowedHosts {
@@ -173,8 +212,9 @@ function Get-GangplankAiSettingsView {
         endpoint = $(if ($cfg) { $cfg.Endpoint } else { [string]$s.Endpoint })
         profile = $(if ($cfg) { $cfg.Profile } else { [string]$s.Profile })
         model = $(if ($cfg) { $cfg.Model } else { [string]$s.Model })
-        source = $(if ($envAi.Endpoint -or $envAi.Model) { 'environment' } elseif ($s.Endpoint) { 'settings' } elseif ($script:GangplankAiDefaultEndpoint) { 'default' } else { 'none' })
+        source = $(if ($envAi.Endpoint -or $envAi.Model) { 'environment' } elseif ($s.Endpoint) { 'settings' } else { 'default' })
         tokenReady = [bool]$cred.configured
+        tokenRequired = $(if ($cfg) { -not $cfg.Loopback } else { $true })
         allowedHosts = @(Get-GangplankAiAllowedHosts)
         problem = $problem
     }
@@ -212,7 +252,8 @@ function Get-GangplankAiConfiguration {
     if ($envAi.Endpoint) {
         $uri = Assert-GangplankAiEndpoint -Url $envAi.Endpoint
         $flavorName = Get-GangplankAiFlavor -Uri $uri
-        $model = if ($envAi.Model) { $envAi.Model } elseif ($saved.Model) { [string]$saved.Model } else { $script:GangplankAiDefaultModel }
+        $model = if ($envAi.Model) { $envAi.Model } elseif ($uri.IsLoopback) { $script:GangplankAiLoopbackModel } elseif ($saved.Model) { [string]$saved.Model } else { '' }
+        if (-not $model) { throw 'AI_MODEL_MISSING|No AI model is set for this endpoint. Set LLM_MODEL (or GANGPLANK_AI_MODEL), or choose a model in Settings.' }
         $base = if ($flavorName -eq 'openai') { Get-GangplankAiOpenAiBase -Uri $uri } else { Get-GangplankAiOrigin $uri }
         $chat = if ($uri.AbsolutePath -match '(?i)/(chat/completions|invocations)$') { $uri.AbsoluteUri } else { Get-GangplankAiChatUrl -Flavor $flavorName -Base $base -Model $model }
         $auth = if ($flavorName -eq 'azure') { 'api-key' } else { 'bearer' }
@@ -222,16 +263,17 @@ function Get-GangplankAiConfiguration {
         $flavorName = [string]$saved.Profile; $model = [string]$saved.Model; $chat = [string]$saved.ChatUrl
         $auth = if ($saved.Auth -eq 'api-key') { 'api-key' } else { 'bearer' }
         $endpoint = [string]$saved.Endpoint
-    } elseif ($script:GangplankAiDefaultEndpoint) {
-        $flavorName = 'openai'
-        $model = if ($envAi.Model) { $envAi.Model } else { $script:GangplankAiDefaultModel }
-        $chat = $script:GangplankAiDefaultEndpoint + '/chat/completions'
-        $auth = 'bearer'; $endpoint = $script:GangplankAiDefaultEndpoint
     } else {
-        throw 'AI_NOT_CONFIGURED|No AI endpoint is set. Enter your organization''s AI endpoint in Settings, or set LLM_URL.'
+        # Built-in default: the local phoenix-lai server on this PC.
+        $flavorName = 'openai'
+        $model = if ($envAi.Model) { $envAi.Model } else { $script:GangplankAiLoopbackModel }
+        $chat = $script:GangplankAiDefaultEndpoint + '/chat/completions'
+        [void](Assert-GangplankAiEndpoint -Url $chat)
+        $auth = 'bearer'; $endpoint = $script:GangplankAiDefaultEndpoint
     }
     return [pscustomobject]@{
         Endpoint = $endpoint; Profile = $flavorName; Model = $model; Url = $chat; Auth = $auth
+        Loopback = (Test-GangplankAiLoopbackUrl -Url $chat)
         # Databricks serving and some gateways do not stream: ask once, show the whole answer.
         Streams = ($flavorName -ne 'databricks')
     }

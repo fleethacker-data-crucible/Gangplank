@@ -111,7 +111,7 @@ function Get-GangplankErrorStatus {
     switch -Regex ($Code) {
         '^(BAD_REQUEST|INVALID)' { return 400 }
         '^(NOT_FOUND)$' { return 404 }
-        '^(BUSY|CONFLICT|NOT_CONNECTED|BAD_STATE|CREDENTIAL_MISSING|CREDENTIAL_STORE_UNAVAILABLE|ARC_[A-Z_]+|AI_NOT_CONFIGURED|GIT_[A-Z_]+)$' { return 409 }
+        '^(BUSY|CONFLICT|NOT_CONNECTED|BAD_STATE|CREDENTIAL_MISSING|CREDENTIAL_STORE_UNAVAILABLE|ARC_[A-Z_]+|AI_NOT_CONFIGURED|AI_TOKEN_MISSING|AI_MODEL_MISSING|GIT_[A-Z_]+)$' { return 409 }
         '^(AUTH_REJECTED|FORBIDDEN|RATE_LIMITED|SERVER_ERROR|NETWORK)$' { return 502 }
         default { return 400 }
     }
@@ -271,13 +271,13 @@ function Invoke-GangplankRouteCore {
         $endpoint = [string](Get-GangplankBodyValue $Req 'endpoint')
         if (-not $endpoint) { $endpoint = (Get-GangplankAiConfiguration).Endpoint }
         [void](Assert-GangplankAiEndpoint -Url $endpoint)   # refuse before any request leaves
-        $jobArgs = @{ Endpoint = $endpoint; AiToken = (Get-GangplankAiToken); Current = [string](Get-GangplankBodyValue $Req 'model') }
+        $jobArgs = @{ Endpoint = $endpoint; AiToken = (Get-GangplankAiAuthToken -Url $endpoint); Current = [string](Get-GangplankBodyValue $Req 'model') }
         $id = Start-GangplankJob -Kind 'ai-detect' -Group 'ai' -Function 'Invoke-GangplankJobAiDetect' -Arguments $jobArgs
         Send-GangplankJobStarted $id
         return
     }
     if ($m -eq 'POST' -and $p -eq '/api/ai/test') {
-        $id = Start-GangplankJob -Kind 'ai-test' -Group 'ai' -Function 'Invoke-GangplankJobAiTest' -Arguments @{ AiToken = (Get-GangplankAiToken) }
+        $id = Start-GangplankJob -Kind 'ai-test' -Group 'ai' -Function 'Invoke-GangplankJobAiTest' -Arguments @{ AiToken = (Get-GangplankAiAuthToken -Url (Get-GangplankAiConfiguration).Url) }
         Send-GangplankJobStarted $id
         return
     }
@@ -455,8 +455,7 @@ function Invoke-GangplankRouteCore {
         $known = @($preview.Changes | Where-Object { -not $_.Blocked } | ForEach-Object Path)
         foreach ($sel in $selected) { if ($sel -cnotin $known) { throw 'BAD_REQUEST|Invalid selected file.' } }
         if ($selected.Count -eq 0) { throw 'BAD_REQUEST|Select changed files first.' }
-        $ai = Get-GangplankAiToken
-        if (-not $ai -and (Get-GangplankAiConfiguration).Profile -ne 'ollama') { throw 'AI_NOT_CONFIGURED|AI is not connected. Add an AI token in Credentials.' }
+        $ai = Get-GangplankAiRequestToken -Config (Get-GangplankAiConfiguration)
         $kinds = @{}; foreach ($c in @($preview.Changes)) { $kinds[$c.Path] = $c.Kind }
         $jobArgs = @{
             New = @($selected | Where-Object { $kinds[$_] -eq 'New' })
@@ -472,8 +471,7 @@ function Invoke-GangplankRouteCore {
         $question = [string](Get-GangplankBodyValue $Req 'message')
         if ([string]::IsNullOrWhiteSpace($question)) { throw 'BAD_REQUEST|Enter a message.' }
         if ($question.Length -gt 6000) { throw 'BAD_REQUEST|AI message exceeds 6,000 characters.' }
-        $ai = Get-GangplankAiToken
-        if (-not $ai -and (Get-GangplankAiConfiguration).Profile -ne 'ollama') { throw 'AI_NOT_CONFIGURED|AI is not connected. Add an AI token in Credentials.' }
+        $ai = Get-GangplankAiRequestToken -Config (Get-GangplankAiConfiguration)
         $snap = Get-GangplankAppSnapshot
         $jobArgs = @{ Question = $question; AiToken = $ai; Project = $(if ($snap) { $snap.ProjectPath } else { '' }); Branch = $(if ($snap) { $(if ($snap.LastBranch) { $snap.LastBranch } else { $snap.DefaultBranch }) } else { '' }) }
         $id = Start-GangplankJob -Kind 'chat' -Group 'chat' -Function 'Invoke-GangplankJobChat' -Arguments $jobArgs
