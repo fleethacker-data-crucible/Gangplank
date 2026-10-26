@@ -15,7 +15,7 @@ Get a safe working copy of a project, edit it with your normal tools, and publis
 
 ### 1. First launch
 
-Gangplank opens on **Overview**. With no project connected, the *Current project* card says *Ready when you are*. Scroll to step 1, *Connect your project*. The yellow TEST MODE banner marks the LocalDev demo build.
+Gangplank opens on **Overview**. With no project connected, the *Current project* card says *Ready when you are*. Scroll to step 1, *Connect your project*. The TEST MODE banner across the top marks the LocalDev demo build.
 
 ![Gangplank Overview on first launch in TEST MODE: Ready when you are, with the demo repository URL filled in under Connect your project.](../assets/walkthrough/01-first-launch.png)
 
@@ -59,4 +59,4 @@ Publish, then select **Create review request** to open a pull request or merge r
 
 ## About these images
 
-Images live in [`docs/assets/walkthrough/`](../assets/walkthrough/), named `NN-<screen>.png` after the step they belong to. They are 1440x900 at 100% scale in the Dark (Gangplank has one theme) theme, and show demo data only.
+Images live in [`docs/assets/walkthrough/`](../assets/walkthrough/), named `NN-<screen>.png` after the step they belong to. They are 1440x900 at 100% scale in the Night watch (dark) theme with the sidebar expanded, and show demo data only. `node dev/capture-walkthrough.mjs` retakes them (and the README pair in `docs/screenshots/`) against the synthetic GitHub in `dev/fake-github.mjs`.
