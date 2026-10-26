@@ -14,9 +14,9 @@ try {
     $pii = Join-Path $root 'test.csv'
     [IO.File]::WriteAllText($pii,'id,ssn' + [Environment]::NewLine + '1,123-45-6789')
     Assert ('SSN_CANDIDATE' -in @(Get-GangplankSentinelFindings -Path $pii | ForEach-Object Code)) 'PII detection'
-    $cui = Join-Path $root 'control.md'
-    [IO.File]::WriteAllText($cui,'CONTROLLED UNCLASSIFIED INFORMATION')
-    Assert ('CUI_MARKING' -in @(Get-GangplankSentinelFindings -Path $cui | ForEach-Object Code)) 'CUI marking'
+    $marking = Join-Path $root 'control.md'
+    [IO.File]::WriteAllText($marking,'CONTROLLED UNCLASSIFIED INFORMATION')
+    Assert ('DATA_MARKING' -in @(Get-GangplankSentinelFindings -Path $marking | ForEach-Object Code)) 'Data-handling marking'
     $binary = Join-Path $root 'image.png'
     [IO.File]::WriteAllBytes($binary,[byte[]](1,2,3))
     Assert ('FORMAT_UNVERIFIED' -in @(Get-GangplankSentinelFindings -Path $binary | ForEach-Object Code)) 'Unsupported file blocked'
@@ -35,7 +35,7 @@ try {
     $session.ProviderObj = $gitlab
     $safe = Test-GangplankSentinelPublication -Session $session -Paths @('clean.ps1')
     Assert ($safe.Allowed -and $safe.Destination.Verified -and -not $safe.RequiresPublicConfirmation) 'Private GitLab incorrectly blocked'
-    Assert (-not (Test-GangplankSentinelPublication -Session $session -Paths @('control.md')).Allowed) 'CUI review was bypassed'
+    Assert (-not (Test-GangplankSentinelPublication -Session $session -Paths @('control.md')).Allowed) 'Data-handling marking review was bypassed'
     Write-Host 'Sentinel fixture tests passed.' -ForegroundColor Green
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue

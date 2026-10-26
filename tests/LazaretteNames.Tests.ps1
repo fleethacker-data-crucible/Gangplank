@@ -71,6 +71,26 @@ function Test-ArcVaultUnlocked { $global:ArcNameCalls += 1; return $script:StubU
     Assert ((Get-GangplankToken -Provider GitHub) -eq 'fake-lazarette-alt-token') 'KEYSTONE_ARC_ITEM_GitHub must still map the item'
     $env:GANGPLANK_LAZARETTE_ITEM_GitHub = 'github'
     Assert ((Get-GangplankToken -Provider GitHub) -eq 'fake-lazarette-github-token') 'GANGPLANK_LAZARETTE_ITEM_GitHub must win'
+    $env:GANGPLANK_LAZARETTE_ITEM_GitHub = $null; $env:KEYSTONE_ARC_ITEM_GitHub = $null
+    # Legacy aliases (Core/Configuration.ps1): former purpose names, item-variable suffixes and
+    # default item names are still accepted. Names come from the alias map, not literals here.
+    & (Get-Module Gangplank) {
+        function Assert([bool]$Condition,[string]$Message) { if (-not $Condition) { throw "FAILED: $Message" } }
+        $legacyAi = @($script:GangplankLegacyAliases.Purpose.Keys | Where-Object { $script:GangplankLegacyAliases.Purpose[$_] -eq 'AI' })[0]
+        Assert ((Resolve-GangplankPurposeName $legacyAi) -eq 'AI') 'Legacy purpose name should resolve to AI'
+        Assert ((Resolve-GangplankPurposeName $legacyAi.ToLowerInvariant()) -eq 'AI') 'Legacy purpose names resolve case-insensitively'
+        Assert ((Resolve-GangplankPurposeName 'gitlab') -eq 'GitLab') 'Current purpose names keep their spelling'
+        Assert ((Get-GangplankLazaretteItemName -Provider AI) -eq 'ai-api-key') 'Default AI item name should be ai-api-key'
+        Assert ((Get-GangplankLazaretteItemName -Provider $legacyAi) -eq 'ai-api-key') 'Legacy purpose name should reach the AI mapping'
+        $legacyVar = 'GANGPLANK_LAZARETTE_ITEM_' + $legacyAi
+        [Environment]::SetEnvironmentVariable($legacyVar,'alt-gh')
+        try { Assert ((Get-GangplankLazaretteItemName -Provider AI) -eq 'alt-gh') 'An item variable with the legacy purpose suffix should still map AI' }
+        finally { [Environment]::SetEnvironmentVariable($legacyVar,$null) }
+        $legacyItem = Get-GangplankLegacyItemName -Purpose GitLab
+        Assert ((Resolve-GangplankLazaretteItemInCatalog -Provider GitLab -Name 'gitlab' -Catalog @('github',$legacyItem)) -eq $legacyItem) 'Default item missing: fall back to the legacy default item'
+        Assert ((Resolve-GangplankLazaretteItemInCatalog -Provider GitLab -Name 'gitlab' -Catalog @('gitlab',$legacyItem)) -eq 'gitlab') 'The current default item wins when both exist'
+        Assert ((Resolve-GangplankLazaretteItemInCatalog -Provider GitLab -Name 'my-gitlab' -Catalog @($legacyItem)) -eq 'my-gitlab') 'A custom item name never falls back'
+    }
     Write-Host 'Gangplank Lazarette names, lib\Lazarette.ps1 and pre-rename opt-ins passed.' -ForegroundColor Green
 } finally {
     foreach ($n in $saved.Keys) { [Environment]::SetEnvironmentVariable($n,$saved[$n]) }

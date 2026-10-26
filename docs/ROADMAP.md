@@ -6,7 +6,7 @@ Supersedes `docs/ENTERPRISE-ROADMAP.md`.
 
 **Where work happens.** Most development is done off-workstation (cloud sessions and
 the build PC) against synthetic data, mocks and Lazarette's software profile. Anything that
-needs a CAC, the real web.git.mil instance or workstation application control is marked
+needs a smart card, the organization's real GitLab host or workstation application control is marked
 **Workstation** and is done on the workstation (local model), never in the cloud.
 
 ## Done
@@ -57,19 +57,19 @@ or a release zip is required.
 |---|---|---|
 | 12 | Get latest without starting over | Bring remote changes into an open workspace: apply non-overlapping files automatically, show overlaps for a choice. Today the only option is a fresh download |
 | 13 | Reviews end to end | Status, checks and comments on PRs/MRs; reply; merge when branch policy allows |
-| 14 | Sentinel review flow | "Review" findings (possible SSN, CUI marking) can be acknowledged per file with an audited reason; images and other binaries allowed by verified type instead of blocked outright; one shared rule list |
+| 14 | Sentinel review flow | "Review" findings (possible SSN, data-handling marking) can be acknowledged per file with an audited reason; images and other binaries allowed by verified type instead of blocked outright; one shared rule list |
 | 15 | Revert a file | Restore one file to the download baseline from the Workspace screen |
 | 16 | AI with explicit consent | Read-only actions (explain this diff, summarize this review) that show exactly what will be sent before sending; still no tool execution |
 | 16b | Use an existing folder | Adopt a git clone (base commit from `.git\HEAD`, file hashes compared with the remote tree) or a plain folder matched to a branch commit |
 | 16c | Shared AI module | Gangplank's endpoint discovery (`Core/Intelligence.ps1`) could become the common AI setting for Halyard and Shellback |
 | 17 | Retire the legacy CLI bulk upload | `Invoke-GangplankPush` and the classic menu once the browser flow covers them |
 
-## Workstation (CAC, real endpoints, application control)
+## Workstation (smart card, real endpoints, application control)
 
 | # | Item | Notes |
 |---|---|---|
-| W1 | CAC unlock through Gangplank's console | When Lazarette is ready: turn Lazarette on in Credentials, restart, and unlock with the card (Lazarette `Unlock-ArcVaultInteractive`). Depends on Lazarette's own CAC testing (planned at the end of Lazarette's polish phase). Gangplank adds no CAC code of its own |
-| W2 | web.git.mil end to end | Connect, start a workspace, Smart Save, create a merge request against a sandbox project; confirm GitLab paging and per-file commit guards |
+| W1 | Smart card unlock through Gangplank's console | When Lazarette is ready: turn Lazarette on in Credentials, restart, and unlock with the card (Lazarette `Unlock-ArcVaultInteractive`). Depends on Lazarette's own smart card testing (planned at the end of Lazarette's polish phase). Gangplank adds no smart card code of its own |
+| W2 | Organization GitLab host end to end | Connect, start a workspace, Smart Save, create a merge request against a sandbox project; confirm GitLab paging and per-file commit guards |
 | W3 | Host under application control | Confirm the launcher and (after item 1) the TcpListener host run on the managed workstation with Edge |
 | W4 | Runner account | The self-hosted runner should run as a dedicated account with no Lazarette vault. Gangplank no longer auto-detects Lazarette, so tests can no longer pick it up, but the account still holds it |
 | W5 | Signed release | Code-sign scripts if application control requires it |

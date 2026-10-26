@@ -9,12 +9,10 @@ function Assert-GangplankTrustedRepositoryUrl {
     # LocalDev synthetic provider (set only by Start-Gangplank.ps1 -LocalDev).
     if ((Test-GangplankDevRepositoryUrl -Url $Url) -and -not $uri.UserInfo -and @($uri.AbsolutePath.Trim('/') -split '/').Count -ge 2) { return }
     if ($uri.Scheme -ne 'https' -or $uri.UserInfo -or $uri.Port -ne 443) { throw 'Only standard HTTPS project URLs without embedded credentials are supported.' }
-    $hosts = @('github.com','web.git.mil')
-    if ((Get-GangplankEnv GITLAB_ALLOWED_HOSTS)) {
-        $hosts += @((Get-GangplankEnv GITLAB_ALLOWED_HOSTS) -split ',' | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
-    }
+    # github.com, the configured GitLab host (GANGPLANK_GITLAB_HOST / config GitLabHost) and the allowlist.
+    $hosts = @('github.com') + @(Get-GangplankTrustedGitLabHosts)
     if ($uri.Host.ToLowerInvariant() -notin $hosts) {
-        throw 'Repository host not allowlisted. Ask an administrator to set GANGPLANK_GITLAB_ALLOWED_HOSTS for approved self-hosted GitLab.'
+        throw 'Repository host not allowlisted. Ask an administrator to set GANGPLANK_GITLAB_HOST (or GANGPLANK_GITLAB_ALLOWED_HOSTS) for approved self-hosted GitLab.'
     }
     if ($uri.Host -eq 'github.com' -and @($uri.AbsolutePath.Trim('/') -split '/').Count -lt 2) { throw 'GitHub project URL needs an owner and repository.' }
     if ($uri.AbsolutePath.Trim('/') -eq '') { throw 'Repository path is missing.' }

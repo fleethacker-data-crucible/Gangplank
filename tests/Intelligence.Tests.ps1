@@ -24,10 +24,10 @@ try {
         Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'https://user:pw@gateway.example.com/v1' }) -eq 'BAD_REQUEST') 'Embedded credentials must be refused'
         Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'http://127.0.0.1:11434' }) -eq '') 'Local model over http should be allowed'
         Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'https://gateway.example.com/v1' }) -eq '') 'Any HTTPS gateway allowed without an administrator list'
-        $env:GANGPLANK_AI_ALLOWED_HOSTS = 'ai.example.mil'
+        $env:GANGPLANK_AI_ALLOWED_HOSTS = 'ai.example.com'
         Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'https://gateway.example.com/v1' }) -eq 'FORBIDDEN') 'The administrator list must be strict'
-        Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'https://ai.example.mil/v1' }) -eq '') 'Listed host allowed'
-        Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'https://api.genai.mil/v1' }) -eq '') 'The default host stays allowed'
+        Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'https://ai.example.com/v1' }) -eq '') 'Listed host allowed'
+        Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'https://api.example.net/v1' }) -eq 'FORBIDDEN') 'No built-in host bypasses the administrator list'
         $env:GANGPLANK_AI_ALLOWED_HOSTS = $null
 
         # --- model filtering and ranking --------------------------------------
@@ -75,8 +75,8 @@ try {
         $script:GangplankHttpTransport = $null
 
         # --- settings and precedence ---------------------------------------------
-        $cfg = Get-GangplankAiConfiguration
-        Assert ($cfg.Endpoint -eq 'https://api.genai.mil/v1' -and $cfg.Url -eq 'https://api.genai.mil/v1/chat/completions') 'Default should stay genai.mil'
+        Assert ((Get-Code { Get-GangplankAiConfiguration }) -eq 'AI_NOT_CONFIGURED') 'With nothing set there is no built-in endpoint'
+        Assert ((Get-GangplankAiSettingsView).source -eq 'none') 'Settings view should report no AI source'
         [void](Set-GangplankAiSettings -Endpoint 'https://gateway.example.com/v1' -Flavor 'openai' -Model 'gpt-4.1')
         $cfg = Get-GangplankAiConfiguration
         Assert ($cfg.Model -eq 'gpt-4.1' -and $cfg.Url -eq 'https://gateway.example.com/v1/chat/completions') 'Saved setting not used'
@@ -87,10 +87,10 @@ try {
         Assert ($cfg.Endpoint -eq 'https://halyard-gw.example.com/v1' -and $cfg.Model -eq 'shared-model') 'Halyard variables (LLM_URL/LLM_MODEL) should be honoured'
         $env:LLM_URL = $null; $env:LLM_MODEL = $null
         $env:LLM_TOKEN = 'shared-token-123'
-        Assert ((Get-GangplankAiToken) -eq 'shared-token-123') 'LLM_TOKEN (Halyard) should be accepted as the GenAI token'
+        Assert ((Get-GangplankAiToken) -eq 'shared-token-123') 'LLM_TOKEN (Halyard) should be accepted as the AI token'
         $env:LLM_TOKEN = $null
         [void](Set-GangplankAiSettings -Endpoint '')
-        Assert ((Get-GangplankAiConfiguration).Endpoint -eq 'https://api.genai.mil/v1') 'Reset should return to the default'
+        Assert ((Get-Code { Get-GangplankAiConfiguration }) -eq 'AI_NOT_CONFIGURED') 'Reset should return to not configured'
         Assert ((Get-Code { Set-GangplankAiSettings -Endpoint 'https://gateway.example.com/v1' -Model '' }) -eq 'BAD_REQUEST') 'A model is required'
 
         # --- branch names -----------------------------------------------------------
@@ -117,7 +117,7 @@ try {
         $env:GANGPLANK_WORK_ROOT = $null
         [void](Set-GangplankWorkspaceRoot -Path '')
         Assert ((Get-GangplankWorkspaceRoot) -eq $default) 'Reset to default'
-        $p = Get-GangplankSafeWorkspacePath -Base $mine -Project 'sun-of-anton/dumping-grounds' -Branch 'dummy-dev'
+        $p = Get-GangplankSafeWorkspacePath -Base $mine -Project 'fleethacker-data-crucible/dumping-grounds' -Branch 'dummy-dev'
         Assert ($p -eq (Join-Path (Join-Path $mine 'dumping-grounds') 'dummy-dev')) ('Workspace layout should be <root>\<repo>\<branch>, got ' + $p)
     } $temp
     Write-Host 'AI discovery, settings, branch naming and workspace folder checks passed.' -ForegroundColor Green

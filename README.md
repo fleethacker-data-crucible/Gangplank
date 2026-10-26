@@ -50,11 +50,13 @@ Your project, work branch and download baseline are saved in `%LOCALAPPDATA%\Gan
 
 ## Credentials
 Gangplank looks for a token in this order:
-1. **Environment:** `GITHUB_TOKEN`, `GITLAB_TOKEN`, `GANGPLANK_AI_TOKEN` or `GENAI_TOKEN`.
+1. **Environment:** `GITHUB_TOKEN`, `GITLAB_TOKEN` or `GANGPLANK_AI_TOKEN`.
 2. **Saved in Gangplank:** paste a token once in **Credentials**. It is sealed with Windows DPAPI for your Windows account in `%LOCALAPPDATA%\Gangplank\credentials.json`, never shown again and never sent back to the browser. Remove it there at any time.
 3. **Lazarette**, only if you turn it on (below).
 
-Only HTTPS github.com, one built-in GitLab host and administrator-approved `GANGPLANK_GITLAB_ALLOWED_HOSTS` are accepted for repositories. Provider errors are reported as codes (`AUTH_REJECTED`, `FORBIDDEN`, `NOT_FOUND`, `RATE_LIMITED`...); response bodies stay in the local log.
+Only HTTPS github.com, your organization's GitLab host (`GANGPLANK_GITLAB_HOST`, or `GitLabHost` in `config\gangplank-config.json`; none by default) and administrator-approved `GANGPLANK_GITLAB_ALLOWED_HOSTS` are accepted for repositories. Provider errors are reported as codes (`AUTH_REJECTED`, `FORBIDDEN`, `NOT_FOUND`, `RATE_LIMITED`...); response bodies stay in the local log.
+
+Names from earlier releases still work as legacy aliases: the former AI token variable and credential name, the former default Lazarette item names (used only when the current default item is missing), and the GitLab host that used to be built in. They are listed in one place, `Core/Configuration.ps1`.
 
 ## Lazarette (optional, opt-in)
 Lazarette is still in development, so Gangplank never looks for it on its own. To use it, open **Credentials → Lazarette vault**, tick **Use Lazarette**, enter the Lazarette folder (the one containing its engine loader: `lib\Arc.ps1` in current Lazarette, or `lib\Lazarette.ps1` once Lazarette ships it; Gangplank accepts either) and restart Gangplank; or set `GANGPLANK_LAZARETTE_PATH` (the former `KEYSTONE_ARC_PATH` still works). Like before the rename, the generic `LAZARETTE_PATH` / `ARC_PATH` variables and sibling folders are not searched: Lazarette stays opt-in. Settings are stored in `config\gangplank.local.json` (not committed).
@@ -66,12 +68,12 @@ Open **Settings → AI model**, enter your organisation's endpoint and select **
 
 | Kind | Recognised by | Notes |
 |---|---|---|
-| OpenAI-compatible (genai.mil, OpenAI, LiteLLM, LM Studio, vLLM) | `/v1/models` answers | Bearer token, streaming |
+| OpenAI-compatible (your organization's AI endpoint, OpenAI, LiteLLM, LM Studio, vLLM) | `/v1/models` answers | Bearer token, streaming |
 | Azure OpenAI | `*.openai.azure.com` | `api-key` header; models are your deployments |
 | Databricks model serving | `/serving-endpoints` or a Databricks host | Chat endpoints only; answers arrive in one piece |
 | Ollama on this PC | `/api/tags` (port 11434) | No token needed; plain http allowed for this PC only |
 
-The token is the **GenAI** credential (Settings, or `GANGPLANK_AI_TOKEN` / `GENAI_TOKEN`). The environment names Halyard uses also work, so one setup serves both apps: `LLM_URL` or `OPENAI_BASE_URL`, `LLM_MODEL` or `OPENAI_MODEL`, `LLM_TOKEN` or `OPENAI_API_KEY`. With nothing configured, Gangplank uses `https://api.genai.mil/v1` and `gemini-3.8-flash`. Endpoints must be HTTPS; if `GANGPLANK_AI_ALLOWED_HOSTS` is set, only those hosts (and genai.mil) are allowed.
+The token is the **AI** credential (Settings, or `GANGPLANK_AI_TOKEN`). The environment names Halyard uses also work, so one setup serves both apps: `LLM_URL` or `OPENAI_BASE_URL`, `LLM_MODEL` or `OPENAI_MODEL`, `LLM_TOKEN` or `OPENAI_API_KEY`. There is no default endpoint: until one is set, AI is reported as not configured (the default model name is `gemini-3.8-flash`). Endpoints must be HTTPS; if `GANGPLANK_AI_ALLOWED_HOSTS` is set, only those hosts are allowed.
 
 The assistant is advisory only: it cannot change files, run tools or publish. Chat sends your typed text and the project/branch name; commit-title help sends file names and statuses only. Source code is never sent automatically.
 
