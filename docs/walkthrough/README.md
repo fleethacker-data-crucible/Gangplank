@@ -2,7 +2,7 @@
 
 Get a safe working copy of a project, edit it with your normal tools, and publish your changes for review, with no Git commands.
 
-> **Status: skeleton.** The screenshots below are placeholders. Zombie Admin captures them with demo data, and the Chief of Staff scans them for sensitive content before they are added (team directive 10). Until then the image links do not resolve.
+> **Screenshots:** captured with demo data and scanned by the Chief of Staff (team directive 10).
 
 ## Before you start
 
@@ -15,15 +15,15 @@ Get a safe working copy of a project, edit it with your normal tools, and publis
 
 ### 1. First launch
 
-Gangplank opens on **Overview** with step 1, *Connect your project*.
+Gangplank opens on **Overview**. With no project connected, the *Current project* card says *Ready when you are*. Scroll to step 1, *Connect your project*. The yellow TEST MODE banner marks the LocalDev demo build.
 
-![Gangplank Overview on first launch, with the Connect your project step and the demo repository URL filled in.](../assets/walkthrough/01-first-launch.png)
+![Gangplank Overview on first launch in TEST MODE: Ready when you are, with the demo repository URL filled in under Connect your project.](../assets/walkthrough/01-first-launch.png)
 
 ### 2. Connect your project
 
 Paste the project URL and connect. Gangplank shows the project and its default branch.
 
-![Gangplank Overview after connecting to the demo repository gangplank-demo/sample.](../assets/walkthrough/02-connect-project.png)
+![Gangplank Overview after connecting gangplank-demo/sample: GitHub provider, main branch, and insights showing 3 branches and 1 open review.](../assets/walkthrough/02-connect-project.png)
 
 ### 3. Start a safe workspace
 
@@ -33,27 +33,29 @@ Name your branch and select **Start my safe workspace**. Gangplank creates the b
 
 ### 4. Review your changes
 
-After editing files, open **Smart Save** and refresh. Choose which added or modified files to publish.
+After editing files, open **Changes** (*Smart Save*) and select **Refresh**. Choose which added or modified files to publish; deletions are never selected automatically.
 
-![Gangplank Smart Save page listing two changed demo files, both selected, with a generated commit title.](../assets/walkthrough/04-smart-save-review.png)
+![Gangplank Smart Save page with two changed demo files selected, one new and one modified, and the generated commit title chore(project): update 2 files.](../assets/walkthrough/04-smart-save-review.png)
 
 ### 5. Ask for a review
 
 Publish, then select **Create review request** to open a pull request or merge request.
 
-![Gangplank Team reviews page after creating a review request for the demo-walkthrough branch.](../assets/walkthrough/05-review-request.png)
+![Gangplank Team reviews page listing review request #3 from demo-walkthrough to main and the demo feature request #1.](../assets/walkthrough/05-review-request.png)
 
 ### 6. See what happened
 
 **History & Activity** shows recent commits and everything done in this session.
 
-![Gangplank History and Activity page showing recent commits and this session's actions.](../assets/walkthrough/06-activity.png)
+![Gangplank History and Activity page with three demo commits on demo-walkthrough and this session's publish and review request actions.](../assets/walkthrough/06-activity.png)
 
 ### 7. Manage credentials
 
 **Settings & credentials** shows which tokens are saved, never their values, plus the workspace folder and AI model.
 
-![Gangplank Settings and credentials page showing a provider token as saved, with no token value visible.](../assets/walkthrough/07-settings-credentials.png)
+*This is the TEST MODE demo build, so the saved GitHub token shown here is simulated.*
+
+![Gangplank Settings and credentials in TEST MODE: GitHub token shown as saved with no value, and GitLab and GenAI tokens not set.](../assets/walkthrough/07-settings-credentials.png)
 
 ## About these images
 
