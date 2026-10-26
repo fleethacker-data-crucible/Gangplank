@@ -43,12 +43,18 @@ function Get-GangplankAppSnapshot {
     return $script:GangplankApp.Restored
 }
 
+function Get-GangplankSnapshotHost {
+    # The host a session's token is sent to (so a legacy GitLab vault item only goes to the configured host).
+    param($Snapshot)
+    try { return ([uri]([string]$Snapshot.BaseUrl)).Host } catch { return '' }
+}
+
 function Get-GangplankLiveSession {
     # The live session, rebuilding a restored one once a credential is available.
     param([switch]$Required)
     if (-not $script:GangplankApp.Session -and $script:GangplankApp.Restored) {
         try {
-            $token = (Resolve-GangplankCredential -Provider $script:GangplankApp.Restored.Provider).Value
+            $token = (Resolve-GangplankCredential -Provider $script:GangplankApp.Restored.Provider -TargetHost (Get-GangplankSnapshotHost $script:GangplankApp.Restored)).Value
             $script:GangplankApp.Session = New-GangplankSessionFromSnapshot -Snapshot $script:GangplankApp.Restored -Token $token
             $script:GangplankApp.Restored = $null
         } catch {
@@ -65,7 +71,7 @@ function Set-GangplankAppSession {
         $script:GangplankApp.Session = $null
         $script:GangplankApp.Restored = $null
     } else {
-        if (-not $Token) { $Token = (Resolve-GangplankCredential -Provider $Snapshot.Provider).Value }
+        if (-not $Token) { $Token = (Resolve-GangplankCredential -Provider $Snapshot.Provider -TargetHost (Get-GangplankSnapshotHost $Snapshot)).Value }
         $script:GangplankApp.Session = New-GangplankSessionFromSnapshot -Snapshot $Snapshot -Token $Token
         $script:GangplankApp.Restored = $null
     }
@@ -80,7 +86,7 @@ function Update-GangplankSessionCredential {
     $s = $script:GangplankApp.Session
     if (-not $s -or $s.Provider -ne $Provider) { return }
     try {
-        $token = (Resolve-GangplankCredential -Provider $Provider).Value
+        $token = (Resolve-GangplankCredential -Provider $Provider -TargetHost (Get-GangplankSnapshotHost (ConvertTo-GangplankSessionSnapshot $s))).Value
         $script:GangplankApp.Session = New-GangplankSessionFromSnapshot -Snapshot (ConvertTo-GangplankSessionSnapshot $s) -Token $token
     } catch {
         # No credential any more: keep the work as a restorable snapshot.
@@ -105,7 +111,7 @@ function Get-GangplankErrorStatus {
     switch -Regex ($Code) {
         '^(BAD_REQUEST|INVALID)' { return 400 }
         '^(NOT_FOUND)$' { return 404 }
-        '^(BUSY|CONFLICT|NOT_CONNECTED|BAD_STATE|CREDENTIAL_MISSING|CREDENTIAL_STORE_UNAVAILABLE|ARC_[A-Z_]+|AI_NOT_CONFIGURED|GIT_[A-Z_]+)$' { return 409 }
+        '^(BUSY|CONFLICT|NOT_CONNECTED|BAD_STATE|CREDENTIAL_MISSING|CREDENTIAL_STORE_UNAVAILABLE|ARC_[A-Z_]+|AI_NOT_CONFIGURED|AI_TOKEN_MISSING|AI_MODEL_MISSING|GIT_[A-Z_]+)$' { return 409 }
         '^(AUTH_REJECTED|FORBIDDEN|RATE_LIMITED|SERVER_ERROR|NETWORK)$' { return 502 }
         default { return 400 }
     }
@@ -138,7 +144,7 @@ function Get-GangplankJobArguments {
     param([Parameter(Mandatory)]$Session)
     return @{
         Session = (ConvertTo-GangplankSessionSnapshot $Session)
-        Token = (Resolve-GangplankCredential -Provider $Session.Provider).Value
+        Token = (Resolve-GangplankCredential -Provider $Session.Provider -TargetHost (Get-GangplankSnapshotHost (ConvertTo-GangplankSessionSnapshot $Session))).Value
         WorkRoot = $script:GangplankApp.WorkRoot
         DevGitHubUrl = (Get-GangplankDevProvider)
     }
@@ -206,7 +212,7 @@ function Invoke-GangplankRouteCore {
         $session = Get-GangplankLiveSession
         $snap = Get-GangplankAppSnapshot
         $creds = Get-GangplankCredentialStatus
-        $ai = @($creds.credentials | Where-Object { $_.provider -eq 'GenAi' })[0]
+        $ai = @($creds.credentials | Where-Object { $_.provider -eq 'AI' })[0]
         Send-GangplankJson -Object @{
             connected = ($null -ne $session)
             restoredWaiting = ($null -eq $session -and $null -ne $snap)
@@ -265,13 +271,13 @@ function Invoke-GangplankRouteCore {
         $endpoint = [string](Get-GangplankBodyValue $Req 'endpoint')
         if (-not $endpoint) { $endpoint = (Get-GangplankAiConfiguration).Endpoint }
         [void](Assert-GangplankAiEndpoint -Url $endpoint)   # refuse before any request leaves
-        $jobArgs = @{ Endpoint = $endpoint; AiToken = (Get-GangplankAiToken); Current = [string](Get-GangplankBodyValue $Req 'model') }
+        $jobArgs = @{ Endpoint = $endpoint; AiToken = (Get-GangplankAiAuthToken -Url $endpoint); Current = [string](Get-GangplankBodyValue $Req 'model') }
         $id = Start-GangplankJob -Kind 'ai-detect' -Group 'ai' -Function 'Invoke-GangplankJobAiDetect' -Arguments $jobArgs
         Send-GangplankJobStarted $id
         return
     }
     if ($m -eq 'POST' -and $p -eq '/api/ai/test') {
-        $id = Start-GangplankJob -Kind 'ai-test' -Group 'ai' -Function 'Invoke-GangplankJobAiTest' -Arguments @{ AiToken = (Get-GangplankAiToken) }
+        $id = Start-GangplankJob -Kind 'ai-test' -Group 'ai' -Function 'Invoke-GangplankJobAiTest' -Arguments @{ AiToken = (Get-GangplankAiAuthToken -Url (Get-GangplankAiConfiguration).Url) }
         Send-GangplankJobStarted $id
         return
     }
@@ -308,7 +314,8 @@ function Invoke-GangplankRouteCore {
     if ($m -eq 'POST' -and $p -eq '/api/integrations/map') {
         $provider = [string](Get-GangplankBodyValue $Req 'provider')
         $item = [string](Get-GangplankBodyValue $Req 'item')
-        if ($provider -notin @('GitHub','GitLab','GenAi')) { throw 'BAD_REQUEST|Unsupported credential provider.' }
+        $provider = Resolve-GangplankPurposeName $provider -Strict   # legacy purpose names still accepted
+        if ($provider -notin @('GitHub','GitLab','AI')) { throw 'BAD_REQUEST|Unsupported credential provider.' }
         if (-not (Test-GangplankLazaretteConfigured)) { throw 'ARC_NOT_CONFIGURED|Enable Lazarette first.' }
         $names = @(Get-GangplankLazaretteServiceNames)
         if ($names.Count -gt 0 -and $item -notin $names) { throw 'BAD_REQUEST|Select an item that exists in the unlocked Lazarette vault.' }
@@ -329,7 +336,7 @@ function Invoke-GangplankRouteCore {
         if (-not $url -or $url.Length -gt 500) { throw 'BAD_REQUEST|Enter a valid GitHub or GitLab project URL.' }
         Assert-GangplankTrustedRepositoryUrl -Url $url
         $parsed = Parse-GangplankRepoUrl -Url $url
-        $token = (Resolve-GangplankCredential -Provider $parsed.Provider).Value
+        $token = (Resolve-GangplankCredential -Provider $parsed.Provider -TargetHost (Get-GangplankSnapshotHost $parsed)).Value
         $id = Start-GangplankJob -Kind 'connect' -Group 'workspace' -Function 'Invoke-GangplankJobConnect' -Arguments @{ Url = $url; Token = $token; DevGitHubUrl = (Get-GangplankDevProvider) } -OnComplete $script:GangplankOnSessionJob -Context (Get-GangplankJobContext -Token $token -Kind 'connect')
         Send-GangplankJobStarted $id
         return
@@ -448,8 +455,7 @@ function Invoke-GangplankRouteCore {
         $known = @($preview.Changes | Where-Object { -not $_.Blocked } | ForEach-Object Path)
         foreach ($sel in $selected) { if ($sel -cnotin $known) { throw 'BAD_REQUEST|Invalid selected file.' } }
         if ($selected.Count -eq 0) { throw 'BAD_REQUEST|Select changed files first.' }
-        $ai = Get-GangplankAiToken
-        if (-not $ai -and (Get-GangplankAiConfiguration).Profile -ne 'ollama') { throw 'AI_NOT_CONFIGURED|AI is not connected. Add a GenAI token in Credentials.' }
+        $ai = Get-GangplankAiRequestToken -Config (Get-GangplankAiConfiguration)
         $kinds = @{}; foreach ($c in @($preview.Changes)) { $kinds[$c.Path] = $c.Kind }
         $jobArgs = @{
             New = @($selected | Where-Object { $kinds[$_] -eq 'New' })
@@ -465,8 +471,7 @@ function Invoke-GangplankRouteCore {
         $question = [string](Get-GangplankBodyValue $Req 'message')
         if ([string]::IsNullOrWhiteSpace($question)) { throw 'BAD_REQUEST|Enter a message.' }
         if ($question.Length -gt 6000) { throw 'BAD_REQUEST|AI message exceeds 6,000 characters.' }
-        $ai = Get-GangplankAiToken
-        if (-not $ai -and (Get-GangplankAiConfiguration).Profile -ne 'ollama') { throw 'AI_NOT_CONFIGURED|AI is not connected. Add a GenAI token in Credentials.' }
+        $ai = Get-GangplankAiRequestToken -Config (Get-GangplankAiConfiguration)
         $snap = Get-GangplankAppSnapshot
         $jobArgs = @{ Question = $question; AiToken = $ai; Project = $(if ($snap) { $snap.ProjectPath } else { '' }); Branch = $(if ($snap) { $(if ($snap.LastBranch) { $snap.LastBranch } else { $snap.DefaultBranch }) } else { '' }) }
         $id = Start-GangplankJob -Kind 'chat' -Group 'chat' -Function 'Invoke-GangplankJobChat' -Arguments $jobArgs

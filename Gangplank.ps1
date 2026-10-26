@@ -11,7 +11,7 @@ Import-Module (Join-Path $here "Gangplank.psm1") -Force -Global
 Initialize-Gangplank -LogLevel "INFO"
 
 Show-GangplankBanner
-# Use same-process Lazarette CAC/TOTP authentication as the browser host.
+# Use same-process Lazarette smart card/TOTP authentication as the browser host.
 $lazaretteAuth = Initialize-GangplankLazaretteAuthentication
 if ($lazaretteAuth.Unlocked) {
     Write-Host '[+] Lazarette ready for GitHub and GitLab credentials.' -ForegroundColor Green
@@ -24,7 +24,7 @@ if ($lazaretteAuth.Unlocked) {
 }
 $cfg = Get-GangplankConfig
 $cfgItems = Get-GangplankConfigLazaretteItems -Config $cfg
-Write-Host "    gitmil -> $($cfgItems.GitLab) | github -> $($cfgItems.GitHub)" -ForegroundColor DarkGray
+Write-Host "    gitlab -> $($cfgItems.GitLab) | github -> $($cfgItems.GitHub)" -ForegroundColor DarkGray
 Write-Host ""
 Wait-GangplankEnter
 
