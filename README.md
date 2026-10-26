@@ -76,7 +76,7 @@ When Lazarette is on, Gangplank loads it once at startup and runs Lazarette's ow
 
 ## AI model
 
-> **Intelligence router:** the AI endpoint (default `https://api.genai.mil/v1`, `Core/Intelligence.ps1:17`) and the GitHub/GitLab API hosts (defaults `https://api.github.com` and `https://web.git.mil`) will move behind the Fleet intelligence router, [Fairlead](https://github.com/fleethacker-data-crucible/Fairlead), so Gangplank defaults to the router instead of a hard-coded endpoint. Until then the settings below stay as they are. See [TechStack](TechStack), "Intelligence router".
+> **Intelligence router:** the AI endpoint (default local phoenix-lai `http://127.0.0.1:1234/v1`, `Core/Intelligence.ps1:20`) and the GitHub/GitLab API hosts (GitHub default `https://api.github.com`; GitLab host from `GANGPLANK_GITLAB_HOST`) will move behind the Fleet intelligence router, [Fairlead](https://github.com/fleethacker-data-crucible/Fairlead), so Gangplank defaults to the router instead of a fixed endpoint. Until then the settings below stay as they are. See [TechStack](TechStack), "Intelligence router".
 
 Open **Settings → AI model**, enter your organisation's endpoint and select **Detect models**. Gangplank asks the endpoint what it is and which chat models it offers, filters out embedding, speech and image models, and preselects the best match; **Test** sends one short message to prove it works. Supported:
 
