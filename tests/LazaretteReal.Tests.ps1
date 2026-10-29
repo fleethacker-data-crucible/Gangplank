@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 # Gangplank against the REAL Lazarette engine (lib\Lazarette.ps1 or lib\Arc.ps1), software (passphrase)
-# profile, in a throwaway data folder. No CAC and no real vault: ARC_DATA points
+# profile, in a throwaway data folder. No smart card and no real vault: ARC_DATA points
 # at a temp folder, so the runner's own %LOCALAPPDATA%\ARC (or \Lazarette) is never touched.
 # Skips when no checkout is found: GANGPLANK_TEST_LAZARETTE_PATH (or the pre-rename
 # KEYSTONE_TEST_ARC_PATH), else a sibling ..\lazarette, else ..\arc.
@@ -48,7 +48,7 @@ try {
         $ctx = @{ Interactive = $false; Log = { param($l,$m) }; Passphrase = $Pass; Pbkdf2Iterations = 100000 }
         [void](New-ArcVault -Profile software -DataDir $Dir -Ctx $ctx)
         [void](Add-ArcRecord (New-ArcRecord -Service 'github' -User 'dev' -Secret 'real-lazarette-github-test-token'))
-        [void](Add-ArcRecord (New-ArcRecord -Service 'gitmil' -User 'dev' -Secret 'real-lazarette-gitlab-test-token'))
+        [void](Add-ArcRecord (New-ArcRecord -Service 'gitlab' -User 'dev' -Secret 'real-lazarette-gitlab-test-token'))
         Lock-ArcVault
     } $data $pass
 
@@ -66,7 +66,7 @@ try {
 
     $status = Get-GangplankLazaretteConnectionStatus
     Assert ($status.lazaretteUnlocked) 'Unlocked real vault not reported'
-    Assert ((@($status.itemNames) -join ',') -eq 'github,gitmil') ('Real item names wrong: ' + (@($status.itemNames) -join ','))
+    Assert ((@($status.itemNames) -join ',') -eq 'github,gitlab') ('Real item names wrong: ' + (@($status.itemNames) -join ','))
     Assert (($status | ConvertTo-Json -Depth 6) -notmatch 'real-arc5') 'Status leaked a real secret'
     Assert ((Get-GangplankToken -Provider GitHub) -eq 'real-lazarette-github-test-token') 'GitHub token not read from the real Lazarette vault'
     Assert ((Get-GangplankToken -Provider GitLab) -eq 'real-lazarette-gitlab-test-token') 'GitLab token not read from the real Lazarette vault'

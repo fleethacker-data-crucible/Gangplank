@@ -110,7 +110,7 @@ $autoStop = Test-GangplankAutoStopEnabled -Stay:$Stay -Config (Get-GangplankConf
 if ($LocalDev) {
     Write-Host '[LOCAL DEV] Lazarette is not imported; no unlock prompts. Use fictional data only.' -ForegroundColor Yellow
 } elseif (Test-GangplankLazaretteConfigured) {
-    # Lazarette's own unlock (passphrase or CAC PIN, then authenticator), in THIS console.
+    # Lazarette's own unlock (passphrase or smart card PIN, then authenticator), in THIS console.
     $lazaretteState = Initialize-GangplankLazaretteAuthentication -SkipUnlock:$SkipLazaretteUnlock
     if (-not $lazaretteState.Unlocked) {
         Write-Host '[!] Lazarette is configured but not unlocked. Saved Gangplank or environment credentials still work.' -ForegroundColor Yellow

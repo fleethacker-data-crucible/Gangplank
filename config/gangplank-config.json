@@ -1,9 +1,10 @@
 {
   "Version": "1.0",
   "LazaretteItems": {
-    "GitLab": "gitmil",
+    "GitLab": "gitlab",
     "GitHub": "github"
   },
+  "GitLabHost": "",
   "LastUsed": null,
   "Repositories": {},
   "LogLevel": "INFO",
