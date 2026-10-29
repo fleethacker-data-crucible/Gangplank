@@ -111,6 +111,15 @@ Every remote write (branch, commit, review request) and every credential or Laza
 | `dev/` | LocalDev, the synthetic GitHub, a synthetic AI gateway and the README screenshot capture (`capture-screenshots.mjs`) |
 | `Gangplank.ps1` | Classic text menu |
 
+## Privacy and data
+
+Gangplank runs on this PC and serves its page on `127.0.0.1` only. Data leaves the machine only where you set it up:
+
+- **Your Git host.** Downloads and saves go to and from github.com or your allowlisted GitLab host, using your token.
+- **The AI model.** An AI request sends your question and the project content it includes to the configured endpoint. The default is local phoenix-lai on this PC, so nothing leaves; if you point Gangplank at a cloud or organization endpoint, that provider's terms and your organization's AI policy apply.
+
+Tokens are sealed with DPAPI for your Windows account and never sent to the browser. The audit log records what changed and where, never file contents or tokens. Gangplank sends no usage data anywhere.
+
 ## Important limits
 - The browser flow needs an existing, initialised remote branch; bootstrapping an empty repository is a future feature.
 - Secret detection is pattern-based for common credential files and formats; it is not complete DLP.
