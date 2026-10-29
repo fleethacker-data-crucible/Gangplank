@@ -59,8 +59,8 @@ function Initialize-Gangplank {
 function Get-GangplankToken {
     # Environment, then Gangplank's DPAPI store, then Lazarette if explicitly configured.
     [CmdletBinding()]
-    param([Parameter(Mandatory)][ValidateSet('GitHub','GitLab')][string]$Provider)
-    $credential = Resolve-GangplankCredential -Provider $Provider
+    param([Parameter(Mandatory)][ValidateSet('GitHub','GitLab')][string]$Provider,[string]$TargetHost)
+    $credential = Resolve-GangplankCredential -Provider $Provider -TargetHost $TargetHost
     Write-GangplankLog -Level INFO -Message "Credential source for $($Provider): $($credential.Source) (value not logged)."
     return $credential.Value
 }
@@ -75,7 +75,9 @@ function Open-GangplankRepository {
     Write-GangplankLog -Level INFO -Message "Provider=$($parsed.Provider) Path=$($parsed.ProjectPath)"
 
     if (-not $Token) {
-        $Token = Get-GangplankToken -Provider $parsed.Provider
+        $targetHost = ''
+        try { $targetHost = ([uri][string]$parsed.BaseUrl).Host } catch { $targetHost = '' }
+        $Token = Get-GangplankToken -Provider $parsed.Provider -TargetHost $targetHost
     }
     if (-not $Token) {
         throw "No token for $($parsed.Provider). Set env or Lazarette Service name."
@@ -279,6 +281,9 @@ Export-ModuleMember -Function @(
     "Assert-GangplankTrustedRepositoryUrl",
     "Get-GangplankAiConfiguration",
     "Get-GangplankAiToken",
+    "Get-GangplankAiAuthToken",
+    "Get-GangplankAiRequestToken",
+    "Test-GangplankAiLoopbackUrl",
     "New-GangplankAiPayload",
     "Invoke-GangplankAI",
     "Invoke-GangplankAIStream",

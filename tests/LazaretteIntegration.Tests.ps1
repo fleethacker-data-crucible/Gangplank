@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-# Offline Lazarette bridge contract test. Uses a fake pm.ps1: no secrets, CAC, network, or real vault.
+# Offline Lazarette bridge contract test. Uses a fake pm.ps1: no secrets, smart card, network, or real vault.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-lazarette-contract-' + [guid]::NewGuid().ToString('N'))
@@ -31,15 +31,15 @@ function Get-PmStarkApiKey {
     switch ($VaultName) {
         'github' { return 'fake-github-test-token' }
         'github-alt' { return 'fake-alternate-test-token' }
-        'gitmil' { return 'fake-gitlab-test-token' }
-        'genapi' { return 'fake-genai-test-token' }
+        'gitlab' { return 'fake-gitlab-test-token' }
+        'ai-api-key' { return 'fake-ai-test-token' }
         default { throw 'Missing test item' }
     }
 }
 function Get-PmVaultNameCatalog {
     if (-not $script:PmState.VaultUnlocked) { throw 'Vault locked' }
     $rows = New-Object System.Collections.ArrayList
-    foreach ($name in @('github','github-alt','gitmil','genapi')) {
+    foreach ($name in @('github','github-alt','gitlab','ai-api-key')) {
         [void]$rows.Add([pscustomobject]@{ Service = $name; HasSecret = $true })
     }
     return ,$rows
@@ -95,7 +95,7 @@ function Get-PmVaultNameCatalog {
     Assert ((Get-GangplankToken -Provider GitHub) -eq 'fake-alternate-test-token') 'Alternate service mapping'
     $saved = [IO.File]::ReadAllText($mapping)
     Assert ($saved -notmatch 'fake-.*-test-token') 'Local mapping must store names, never secrets'
-    Write-Host 'Gangplank Lazarette import, CAC startup, token lookup, and mapping contract passed.' -ForegroundColor Green
+    Write-Host 'Gangplank Lazarette import, smart card startup, token lookup, and mapping contract passed.' -ForegroundColor Green
 } finally {
     if ($null -ne $oldMapping) {
         [IO.File]::WriteAllText($mapping,$oldMapping)

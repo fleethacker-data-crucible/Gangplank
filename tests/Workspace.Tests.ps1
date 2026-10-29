@@ -11,8 +11,39 @@ foreach ($file in $sourceFiles) {
     Assert (@($errors).Count -eq 0) ("Parse failed: " + $file.FullName + ' ' + ($errors -join '; '))
 }
 Write-Host ("Parsed {0} PowerShell scripts" -f $sourceFiles.Count)
-Assert-GangplankTrustedRepositoryUrl -Url 'https://github.com/sun-of-anton/Gangplank'
-Assert-GangplankTrustedRepositoryUrl -Url 'https://web.git.mil/group/project'
+Assert-GangplankTrustedRepositoryUrl -Url 'https://github.com/fleethacker-data-crucible/Gangplank'
+# No GitLab host is trusted by default: only the host the user configures.
+$savedGitLabHost = $env:GANGPLANK_GITLAB_HOST
+$savedAllowed = $env:GANGPLANK_GITLAB_ALLOWED_HOSTS
+try {
+    $env:GANGPLANK_GITLAB_HOST = $null
+    $env:GANGPLANK_GITLAB_ALLOWED_HOSTS = $null
+    Assert ((& (Get-Module Gangplank) { Get-GangplankGitLabHost }) -eq '') 'No GitLab host should be configured by default'
+    Assert (@(& (Get-Module Gangplank) { Get-GangplankTrustedGitLabHosts }).Count -eq 0) 'No GitLab host may be trusted by default'
+    Assert (-not (& (Get-Module Gangplank) { $script:GangplankLegacyAliases.ContainsKey('GitLabHost') })) 'No legacy GitLab host may be trusted'
+    $rejected = $false
+    try { Assert-GangplankTrustedRepositoryUrl -Url 'https://gitlab.example.org/group/project' } catch { $rejected = $true }
+    Assert $rejected 'An unconfigured GitLab host must be refused'
+    $noHost = $false
+    try { [void](New-GangplankProvider -Provider GitLab) } catch { $noHost = ($_.Exception.Message -match 'GANGPLANK_GITLAB_HOST') }
+    Assert $noHost 'A GitLab provider without a base URL or configured host must explain the setting'
+    $env:GANGPLANK_GITLAB_HOST = 'https://GitLab.Example.org/'
+    Assert ((& (Get-Module Gangplank) { Get-GangplankGitLabHost }) -eq 'gitlab.example.org') 'A configured URL should be reduced to its host'
+    Assert-GangplankTrustedRepositoryUrl -Url 'https://gitlab.example.org/group/project'
+    Assert ((@(& (Get-Module Gangplank) { Get-GangplankTrustedGitLabHosts }) -join ',') -eq 'gitlab.example.org') 'Only the configured host is trusted'
+    $env:GANGPLANK_GITLAB_HOST = 'Git-Lab.example.org'
+    Assert ((& (Get-Module Gangplank) { Get-GangplankGitLabHost }) -eq 'git-lab.example.org') 'A bare host name is accepted and lower-cased'
+    Assert-GangplankTrustedRepositoryUrl -Url 'https://git-lab.example.org/group/project'
+    $rejected = $false
+    try { Assert-GangplankTrustedRepositoryUrl -Url 'https://other.example.org/group/project' } catch { $rejected = $true }
+    Assert $rejected 'A host other than the configured one must be refused'
+    foreach ($bad in @('gitlab.example.org/group','gitlab.example.org:8443','user@gitlab.example.org','gitlab example.org','gitlab_example.org')) {
+        $env:GANGPLANK_GITLAB_HOST = $bad
+        $msg = ''
+        try { [void](& (Get-Module Gangplank) { Get-GangplankGitLabHost }) } catch { $msg = $_.Exception.Message }
+        Assert ($msg -match 'letters, digits, dots and hyphens') ("A bad GitLab host must be rejected with a clear error: " + $bad)
+    }
+} finally { $env:GANGPLANK_GITLAB_HOST = $savedGitLabHost; $env:GANGPLANK_GITLAB_ALLOWED_HOSTS = $savedAllowed }
 foreach ($url in @('http://github.com/a/b','https://github.com.evil.invalid/a/b','https://localhost/a/b','https://user:secret@github.com/a/b')) {
     $rejected = $false
     try { Assert-GangplankTrustedRepositoryUrl -Url $url } catch { $rejected = $true }

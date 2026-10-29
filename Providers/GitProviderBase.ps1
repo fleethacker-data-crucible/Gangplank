@@ -68,7 +68,11 @@ function New-GangplankProvider {
             return [GitHubProvider]::new($BaseUrl, $Token)
         }
         default {
-            if (-not $BaseUrl) { $BaseUrl = "https://web.git.mil" }
+            if (-not $BaseUrl) {
+                $gitLabHost = Get-GangplankGitLabHost
+                if (-not $gitLabHost) { throw "GitLab host is not configured. Set GANGPLANK_GITLAB_HOST or GitLabHost in config\gangplank-config.json." }
+                $BaseUrl = "https://$gitLabHost"
+            }
             return [GitLabProvider]::new($BaseUrl, $Token)
         }
     }
