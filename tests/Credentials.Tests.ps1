@@ -98,9 +98,24 @@ try {
         Assert (-not (Test-Path -LiteralPath (Get-GangplankCredentialStorePath))) 'Empty store file should be deleted'
 
         # AI token uses the same chain.
-        $env:GENAI_TOKEN = 'genai-env-token-1'
-        Assert ((Get-GangplankAiToken) -eq 'genai-env-token-1') 'AI token should come from GENAI_TOKEN'
-        $env:GENAI_TOKEN = $null
+        $env:GANGPLANK_AI_TOKEN = 'ai-env-token-1'
+        Assert ((Get-GangplankAiToken) -eq 'ai-env-token-1') 'AI token should come from GANGPLANK_AI_TOKEN'
+        $env:GANGPLANK_AI_TOKEN = $null
+        # Legacy alias: the former AI token variable is still read.
+        $legacyEnv = @($script:GangplankLegacyAliases.TokenEnv['AI'])[0]
+        [Environment]::SetEnvironmentVariable($legacyEnv,'ai-legacy-token-1')
+        Assert ((Get-GangplankAiToken) -eq 'ai-legacy-token-1') 'AI token should still come from the legacy variable'
+        [Environment]::SetEnvironmentVariable($legacyEnv,$null)
+        # Legacy alias: the former purpose name resolves to AI for the store and the routes.
+        $legacyPurpose = @($script:GangplankLegacyAliases.Purpose.Keys | Where-Object { $script:GangplankLegacyAliases.Purpose[$_] -eq 'AI' })[0]
+        Assert ((Resolve-GangplankPurposeName $legacyPurpose -Strict) -eq 'AI') 'Legacy purpose name should resolve to AI'
+        Assert ((Resolve-GangplankPurposeName 'github' -Strict) -eq 'github') 'Strict resolution must not fold case of current names'
+        [void](Set-GangplankStoredCredential -Provider $legacyPurpose -Token 'FakeLegacyPurposeToken1')
+        Assert ((Get-GangplankStoredCredential -Provider AI) -eq 'FakeLegacyPurposeToken1') 'Token saved under the legacy purpose should be read as AI'
+        $storeText = [IO.File]::ReadAllText((Get-GangplankCredentialStorePath))
+        [IO.File]::WriteAllText((Get-GangplankCredentialStorePath),$storeText.Replace('"AI"',('"' + $legacyPurpose + '"')))
+        Assert ((Get-GangplankStoredCredential -Provider AI) -eq 'FakeLegacyPurposeToken1') 'A store entry under the legacy purpose key should be read as AI'
+        Assert (Remove-GangplankStoredCredential -Provider AI) 'Remove AI token'
         Assert ($null -eq (Get-GangplankAiToken)) 'AI token must be null when unconfigured'
 
         # Audit: actions recorded, never values.

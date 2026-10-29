@@ -2,7 +2,7 @@
 # ============================================================
 #  Core/Credentials.ps1
 #  Where provider tokens come from, in order:
-#    1. Environment (GITHUB_TOKEN, GITLAB_TOKEN, GENAI_TOKEN / GANGPLANK_AI_TOKEN)
+#    1. Environment (GITHUB_TOKEN, GITLAB_TOKEN, GANGPLANK_AI_TOKEN; legacy names in Configuration.ps1)
 #    2. Gangplank's local credential store: entered once in Integrations,
 #       sealed with Windows DPAPI (CurrentUser) under %LOCALAPPDATA%\Gangplank
 #    3. Lazarette, only when explicitly configured (Lazarette.Enabled + .Path in
@@ -11,11 +11,12 @@
 #  Token values never go to the browser, the log or the audit trail.
 # ============================================================
 
-$script:GangplankCredentialProviders = @('GitHub','GitLab','GenAi')
+$script:GangplankCredentialProviders = @('GitHub','GitLab','AI')
 $script:GangplankCredentialEnv = @{
     GitHub = @('GITHUB_TOKEN')
     GitLab = @('GITLAB_TOKEN')
-    GenAi  = @('GANGPLANK_AI_TOKEN','GENAI_TOKEN','LLM_TOKEN','OPENAI_API_KEY')   # LLM_TOKEN/OPENAI_API_KEY: shared with Halyard
+    # LLM_TOKEN/OPENAI_API_KEY: shared with Halyard; the legacy variable keeps its former precedence.
+    AI     = @('GANGPLANK_AI_TOKEN') + @($script:GangplankLegacyAliases.TokenEnv['AI']) + @('LLM_TOKEN','OPENAI_API_KEY')
 }
 $script:GangplankCredentialEntropy = [Text.Encoding]::UTF8.GetBytes('Keystone credential store v1')
 $script:GangplankCredentialStorePath = $null
@@ -67,8 +68,9 @@ function Read-GangplankCredentialFile {
         $items = @{}
         if ($raw.Items) {
             foreach ($p in $raw.Items.PSObject.Properties) {
-                if ($p.Name -in $script:GangplankCredentialProviders -and $p.Value.Protected) {
-                    $items[$p.Name] = @{ Protected = [string]$p.Value.Protected; Saved = [string]$p.Value.Saved }
+                $name = Resolve-GangplankPurposeName $p.Name -Strict   # an entry saved under a legacy name is read as the current one
+                if ($name -in $script:GangplankCredentialProviders -and $p.Value.Protected -and -not ($items.ContainsKey($name) -and $p.Name -cne $name)) {
+                    $items[$name] = @{ Protected = [string]$p.Value.Protected; Saved = [string]$p.Value.Saved }
                 }
             }
         }
@@ -102,6 +104,7 @@ function Assert-GangplankCredentialProvider {
 function Set-GangplankStoredCredential {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Provider,[Parameter(Mandatory)][string]$Token)
+    $Provider = Resolve-GangplankPurposeName $Provider -Strict
     Assert-GangplankCredentialProvider $Provider
     $value = $Token.Trim()
     if ($value.Length -lt 8 -or $value.Length -gt 512 -or $value -match '[\s\x00-\x1f\x7f]') {
@@ -119,7 +122,10 @@ function Set-GangplankStoredCredential {
 
 function Remove-GangplankStoredCredential {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Provider)
+    # -TargetHost: the host the token will be sent to (GitLab), so a legacy vault item is
+    # only used for the explicitly configured GitLab host.
+    param([Parameter(Mandatory)][string]$Provider,[string]$TargetHost)
+    $Provider = Resolve-GangplankPurposeName $Provider -Strict
     Assert-GangplankCredentialProvider $Provider
     $items = Read-GangplankCredentialFile
     if (-not $items.ContainsKey($Provider)) { return $false }
@@ -135,7 +141,10 @@ function Remove-GangplankStoredCredential {
 
 function Get-GangplankStoredCredential {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Provider)
+    # -TargetHost: the host the token will be sent to (GitLab), so a legacy vault item is
+    # only used for the explicitly configured GitLab host.
+    param([Parameter(Mandatory)][string]$Provider,[string]$TargetHost)
+    $Provider = Resolve-GangplankPurposeName $Provider -Strict
     Assert-GangplankCredentialProvider $Provider
     $items = Read-GangplankCredentialFile
     if (-not $items.ContainsKey($Provider)) { return $null }
@@ -153,6 +162,7 @@ function Get-GangplankStoredCredential {
 
 function Get-GangplankEnvironmentCredential {
     param([string]$Provider)
+    $Provider = Resolve-GangplankPurposeName $Provider -Strict
     foreach ($name in $script:GangplankCredentialEnv[$Provider]) {
         $v = [Environment]::GetEnvironmentVariable($name)
         if (-not [string]::IsNullOrWhiteSpace($v)) { return [pscustomobject]@{ Name = $name; Value = $v.Trim() } }
@@ -311,14 +321,17 @@ function Test-GangplankLazaretteConfigured { return [bool](Get-GangplankConfigur
 function Resolve-GangplankCredential {
     # Returns @{ Value; Source } or throws a coded error the UI can explain.
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Provider)
+    # -TargetHost: the host the token will be sent to (GitLab), so a legacy vault item is
+    # only used for the explicitly configured GitLab host.
+    param([Parameter(Mandatory)][string]$Provider,[string]$TargetHost)
+    $Provider = Resolve-GangplankPurposeName $Provider -Strict
     Assert-GangplankCredentialProvider $Provider
     $fromEnv = Get-GangplankEnvironmentCredential -Provider $Provider
     if ($fromEnv) { return [pscustomobject]@{ Value = $fromEnv.Value; Source = 'environment' } }
     $stored = Get-GangplankStoredCredential -Provider $Provider
     if ($stored) { return [pscustomobject]@{ Value = $stored; Source = 'stored' } }
     if (Test-GangplankLazaretteConfigured) {
-        $token = Get-GangplankLazaretteCredential -Provider $Provider
+        $token = Get-GangplankLazaretteCredential -Provider $Provider -TargetHost $TargetHost
         if ($token) { return [pscustomobject]@{ Value = $token; Source = 'lazarette' } }
     }
     $envName = $script:GangplankCredentialEnv[$Provider][0]
@@ -335,6 +348,7 @@ function Get-GangplankCredentialStatus {
         $lazaretteReady = $false
         if ($lazaretteOn) {
             $lazaretteItem = Get-GangplankLazaretteItemName -Provider $p
+            if ($lazaretteStatus.lazaretteUnlocked) { $lazaretteItem = Resolve-GangplankLazaretteItemInCatalog -Provider $p -Name $lazaretteItem -Catalog @($lazaretteStatus.itemNames) }
             $lazaretteReady = [bool]($lazaretteStatus.lazaretteUnlocked -and (@($lazaretteStatus.itemNames) -contains $lazaretteItem))
         }
         # A saved entry that cannot be unsealed (other account, damaged file) is not "ready".

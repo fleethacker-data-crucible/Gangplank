@@ -16,21 +16,21 @@ Development-stage tool, NOT an accredited enterprise deployment.
 ## Credentials
 - Order: environment variable, then Gangplank's store, then Lazarette if explicitly configured.
 - **Gangplank's store:** tokens entered in the UI are write-only. They are sealed with Windows DPAPI (current user, with Gangplank-specific entropy) in `%LOCALAPPDATA%\Gangplank\credentials.json`. Another account, or a copied file, cannot unseal them. Without DPAPI the store refuses to save.
-- **Lazarette** is opt-in (Credentials setting or `GANGPLANK_LAZARETTE_PATH`); nothing is auto-detected, and network-share paths are refused. Unlock is Lazarette's own console flow, run once at startup before the server listens, never from a browser request. Gangplank adds no CAC or passphrase handling.
+- **Lazarette** is opt-in (Credentials setting or `GANGPLANK_LAZARETTE_PATH`); nothing is auto-detected, and network-share paths are refused. Unlock is Lazarette's own console flow, run once at startup before the server listens, never from a browser request. Gangplank adds no smart card or passphrase handling.
 - **Tokens never go to** the browser, the log, the audit trail or job results. Background jobs receive the token in memory from the host's main thread.
 
 ## Network
-- Repositories: HTTPS github.com, web.git.mil and administrator-approved `GANGPLANK_GITLAB_ALLOWED_HOSTS` only.
+- Repositories: HTTPS github.com, your organization's GitLab host (`GANGPLANK_GITLAB_HOST` or `GitLabHost` in the config) and administrator-approved `GANGPLANK_GITLAB_ALLOWED_HOSTS` only.
 - All provider calls use one transport with **redirects off**. Archive downloads follow redirects themselves and send the token only to the original host (GitHub's codeload redirect gets no token).
 - API reads follow redirects on the same host only (renamed repositories); other hosts never get the token.
 - Background GET requests are retried on 429/5xx/network errors, honouring `Retry-After` (max 10 s); reads answered directly on the HTTP loop make one attempt with a 20 s timeout. Writes are never retried.
-- **AI:** the endpoint the user saves in Settings (or the environment) must be HTTPS without embedded credentials; plain http is accepted only for a model on this PC (loopback). When `GANGPLANK_AI_ALLOWED_HOSTS` is set it is a strict allowlist (plus genai.mil), and an endpoint outside it is refused before any request leaves. Discovery (`/models`, `/api/tags`, deployment or serving-endpoint lists) sends the token only to that endpoint and never follows redirects to another host. Chat sends the typed text plus project and branch name; commit-title help sends file names and statuses only. No source text is sent automatically. Administrators must approve model use for the data classification.
+- **AI:** the endpoint the user saves in Settings (or the environment) must be HTTPS without embedded credentials; plain http is accepted only for a model on this PC (loopback). When `GANGPLANK_AI_ALLOWED_HOSTS` is set it is a strict allowlist, and an endpoint outside it is refused before any request leaves. Discovery (`/models`, `/api/tags`, deployment or serving-endpoint lists) sends the token only to that endpoint and never follows redirects to another host. Chat sends the typed text plus project and branch name; commit-title help sends file names and statuses only. No source text is sent automatically. Administrators must approve model use for the data classification.
 
 ## Save safeguards
 - A download never deletes or overwrites a non-empty folder, and each workspace is pinned to a remote commit.
 - The remote head is checked before upload. GitHub updates use `force=false`; GitLab uses per-file `last_commit_id` guards.
 - Only selected changed files are uploaded, with their existing Git modes. Deletions start unselected.
-- Sentinel blocks likely secrets, CUI markings, personal identifiers, linked files, unscanned formats and files over 5 MB. It is pattern-based, not complete DLP.
+- Sentinel blocks likely secrets, data-handling markings, personal identifiers, linked files, unscanned formats and files over 5 MB. It is pattern-based, not complete DLP.
 - Every remote write and credential/setting change is appended to `Logs\audit.jsonl`, without contents or tokens.
 - A restored session is re-checked against the repository host allowlist, so a session saved in LocalDev can never send a real token to a local address.
 
@@ -39,7 +39,7 @@ Development-stage tool, NOT an accredited enterprise deployment.
 - In LocalDev, Lazarette is never imported. The synthetic provider (`-DevGitHubUrl`) is refused outside LocalDev and limited to loopback http.
 
 ## Remaining production gates
-- Real CAC unlock through Lazarette and web.git.mil end to end on the workstation (roadmap W1-W3).
+- Real smart card unlock through Lazarette and your organization's GitLab host end to end on the workstation (roadmap W1-W3).
 - The self-hosted runner should use a dedicated account without a Lazarette vault (W4).
 - No SSO, central RBAC, multi-user isolation, signed release or formal accreditation.
 - A threat model, data-handling policy and enterprise security review are still required.

@@ -3,8 +3,8 @@
 # No source code is sent automatically.
 
 function Get-GangplankAiToken {
-    # Environment (GANGPLANK_AI_TOKEN, GENAI_TOKEN), Gangplank's store, or configured Lazarette.
-    try { return (Resolve-GangplankCredential -Provider GenAi).Value } catch { return $null }
+    # Environment (GANGPLANK_AI_TOKEN, or a legacy name), Gangplank's store, or configured Lazarette.
+    try { return (Resolve-GangplankCredential -Provider AI).Value } catch { return $null }
 }
 
 function New-GangplankAiPayload {
@@ -34,8 +34,8 @@ function Invoke-GangplankAI {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Question, $Session, [switch]$CommitTitle, [string]$Token)
     $config = Get-GangplankAiConfiguration
-    $token = if ($Token) { $Token } else { Get-GangplankAiToken }
-    if (-not $token -and $config.Profile -ne 'ollama') { throw 'AI_NOT_CONFIGURED|AI is not connected. Add a GenAI token in Credentials.' }
+    # A loopback endpoint (local phoenix-lai) needs no token; remote endpoints do.
+    $token = if ($Token) { $Token } else { Get-GangplankAiRequestToken -Config $config }
     $payload = New-GangplankAiPayload -Question $Question -Session $Session -Model $config.Model -CommitTitle:$CommitTitle
     if ($config.Profile -eq 'databricks') { $payload.Remove('model'); $payload.Remove('stream') }
     $response = Invoke-GangplankHttpRequest -Method POST -Uri $config.Url -Headers (Get-GangplankAiAuthHeaders -Auth $config.Auth -Token $token) -Body ($payload | ConvertTo-Json -Depth 8 -Compress) -TimeoutSec 90
@@ -52,8 +52,8 @@ function Invoke-GangplankAIStream {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Question, $Session, [Parameter(Mandatory)][scriptblock]$OnChunk, [string]$Token)
     $config = Get-GangplankAiConfiguration
-    $token = if ($Token) { $Token } else { Get-GangplankAiToken }
-    if (-not $token -and $config.Profile -ne 'ollama') { throw 'AI_NOT_CONFIGURED|AI is not connected. Add a GenAI token in Credentials.' }
+    # A loopback endpoint (local phoenix-lai) needs no token; remote endpoints do.
+    $token = if ($Token) { $Token } else { Get-GangplankAiRequestToken -Config $config }
     if (-not $config.Streams) {
         # Gateway without streaming: one request, the whole answer as one chunk.
         & $OnChunk (Invoke-GangplankAI -Question $Question -Session $Session -Token $token)

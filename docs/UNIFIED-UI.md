@@ -16,8 +16,8 @@ Requirement words: **MUST** is required to call an app aligned. **SHOULD** is ex
 | --- | --- | --- | --- | --- | --- |
 | Scrimshaw | Scrimshaw | (new) | E-learning course authoring | New | 8775 |
 | Lazarette | Lazarette | ARC | Encrypted single-user vault | Svelte 5 + Tailwind 4 | 8765 |
-| Halyard | Halyard | Cascade | Product-owner backlog assistant | React + Tailwind, .NET engine | 8773 |
-| Halyard Ballast | Halyard-Ballast | cascade-sandbox | Halyard's write-only sandbox repo | No UI | — |
+| Halyard | Halyard | previous name | Product-owner backlog assistant | React + Tailwind, .NET engine | 8773 |
+| Halyard Ballast | Halyard-Ballast | previous name | Halyard's write-only sandbox repo | No UI | — |
 | Shellback | Shellback | Synapse | Workforce capability discovery | React 19 + Tailwind 4 | 8771 |
 | SnapShackle | SnapShackle | CutterMk, Lasso, SnipHero | Screenshot and annotation studio | Plain HTML/JS | 8768 |
 | Gangplank | Gangplank | Keystone | Git-free development workspace | Plain HTML/JS | 8769 |
@@ -83,7 +83,7 @@ Every value below passes 4.5:1 against its theme's background, so it is safe for
 | --- | --- | --- | --- |
 | Scrimshaw | `#f1e4c8` ivory | `#7d6a48` aged bone | The bone it is carved on |
 | Lazarette | `#c9a66b` brass | `#8a6b45` brass | The lock on the chest |
-| Halyard | `#3fb6a8` teal | `#0f766e` teal | Keeps Cascade's color |
+| Halyard | `#3fb6a8` teal | `#0f766e` teal | Keeps its previous color |
 | Shellback | `#5cf1cb` mint | `#0b7a62` mint | Keeps Synapse's color |
 | SnapShackle | `#ef6a5a` signal red | `#b8382b` signal red | Annotation ink |
 | Gangplank | `#c99566` teak | `#8b5a2b` teak | The plank |
@@ -175,12 +175,12 @@ Plain-HTML apps use these classes directly. Tailwind and component-framework app
 ## 8. Brand
 
 - **Emblem frame. MUST** use the Scrimshaw frame:
-  - circular ink-navy field with a thin brass ring
+  - circular ink-dark-blue field with a thin brass ring
   - compass-point rays at 3 and 9 o'clock
   - an engraved-style subject that may break out of the circle
 
   The subject is the app's own.
-- **Wordmark. MUST** be the display serif, all caps, navy on light and ivory on dark, with the compass-star divider between brass rules underneath.
+- **Wordmark. MUST** be the display serif, all caps, dark blue on light and ivory on dark, with the compass-star divider between brass rules underneath.
 - **Assets. MUST** live in `assets/brand/`:
   - `emblem.svg` or `emblem.png` (full emblem with wordmark)
   - `mark.svg` (icon only, simplified to read at 32 px)

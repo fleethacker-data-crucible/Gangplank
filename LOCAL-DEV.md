@@ -3,7 +3,7 @@
 LocalDev runs the **real** Gangplank host in test mode against a synthetic GitHub
 (`dev/fake-github.mjs`), so you can develop and try the whole flow with fictional
 repositories. Use it on a development PC only. It is not a way around Lazarette,
-CAC or any authorization on a managed system.
+smart card or any authorization on a managed system.
 
 ## Start
 
@@ -33,5 +33,5 @@ simulate a teammate pushing.
 
 - LocalDev is only ever the explicit `-LocalDev` switch; no environment variable turns it on.
 - `-DevGitHubUrl` is refused without `-LocalDev` and accepts only `http://127.0.0.1` / `localhost`.
-- Fictional data only: never real credentials, CUI, classified material or personal data.
+- Fictional data only: never real credentials, sensitive or regulated data or personal data.
 - Production is started with `Launch-Gangplank.bat`; do not ship `dev\` or `Launch-LocalDev.bat` in a release.
