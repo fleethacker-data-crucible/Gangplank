@@ -124,7 +124,7 @@ async function api(method, p, query, body) {
   };
   if (p === '/api/settings') return {
     workspaces: { root: workRoot, default: workRoot, fixed: false },
-    intelligence: { endpoint: 'https://api.genai.mil/v1', model: '', profile: 'openai', source: 'default', tokenReady: false, allowedHosts: [], problem: '' },
+    intelligence: { endpoint: 'http://127.0.0.1:1234/v1', model: 'phoenixlai', profile: 'openai', source: 'default', tokenReady: false, allowedHosts: [], problem: '' },
   };
   if (p === '/api/audit') return { entries: S.audit.slice(0, 30) };
   if (p === '/api/insights') {
