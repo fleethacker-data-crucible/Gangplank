@@ -151,11 +151,14 @@ test('connect, start, edit, Smart Save, review', async () => {
   assert.equal(branch, 'dummy-dev', 'The work branch must use the name the user typed');
   assert.equal(path.basename(folder), 'dummy-dev', 'The folder must be named after the branch');
   assert.equal(path.basename(path.dirname(folder)), 'sample', 'The folder must sit under the repository name');
-  // PowerShell canonicalizes drive/path casing on Windows; compare paths, not strings.
-  const workspaceRelative = path.relative(workRoot, folder);
+  // Windows can expose the temp folder through a short name or a junction.
+  // Resolve both existing directories before checking containment.
+  const realWorkRoot = fs.realpathSync.native(workRoot);
+  const realFolder = fs.realpathSync.native(folder);
+  const workspaceRelative = path.relative(realWorkRoot, realFolder);
   assert.ok(workspaceRelative && !path.isAbsolute(workspaceRelative) &&
     workspaceRelative !== '..' && !workspaceRelative.startsWith('..' + path.sep),
-    'Workspaces must go to the workspace folder: ' + folder);
+    `Workspaces must go to the workspace folder: ${realFolder} (root ${realWorkRoot})`);
   const dup = await job(h, '/api/start', { name: 'dummy-dev' });
   assert.equal(dup.status, 500, 'Starting a branch that already exists must fail');
   assert.match(String(dup.error), /already exists/, 'Duplicate branch error must say so: ' + dup.error);
