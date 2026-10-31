@@ -57,6 +57,14 @@ function Invoke-GangplankJobReview {
     return @{ Url = $url; Title = $title }
 }
 
+function Invoke-GangplankJobAiExplain {
+    param($Shared,[hashtable]$Arguments)
+    $session = New-GangplankSessionFromSnapshot -Snapshot $Arguments.Session -Token $Arguments.Token
+    Set-GangplankJobProgress $Shared 'Asking the assistant'
+    $answer = Invoke-GangplankAiExplain -Session $session -Path ([string]$Arguments.Path) -Consent ([string]$Arguments.Consent) -Token $Arguments.AiToken
+    return [ordered]@{ answer = $answer }
+}
+
 function Invoke-GangplankJobCommitTitle {
     param($Shared,[hashtable]$Arguments)
     Set-GangplankJobProgress $Shared 'Asking the AI gateway for a title'
