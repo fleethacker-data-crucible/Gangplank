@@ -10,7 +10,10 @@
 // prints one JSON line {"url":"http://127.0.0.1:PORT","token":"..."} once listening (127.0.0.1 only).
 //
 // Control endpoints (fake only, no auth): POST /__fake/reset, GET /__fake/state, POST /__fake/fail,
-// POST /__fake/advance, DELETE /__fake/calls. Zero dependencies; Node 22+.
+// POST /__fake/advance, POST /__fake/checks, POST /__fake/pull, DELETE /__fake/calls. Zero dependencies; Node 22+.
+//
+// Reviews: pulls (single GET with mergeable / mergeable_state), pulls/:n/files, pulls/:n/merge (merge commits
+// only, with the sha guard and GitHub's 405 / 409 / 422 refusals), issue comments, and check-runs / status for a ref.
 import { createServer } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 import { deflateRawSync } from 'node:zlib';
@@ -95,6 +98,8 @@ class Repo {
     this.refs = new Map(); // 'heads/main' -> sha
     this.pulls = [];
     this.nextNumber = 1;
+    this.checks = new Map(); // head sha -> { runs: [], statuses: [] }
+    this.nextCommentId = 1000;
   }
   get fullName() { return `${this.owner}/${this.name}`; }
   get isEmpty() { return this.refs.size === 0; }
@@ -298,7 +303,14 @@ function seed(store) {
   sample.setRef('feature/demo', c3);
   sample.setRef('release/2026.10', c1);
   for (let i = 1; i <= store.options.extraBranches; i++) sample.setRef(`bulk/branch-${String(i).padStart(4, '0')}`, c2);
-  store.addPull(sample, { title: 'Demo feature', body: 'Extends the guide and adds a demo script.', head: 'feature/demo', base: 'main', user: contributor.login });
+  const demoPull = store.addPull(sample, { title: 'Demo feature', body: 'Extends the guide and adds a demo script.', head: 'feature/demo', base: 'main', user: contributor.login });
+  // Conversation and checks on the seed review, so the Reviews tab has something to show. Fixed times:
+  // seed commit SHAs must not depend on how many comments exist.
+  store.addComment(sample, demoPull, TEAMMATE.login, 'Looks good to me. One question: should the demo script print the date as well?', iso(SEED_EPOCH + 45));
+  sample.checks.set(c3, {
+    runs: [{ name: 'build', status: 'completed', conclusion: 'success' }, { name: 'unit-tests', status: 'completed', conclusion: 'success' }],
+    statuses: [{ context: 'ci/lint', state: 'success' }],
+  });
   const closed = store.addPull(sample, { title: 'Old release notes', body: '', head: 'release/2026.10', base: 'main', user: contributor.login });
   closed.state = 'closed';
 
@@ -339,22 +351,37 @@ function shapes(store, repo) {
     const sha = repo.refs.get(name);
     return { ref: `refs/${name}`, node_id: `REF_${Buffer.from(name).toString('base64url')}`, url: `${api}/git/refs/${name}`, object: { sha, type: 'commit', url: `${api}/git/commits/${sha}` } };
   };
-  const pull = (pr) => {
+  // `detail` adds what only the single-pull endpoint returns (like GitHub, the list omits mergeability).
+  const pull = (pr, detail = false) => {
     const side = (name) => ({ label: `${repo.owner}:${name}`, ref: name, sha: repo.refs.get(`heads/${name}`) ?? null, repo: { full_name: repo.fullName } });
-    return {
-      id: 500000 + pr.number, number: pr.number, state: pr.state, title: pr.title, body: pr.body, draft: false,
+    const out = {
+      id: 500000 + pr.number, number: pr.number, state: pr.state, title: pr.title, body: pr.body, draft: pr.draft,
       url: `${api}/pulls/${pr.number}`, html_url: `${web}/pull/${pr.number}`, user: { login: pr.user },
       head: side(pr.head), base: side(pr.base), created_at: pr.created_at, updated_at: pr.updated_at,
-      closed_at: pr.state === 'closed' ? pr.updated_at : null, merged_at: null,
+      closed_at: pr.state === 'closed' ? pr.updated_at : null, merged_at: pr.merged_at, merge_commit_sha: pr.merge_commit_sha,
     };
+    if (detail) {
+      const ms = pullMergeState(repo, pr);
+      Object.assign(out, { merged: pr.merged, mergeable: ms.mergeable, mergeable_state: ms.state, comments: pr.comments.length });
+    }
+    return out;
   };
+  const comment = (c) => ({
+    id: c.id, node_id: `IC_${c.id}`, url: `${api}/issues/comments/${c.id}`, html_url: `${web}/pull/${c.pull}#issuecomment-${c.id}`,
+    body: c.body, user: { login: c.user }, created_at: c.created_at, updated_at: c.created_at, author_association: 'MEMBER',
+  });
+  const run = (sha, r, i) => ({
+    id: 700000 + i, name: r.name, head_sha: sha, status: r.status ?? 'completed', conclusion: r.status && r.status !== 'completed' ? null : (r.conclusion ?? 'success'),
+    html_url: `${web}/runs/${700000 + i}`, started_at: r.started_at ?? null, completed_at: r.completed_at ?? null, app: { slug: 'fake-ci' },
+  });
+  const status = (r, i) => ({ id: 800000 + i, state: r.state, context: r.context, description: r.description ?? null, target_url: r.target_url ?? null, created_at: r.created_at ?? null });
   const repoJson = () => ({
     id: Number.parseInt(sha1(repo.fullName).slice(0, 8), 16), node_id: `R_${repo.name}`, name: repo.name, full_name: repo.fullName,
     owner: { login: repo.owner, type: 'Organization' }, private: repo.visibility !== 'public', visibility: repo.visibility,
     description: repo.description, html_url: web, url: api, default_branch: repo.defaultBranch, size: repo.objects.size,
     permissions: { admin: false, maintain: false, push: true, triage: true, pull: true }, archived: false, disabled: false, fork: false,
   });
-  return { gitCommit, commit, ref, pull, repoJson, api, web };
+  return { gitCommit, commit, ref, pull, comment, run, status, repoJson, api, web };
 }
 
 function paginate(urlObj, items, defaultPer = 30) {
@@ -480,9 +507,36 @@ class Store {
   }
   addPull(repo, { title, body, head, base, user }) {
     const at = this.tick();
-    const pr = { number: repo.nextNumber++, state: 'open', title, body: body ?? '', head, base, user, created_at: at, updated_at: at };
+    const pr = {
+      number: repo.nextNumber++, state: 'open', title, body: body ?? '', head, base, user, created_at: at, updated_at: at,
+      draft: false, blocked: false, merged: false, merged_at: null, merge_commit_sha: null, comments: [],
+    };
     repo.pulls.push(pr);
     return pr;
+  }
+  addComment(repo, pr, user, body, at) {
+    const c = { id: repo.nextCommentId++, pull: pr.number, user, body: String(body), created_at: at ?? this.tick() };
+    pr.comments.push(c);
+    return c;
+  }
+  // Control: replace the checks reported for a commit (by sha, or the tip of a branch).
+  setChecks({ repo: name = 'gangplank-demo/sample', sha, branch, runs = [], statuses = [] } = {}) {
+    const repo = this.repo(name);
+    if (!repo) throw notFound();
+    const target = sha ? repo.resolveCommit(sha) : repo.resolveCommit(branch ?? repo.defaultBranch);
+    if (!target) throw new HttpError(404, 'Commit not found');
+    const entry = { runs: runs.map((r) => ({ ...r })), statuses: statuses.map((s) => ({ ...s })) };
+    repo.checks.set(target, entry);
+    return { repo: repo.fullName, sha: target, ...entry };
+  }
+  // Control: mark a review as a draft, or as blocked by a branch rule (e.g. a required approval).
+  setPull({ repo: name = 'gangplank-demo/sample', number, draft, blocked } = {}) {
+    const repo = this.repo(name);
+    const pr = repo?.pulls.find((p) => p.number === Number(number));
+    if (!pr) throw notFound();
+    if (draft !== undefined) pr.draft = Boolean(draft);
+    if (blocked !== undefined) pr.blocked = Boolean(blocked);
+    return { repo: repo.fullName, number: pr.number, draft: pr.draft, blocked: pr.blocked };
   }
   repo(fullName) { return this.repos.get(String(fullName).toLowerCase()) ?? null; }
 
@@ -526,7 +580,7 @@ class Store {
       repos[r.fullName] = {
         default_branch: r.defaultBranch, visibility: r.visibility,
         branches: Object.fromEntries([...r.refs].filter(([k]) => k.startsWith('heads/')).map(([k, v]) => [k.slice(6), v])),
-        pulls: r.pulls.map((p) => ({ number: p.number, state: p.state, title: p.title, head: p.head, base: p.base })),
+        pulls: r.pulls.map((p) => ({ number: p.number, state: p.state, title: p.title, head: p.head, base: p.base, draft: p.draft, merged: p.merged, merge_commit_sha: p.merge_commit_sha, comments: p.comments.map((c) => ({ id: c.id, user: c.user, body: c.body })) })),
       };
     }
     const codeload = this.calls.filter((c) => c.kind === 'codeload');
@@ -612,6 +666,8 @@ async function handleControl(store, req, res, path, body) {
   if (req.method === 'DELETE' && path === '/__fake/calls') { store.calls = []; return sendJson(res, 200, { ok: true }); }
   if (req.method === 'POST' && path === '/__fake/fail') return sendJson(res, 201, store.addFault(body));
   if (req.method === 'POST' && path === '/__fake/advance') return sendJson(res, 201, store.advance(body));
+  if (req.method === 'POST' && path === '/__fake/checks') return sendJson(res, 201, store.setChecks(body));
+  if (req.method === 'POST' && path === '/__fake/pull') return sendJson(res, 201, store.setPull(body));
   throw notFound();
 }
 
@@ -762,6 +818,22 @@ function handleRepo(store, req, res, urlObj, repo, rest, body) {
     const { items, headers } = paginate(urlObj, list);
     return sendJson(res, 200, items.map(S.commit), headers);
   }
+  if ((m = /^\/commits\/(.+)\/(check-runs|status)$/.exec(rest)) && method === 'GET') {
+    if (repo.isEmpty) throw emptyRepo();
+    const ref = decodeTail(m[1]);
+    const sha = repo.resolveCommit(ref);
+    if (!sha) throw invalid(`No commit found for SHA: ${ref}`);
+    const entry = repo.checks.get(sha) ?? { runs: [], statuses: [] };
+    if (m[2] === 'check-runs') {
+      const rows = entry.runs.map((r, i) => S.run(sha, r, i));
+      const { items, headers } = paginate(urlObj, rows);
+      return sendJson(res, 200, { total_count: rows.length, check_runs: items }, headers);
+    }
+    const statuses = entry.statuses.map((s, i) => S.status(s, i));
+    // GitHub's combined state: failure beats pending beats success; no statuses at all reads as pending.
+    const state = statuses.some((s) => s.state === 'failure' || s.state === 'error') ? 'failure' : (!statuses.length || statuses.some((s) => s.state === 'pending')) ? 'pending' : 'success';
+    return sendJson(res, 200, { state, sha, total_count: statuses.length, statuses, repository: { full_name: repo.fullName } });
+  }
   if ((m = /^\/commits\/(.+)$/.exec(rest)) && method === 'GET') {
     if (repo.isEmpty) throw emptyRepo();
     const sha = repo.resolveCommit(decodeTail(m[1]));
@@ -801,12 +873,54 @@ function handleRepo(store, req, res, urlObj, repo, rest, body) {
       .filter((p) => !q.get('base') || p.base === q.get('base'))
       .sort((a, b) => b.number - a.number);
     const { items, headers } = paginate(urlObj, rows);
-    return sendJson(res, 200, items.map(S.pull), headers);
+    return sendJson(res, 200, items.map((p) => S.pull(p)), headers);
   }
   if ((m = /^\/pulls\/(\d+)$/.exec(rest)) && method === 'GET') {
     const pr = repo.pulls.find((p) => p.number === Number(m[1]));
     if (!pr) throw notFound();
-    return sendJson(res, 200, S.pull(pr));
+    return sendJson(res, 200, S.pull(pr, true));
+  }
+  if ((m = /^\/pulls\/(\d+)\/files$/.exec(rest)) && method === 'GET') {
+    const pr = repo.pulls.find((p) => p.number === Number(m[1]));
+    if (!pr) throw notFound();
+    const headSha = repo.refs.get(`heads/${pr.head}`);
+    const baseSha = repo.refs.get(`heads/${pr.base}`);
+    if (!headSha || !baseSha) throw notFound();
+    const mb = mergeBaseOf(repo, baseSha, headSha);
+    const files = diffFiles(repo, mb ? repo.get(mb, 'commit').tree : null, repo.get(headSha, 'commit').tree)
+      .map((f) => ({ ...f, blob_url: `${S.web}/blob/${headSha}/${f.filename}`, raw_url: `${S.web}/raw/${headSha}/${f.filename}` }));
+    const { items, headers } = paginate(urlObj, files);
+    return sendJson(res, 200, items, headers);
+  }
+  if ((m = /^\/pulls\/(\d+)\/merge$/.exec(rest)) && method === 'PUT') {
+    const pr = repo.pulls.find((p) => p.number === Number(m[1]));
+    if (!pr) throw notFound();
+    const mergeMethod = body.merge_method ?? 'merge';
+    if (!['merge', 'squash', 'rebase'].includes(mergeMethod)) throw invalid('Validation Failed', [{ resource: 'PullRequest', field: 'merge_method', code: 'invalid' }]);
+    if (body.sha !== undefined && typeof body.sha !== 'string') throw invalid('Invalid request.\n\nFor \'properties/sha\', nil is not a string.');
+    const headSha = repo.refs.get(`heads/${pr.head}`);
+    // The guard: the caller merges the version it looked at, or nothing.
+    if (body.sha !== undefined && body.sha !== headSha) throw new HttpError(409, 'Head branch was modified. Review and try the merge again.');
+    if (pr.state !== 'open') throw new HttpError(405, 'Pull Request is not mergeable');
+    if (mergeMethod !== 'merge') throw new HttpError(405, `${mergeMethod === 'squash' ? 'Squash merges' : 'Rebase merges'} are not allowed on this repository.`);
+    const ms = pullMergeState(repo, pr);
+    if (ms.state === 'draft') throw new HttpError(405, 'Draft pull requests are not mergeable');
+    if (ms.state === 'dirty') throw new HttpError(405, 'Pull Request is not mergeable');
+    if (ms.state === 'blocked') throw new HttpError(405, 'At least 1 approving review is required by reviewers with write access.');
+    const sha = mergePull(store, repo, pr, body);
+    return sendJson(res, 200, { sha, merged: true, message: 'Pull Request successfully merged' });
+  }
+  if ((m = /^\/issues\/(\d+)\/comments$/.exec(rest)) && (method === 'GET' || method === 'POST')) {
+    const pr = repo.pulls.find((p) => p.number === Number(m[1]));
+    if (!pr) throw notFound();
+    if (method === 'GET') {
+      const { items, headers } = paginate(urlObj, pr.comments);
+      return sendJson(res, 200, items.map((c) => S.comment(c)), headers);
+    }
+    if (typeof body.body !== 'string' || !body.body.trim()) throw invalid('Validation Failed', [{ resource: 'IssueComment', code: 'missing_field', field: 'body' }]);
+    const made = store.addComment(repo, pr, API_USER.login, body.body);
+    pr.updated_at = made.created_at;
+    return sendJson(res, 201, S.comment(made), { Location: `${S.api}/issues/comments/${made.id}` });
   }
   if (rest === '/pulls' && method === 'POST') {
     const head = String(body.head ?? '').replace(new RegExp(`^${repo.owner}:`, 'i'), '');
@@ -879,6 +993,65 @@ function handleRepo(store, req, res, urlObj, repo, rest, body) {
   }
 
   throw notFound();
+}
+
+// ---------------------------------------------------------------- merging
+
+function mergeBaseOf(repo, a, b) {
+  const aAnc = repo.ancestors(a);
+  const date = (s) => Date.parse(repo.get(s, 'commit').committer.date);
+  return [...repo.ancestors(b)].filter((s) => aAnc.has(s)).sort((x, y) => date(y) - date(x))[0] ?? null;
+}
+
+// A conflict is a path changed on both sides to different contents (a file-level three-way check).
+function hasConflicts(repo, baseSha, headSha) {
+  const mb = mergeBaseOf(repo, baseSha, headSha);
+  const mbTree = mb ? repo.get(mb, 'commit').tree : null;
+  const baseTree = repo.get(baseSha, 'commit').tree;
+  const headTree = repo.get(headSha, 'commit').tree;
+  const ours = new Set(diffFiles(repo, mbTree, baseTree).map((f) => f.filename));
+  const baseFiles = repo.files(baseTree);
+  const headFiles = repo.files(headTree);
+  return diffFiles(repo, mbTree, headTree).some((f) => ours.has(f.filename) && baseFiles.get(f.filename)?.sha !== headFiles.get(f.filename)?.sha);
+}
+
+// mergeable / mergeable_state as GitHub reports them for an open pull request.
+function pullMergeState(repo, pr) {
+  if (pr.state !== 'open') return { mergeable: null, state: 'unknown' };
+  const headSha = repo.refs.get(`heads/${pr.head}`);
+  const baseSha = repo.refs.get(`heads/${pr.base}`);
+  if (!headSha || !baseSha) return { mergeable: null, state: 'unknown' };
+  if (pr.draft) return { mergeable: true, state: 'draft' };
+  if (hasConflicts(repo, baseSha, headSha)) return { mergeable: false, state: 'dirty' };
+  if (pr.blocked) return { mergeable: true, state: 'blocked' };
+  const entry = repo.checks.get(headSha);
+  const failing = (entry?.runs ?? []).some((r) => (r.status ?? 'completed') === 'completed' && !['success', 'neutral', 'skipped'].includes(r.conclusion ?? 'success'))
+    || (entry?.statuses ?? []).some((s) => s.state === 'failure' || s.state === 'error');
+  return { mergeable: true, state: failing ? 'unstable' : 'clean' };
+}
+
+// A real merge commit (parents: base, head) whose tree applies the head's changes since the merge base.
+function mergePull(store, repo, pr, body) {
+  const headSha = repo.refs.get(`heads/${pr.head}`);
+  const baseSha = repo.refs.get(`heads/${pr.base}`);
+  const mb = mergeBaseOf(repo, baseSha, headSha);
+  const mbTree = mb ? repo.get(mb, 'commit').tree : null;
+  const headTree = repo.get(headSha, 'commit').tree;
+  const headFiles = repo.files(headTree);
+  const items = diffFiles(repo, mbTree, headTree).map((f) => (f.status === 'removed'
+    ? { path: f.filename, mode: '100644', type: 'blob', sha: null }
+    : { path: f.filename, mode: headFiles.get(f.filename).mode, type: 'blob', sha: f.sha }));
+  const tree = repo.buildTree(repo.get(baseSha, 'commit').tree, items);
+  const title = typeof body.commit_title === 'string' && body.commit_title ? body.commit_title : `Merge pull request #${pr.number} from ${repo.owner}/${pr.head}`;
+  const extra = typeof body.commit_message === 'string' ? body.commit_message : pr.title;
+  const sha = repo.putCommit({ tree, parents: [baseSha, headSha], message: extra ? `${title}\n\n${extra}` : title, author: store.signature(API_USER) });
+  repo.setRef(pr.base, sha);
+  pr.state = 'closed';
+  pr.merged = true;
+  pr.merged_at = store.tick();
+  pr.merge_commit_sha = sha;
+  pr.updated_at = pr.merged_at;
+  return sha;
 }
 
 function diffFiles(repo, fromTree, toTree) {
