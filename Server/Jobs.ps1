@@ -45,6 +45,7 @@ function Start-GangplankJob {
             Initialize-GangplankLogging -LogDir $LogDir -Level INFO
             Initialize-GangplankConfig -ConfigPath $ConfigPath
             if ($Arguments.ContainsKey('DevGitHubUrl') -and $Arguments.DevGitHubUrl) { Set-GangplankDevProvider -GitHubUrl $Arguments.DevGitHubUrl }
+            if ($Arguments.ContainsKey('DevGitLabUrl') -and $Arguments.DevGitLabUrl) { Set-GangplankDevProvider -GitLabUrl $Arguments.DevGitLabUrl }
             & $Function -Shared $Shared -Arguments $Arguments
         } $LogDir $ConfigPath $Function $Shared $Arguments
     }
