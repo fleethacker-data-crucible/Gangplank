@@ -57,7 +57,7 @@ jobs:
         run: |
           $failed = $false
           # Each suite in its own process: Lazarette's engine and the module load once per process.
-          foreach ($t in @('SmartSave','Workspace','LegacyRetired','GitLabProvider','ProviderSafety','Credentials','Intelligence','Sentinel','RepositoryInsights','RepositoryIntegrity','LazaretteIntegration','LazaretteCoreOnly','LazaretteContract','LazaretteReal','LazaretteNames','WebHost')) {
+          foreach ($t in @('SmartSave','Workspace','LegacyRetired','FileDiff','GitLabProvider','ProviderSafety','Credentials','Intelligence','Sentinel','RepositoryInsights','RepositoryIntegrity','LazaretteIntegration','LazaretteCoreOnly','LazaretteContract','LazaretteReal','LazaretteNames','WebHost')) {
             Write-Host "== $t"
             .\.github\ci-run.ps1 -Title "$t tests" -Command "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\$t.Tests.ps1"
             if ($LASTEXITCODE -ne 0) { $failed = $true }
@@ -79,8 +79,17 @@ jobs:
       - name: Synthetic GitHub server
         shell: powershell
         run: |
-          .\.github\ci-run.ps1 -Title 'Synthetic GitHub' -Command 'node --test dev/fake-github.test.mjs dev/fake-gitlab.test.mjs'
+          .\.github\ci-run.ps1 -Title 'Synthetic GitHub' -Command 'node --test dev/fake-github.test.mjs dev/fake-gitlab.test.mjs tests/DiffWorker.test.mjs'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: UI client (TypeScript run by Node type stripping, against the real host)
+        shell: powershell
+        env:
+          # The runner is a real user account: keep its Gangplank credentials and session out of reach.
+          LOCALAPPDATA: ${{ runner.temp }}\gangplank-appdata
+          GANGPLANK_PWSH: powershell.exe
+        run: |
+          .\.github\ci-run.ps1 -Title 'UI client' -Command 'node --test ui-src/tests/api.test.ts ui-src/tests/host.contract.test.ts'
+          exit $LASTEXITCODE
       - name: Real host under Windows PowerShell 5.1 against the synthetic GitHub
         shell: powershell
         env:
