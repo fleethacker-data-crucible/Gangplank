@@ -120,6 +120,14 @@ class GangplankFakeAdoptGitHub : GitHubProvider {
     $stranger = Join-Path $temp 'stranger'
     Write-File $stranger 'holiday-photos.txt' 'not the project'
     Assert ((Get-Code { Add-GangplankExistingFolder -Session (New-Session) -Folder $stranger -Branch 'work' }) -eq 'BAD_REQUEST') 'A folder with no matching file is refused'
+    # Publishing is the same folder with the matching rule waived: every file is new, the project's files are "missing".
+    $r = Add-GangplankExistingFolder -Session (New-Session) -Folder $stranger -Branch 'work' -Unrelated
+    Assert ($r.Same -eq 0 -and $r.New -eq 1 -and $r.Missing -eq 3) ("Unrelated folder: same=$($r.Same) new=$($r.New) missing=$($r.Missing)")
+    $withGit = Join-Path $temp 'publish-with-git'
+    Write-File $withGit 'lesson.md' 'a lesson'
+    Write-File $withGit '.git/HEAD' "ref: refs/heads/somewhere-else`n"
+    $r = Add-GangplankExistingFolder -Session (New-Session) -Folder $withGit -Branch 'work' -Unrelated
+    Assert ($r.Source -eq 'plain folder' -and $r.Branch -eq 'work') 'With -Unrelated a .git folder is not read as the branch to use'
     Assert ((Get-Code { Add-GangplankExistingFolder -Session (New-Session) -Folder $plain -Branch 'ghost' }) -eq 'NOT_FOUND') 'A branch that is not online is refused'
     Assert ((Get-Code { Add-GangplankExistingFolder -Session (New-Session) -Folder $plain -Branch '../x' }) -eq 'BAD_REQUEST') 'A bad branch name is refused'
     Assert ((Get-Code { Add-GangplankExistingFolder -Session (New-Session) -Folder '' }) -eq 'BAD_REQUEST') 'An empty folder is refused'
