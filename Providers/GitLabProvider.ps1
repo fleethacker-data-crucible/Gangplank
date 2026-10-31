@@ -61,17 +61,11 @@ class GitLabProvider : GitProviderBase {
     }
 
     [string[]] GetBranches([string]$projectPath) {
-        $all = @()
-        $enc = $this.EncodePath($projectPath)
-        $page = 1
         # Errors propagate: a silently partial branch list looks like real data.
-        do {
-            $batch = $this.InvokeApi("GET", "projects/$enc/repository/branches?per_page=100&page=$page")
-            if (-not $batch) { break }
-            $all += @($batch | ForEach-Object { $_.name })
-            $page++
-        } while (@($batch).Count -eq 100 -and $page -le 50)
-        return $all
+        $enc = $this.EncodePath($projectPath)
+        $uri = "$($this.ApiRoot)/projects/$enc/repository/branches?per_page=100"
+        $batch = Invoke-GangplankPagedGet -Provider 'GitLab' -Uri $uri -Headers $this.GetAuthHeaders('GET')
+        return @($batch | ForEach-Object { $_.name })
     }
 
     [void] DownloadArchive([string]$projectPath, [string]$ref, [string]$outZip) {
