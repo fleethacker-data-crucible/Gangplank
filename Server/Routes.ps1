@@ -380,6 +380,12 @@ function Invoke-GangplankRouteCore {
         }
         return
     }
+    if ($m -eq 'GET' -and $p -eq '/api/diff') {
+        # Read-only: the text of one pending change, before (baseline commit) and after (local file).
+        $session = Get-GangplankLiveSession -Required
+        Send-GangplankJson -Object (Get-GangplankFileDiff -Session $session -Path ([string](Get-GangplankQueryValue $Req.Query 'path')))
+        return
+    }
     if ($m -eq 'POST' -and $p -eq '/api/save') {
         $session = Get-GangplankLiveSession -Required
         $paths = @([string[]]@(Get-GangplankBodyValue $Req 'paths') | Where-Object { $_ })
