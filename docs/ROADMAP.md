@@ -1,7 +1,7 @@
 # Gangplank roadmap
 
 Browser-first Git workspace for people who don't use Git. Built to the shared
-[`TechStack`](../TechStack) used by Lazarette, Halyard and Shellback. Last updated 2026-10-24 (host refactor).
+[`TechStack`](../TechStack) used by Lazarette, Halyard and Shellback. Last updated 2026-10-31 (draft PRs listed below).
 Supersedes `docs/ENTERPRISE-ROADMAP.md`.
 
 **Where work happens.** Most development is done off-workstation (cloud sessions and
@@ -73,6 +73,32 @@ or a release zip is required.
 | W3 | Host under application control | Confirm the launcher and (after item 1) the TcpListener host run on the managed workstation with Edge |
 | W4 | Runner account | The self-hosted runner should run as a dedicated account with no Lazarette vault. Gangplank no longer auto-detects Lazarette, so tests can no longer pick it up, but the account still holds it |
 | W5 | Signed release | Code-sign scripts if application control requires it |
+
+## Built, waiting to merge (draft pull requests, 2026-10-31)
+
+Each row has code and tests on its branch and is not on `main` yet, so it stays out of the Done table
+until its pull request merges. Rows already in the tables above that these cover: 4b, 6b, 10, 12, 13, 15, 16b, 17.
+
+| # | Item | Where | Tested by |
+|---|---|---|---|
+| 4b, 6b | Paging through `Link` / `X-Next-Page`; a Cancel bar for running jobs | PR #41 | `tests/Paging.Tests.ps1`, `tests/BrowserSyntax.Tests.cjs` |
+| 10 | Diff viewer with the line diff in a Web Worker | PR #40 | `tests/DiffWorker.test.mjs`, `tests/FileDiff.Tests.ps1` |
+| 13 | Reviews end to end: detail, checks, comments, guarded merge | PR #42 | `tests/Reviews.Tests.ps1`, `dev/fake-github.test.mjs` |
+| 12 | Get latest: apply online changes, ask on overlaps | branch `feature/get-latest` | `tests/GetLatest.Tests.ps1`, host e2e |
+| 15 | Revert one file to the downloaded version | branch `feature/revert-file` | `tests/Revert.Tests.ps1`, host e2e |
+| 16b | Use a git clone or a plain folder as the workspace | branch `feature/adopt-folder` | `tests/Adopt.Tests.ps1`, host e2e |
+| 17 | Retire the legacy bulk upload (the classic text menu stays as the CLI) | branch `feature/retire-legacy-push` | `tests/LegacyRetired.Tests.ps1` |
+| new | Publish a plain folder to a new work branch (stacked on 16b) | branch `feature/publish-folder` | `tests/Adopt.Tests.ps1`, host e2e |
+| new | Spoken status with the browser's local voices (opt-in) | branch `feature/spoken-status` | `tests/BrowserSyntax.Tests.cjs` |
+| new | AI defaults to the Fleet router; Lazarette bridge reference and vault-flow test | PR #43 | `tests/Intelligence.Tests.ps1`, `tests/LazaretteVaultFlow.Tests.ps1` |
+
+Already true on `main`: 5b (synthetic GitLab, #39) and 11 (the Playwright browser test runs in CI on the
+Windows runner with Edge: run 41224330942 ran it, 1 test, 0 skipped). Both rows above still read as open and
+are updated when the pull requests above merge.
+
+**Not started:** 8 and 9 (the TypeScript UI rebuild), 14 (Sentinel review flow), 16 (AI with explicit
+consent), 16c (shared AI module), and Fleet UI v0.2. **Needs the workstation or a live service:** W1 to W5,
+a live Fairlead or TalkForge (spoken status through the router is not wired), and a smart card vault.
 
 ## Shared with sibling products
 
