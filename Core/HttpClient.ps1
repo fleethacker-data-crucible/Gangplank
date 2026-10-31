@@ -189,3 +189,80 @@ function Invoke-GangplankDownload {
     }
     throw "NETWORK|$Provider download redirected too many times."
 }
+
+function Set-GangplankPageQuery {
+    # The same URI with its page parameter set to $Page (other query values kept).
+    param([Parameter(Mandatory)][string]$Uri,[Parameter(Mandatory)][string]$Page)
+    $u = [uri]$Uri
+    $kept = @($u.Query.TrimStart('?') -split '&' | Where-Object { $_ -and $_ -notmatch '^page=' })
+    $query = @($kept + ('page=' + $Page)) -join '&'
+    return ('{0}://{1}{2}?{3}' -f $u.Scheme, $u.Authority, $u.AbsolutePath, $query)
+}
+
+function Get-GangplankNextPageUri {
+    # The next page of a list response: the RFC 8288 Link header (GitHub, GitLab),
+    # else GitLab's X-Next-Page. Known = the response said how paging ends, so a
+    # full page with neither header is not guessed at.
+    [CmdletBinding()]
+    param([hashtable]$Headers,[Parameter(Mandatory)][string]$CurrentUri)
+    $next = $null
+    $known = $false
+    $link = [string]$Headers['link']
+    if ($link) {
+        $known = $true
+        foreach ($entry in ($link -split ',(?=\s*<)')) {
+            if ($entry -notmatch '<([^>]*)>') { continue }
+            $target = $Matches[1]
+            if ($entry -notmatch 'rel\s*=\s*"?([^";]*)"?') { continue }
+            $rels = @($Matches[1].Trim() -split '\s+')
+            if ($rels -contains 'next') {
+                $next = [uri]::new([uri]$CurrentUri, $target).AbsoluteUri
+                break
+            }
+        }
+    }
+    elseif ($Headers.ContainsKey('x-next-page')) {
+        $known = $true
+        $n = [string]$Headers['x-next-page']
+        if ($n -match '^\d+$') { $next = Set-GangplankPageQuery -Uri $CurrentUri -Page $n }
+    }
+    return [pscustomobject]@{ Known = $known; Uri = $next }
+}
+
+function Invoke-GangplankPagedGet {
+    # GET a list endpoint and follow its pages. Pages follow the Link / X-Next-Page
+    # headers; a response with neither (a proxy may strip them) is followed by a
+    # page=N request while it is full. The token only goes to the host of the first
+    # request: a paging link to another host is refused. After MaxPages the list
+    # stops with a warning rather than running on.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Provider,
+        [Parameter(Mandatory)][string]$Uri,
+        [hashtable]$Headers = @{},
+        [int]$PerPage = 100,
+        [int]$MaxPages = 50
+    )
+    $origin = [uri]$Uri
+    $items = New-Object System.Collections.Generic.List[object]
+    $current = $Uri
+    for ($page = 1; $page -le $MaxPages; $page++) {
+        $response = Invoke-GangplankHttpRequest -Method GET -Uri $current -Headers $Headers
+        $batch = @(ConvertFrom-GangplankApiResponse -Provider $Provider -Method GET -Endpoint ([uri]$current).AbsolutePath -Response $response | Where-Object { $null -ne $_ })
+        foreach ($b in $batch) { [void]$items.Add($b) }
+        if ($batch.Count -eq 0) { break }
+        $paging = Get-GangplankNextPageUri -Headers $response.Headers -CurrentUri $current
+        $nextUri = $paging.Uri
+        if (-not $paging.Known -and $batch.Count -ge $PerPage) {
+            $nextUri = Set-GangplankPageQuery -Uri $current -Page ([string]($page + 1))
+        }
+        if (-not $nextUri) { break }
+        $n = [uri]$nextUri
+        if ($n.Scheme -ne $origin.Scheme -or $n.Authority -ne $origin.Authority) {
+            throw "NETWORK|$Provider paging link points to another host; the list was not followed."
+        }
+        $current = $nextUri
+        if ($page -eq $MaxPages) { Write-GangplankLog -Level WARN -Message "$Provider list stopped after $MaxPages pages: $(Get-GangplankSafeUrl $Uri)" }
+    }
+    return @($items.ToArray())
+}
