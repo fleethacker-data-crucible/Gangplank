@@ -79,7 +79,7 @@ jobs:
       - name: Synthetic GitHub server
         shell: powershell
         run: |
-          .\.github\ci-run.ps1 -Title 'Synthetic GitHub' -Command 'node --test dev/fake-github.test.mjs dev/fake-gitlab.test.mjs'
+          .\.github\ci-run.ps1 -Title 'Synthetic GitHub' -Command 'node --test dev/fake-github.test.mjs dev/fake-gitlab.test.mjs tests/DiffWorker.test.mjs'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Real host under Windows PowerShell 5.1 against the synthetic GitHub
         shell: powershell
