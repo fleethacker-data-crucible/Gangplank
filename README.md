@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/emblem-dark.png">
-    <img src="assets/brand/emblem-light.png" width="280" alt="Gangplank emblem: a roped gangplank leading up to a ship's open door, inside a brass compass ring">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/emblem-dark-transparent.png">
+    <img src="assets/brand/emblem-light-transparent.png" width="280" alt="Gangplank emblem: a roped gangplank leading up to a ship's open door, inside a brass compass ring">
   </picture>
 </p>
 
