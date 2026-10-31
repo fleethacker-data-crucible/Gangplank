@@ -394,6 +394,16 @@ function Invoke-GangplankRouteCore {
         Send-GangplankJobStarted $id
         return
     }
+    if ($m -eq 'POST' -and $p -eq '/api/revert') {
+        $session = Get-GangplankLiveSession -Required
+        $path = [string](Get-GangplankBodyValue $Req 'path')
+        if (-not $path -or $path.Length -gt 1000) { throw 'BAD_REQUEST|Choose a changed file from the list.' }
+        $args2 = Get-GangplankJobArguments $session
+        $args2.Path = $path
+        $id = Start-GangplankJob -Kind 'revert' -Group 'workspace' -Function 'Invoke-GangplankJobRevert' -Arguments $args2
+        Send-GangplankJobStarted $id
+        return
+    }
     if ($m -eq 'POST' -and $p -eq '/api/review') {
         $session = Get-GangplankLiveSession -Required
         if (-not $session.LastBranch) { throw 'BAD_STATE|Start a work branch before requesting review.' }
