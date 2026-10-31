@@ -45,6 +45,19 @@ function Invoke-GangplankJobSave {
     return @{ Session = (ConvertTo-GangplankSessionSnapshot $session); Saved = $saved }
 }
 
+function Invoke-GangplankJobLatest {
+    param($Shared,[hashtable]$Arguments)
+    $session = New-GangplankSessionFromSnapshot -Snapshot $Arguments.Session -Token $Arguments.Token
+    Set-GangplankJobProgress $Shared 'Checking what changed online'
+    $choices = @{}
+    if ($Arguments.Choices) { foreach ($k in @($Arguments.Choices.Keys)) { $choices[[string]$k] = [string]$Arguments.Choices[$k] } }
+    $r = Update-GangplankWorkspaceFromRemote -Session $session -Choices $choices
+    return @{
+        Session = (ConvertTo-GangplankSessionSnapshot $session)
+        Latest = [ordered]@{ upToDate = $r.UpToDate; needsChoice = $r.NeedsChoice; applied = @($r.Applied); overlaps = @($r.Overlaps); head = $r.Head }
+    }
+}
+
 function Invoke-GangplankJobReview {
     param($Shared,[hashtable]$Arguments)
     $session = New-GangplankSessionFromSnapshot -Snapshot $Arguments.Session -Token $Arguments.Token

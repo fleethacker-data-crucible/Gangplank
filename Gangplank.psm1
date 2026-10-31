@@ -20,6 +20,8 @@ if (-not $script:GangplankRoot) {
 . (Join-Path $script:GangplankRoot "Core\Diff.ps1")
 . (Join-Path $script:GangplankRoot "Core\SmartSave.ps1")
 . (Join-Path $script:GangplankRoot "Core\Workspace.ps1")
+. (Join-Path $script:GangplankRoot "Core\WorkspaceBaseline.ps1")
+. (Join-Path $script:GangplankRoot "Core\GetLatest.ps1")
 . (Join-Path $script:GangplankRoot "Core\Sentinel.ps1")
 . (Join-Path $script:GangplankRoot "Core\RepositoryInsights.ps1")
 . (Join-Path $script:GangplankRoot "Core\Intelligence.ps1")
@@ -289,6 +291,7 @@ Export-ModuleMember -Function @(
     "Invoke-GangplankAIStream",
     "Get-GangplankWorkspacePreview",
     "Invoke-GangplankWorkspaceSave",
+    "Update-GangplankWorkspaceFromRemote",
     "New-GangplankSmartMessage",
     "Get-GangplankSmartSavePrompt",
     "Get-GangplankLocalFileMap",
