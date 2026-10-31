@@ -13,6 +13,12 @@
 #  Environment names shared with Halyard are honoured: LLM_URL / OPENAI_BASE_URL,
 #  LLM_MODEL / OPENAI_MODEL, LLM_TOKEN / OPENAI_API_KEY.
 # ============================================================
+# Shared module. Gangplank Intelligence, version 1.0.0 (docs/SHARED-AI-MODULE.md).
+# Copied, not forked, into sibling products: change it here, bump the version, copy it back.
+# Host functions it needs, and nothing else of Gangplank: ConvertFrom-GangplankApiResponse,
+# Get-GangplankAiToken, Get-GangplankCredentialStatus, Get-GangplankEnv, Get-GangplankEnvironmentCredential,
+# Get-GangplankLocalSettings, Get-GangplankProviderErrorCode, Get-GangplankSafeUrl, Get-GangplankStoredCredential,
+# Invoke-GangplankHttpRequest, Save-GangplankLocalSettings, Write-GangplankAudit.
 
 # Built-in default: the local phoenix-lai server's OpenAI-compatible API on this PC
 # (http://127.0.0.1:1234/v1/chat/completions). GANGPLANK_AI_URL / LLM_URL / OPENAI_BASE_URL or a
