@@ -79,16 +79,10 @@ class GitHubProvider : GitProviderBase {
     }
 
     [string[]] GetBranches([string]$projectPath) {
-        $all = @()
-        $page = 1
-        do {
-            # Errors propagate: a silently partial branch list looks like real data.
-            $batch = $this.InvokeApi("GET", "repos/$projectPath/branches?per_page=100&page=$page")
-            if (-not $batch) { break }
-            $all += @($batch | ForEach-Object { $_.name })
-            $page++
-        } while (@($batch).Count -eq 100)
-        return $all
+        # Errors propagate: a silently partial branch list looks like real data.
+        $uri = "$($this.ApiRoot)/repos/$projectPath/branches?per_page=100"
+        $batch = Invoke-GangplankPagedGet -Provider 'GitHub' -Uri $uri -Headers $this.GetAuthHeaders('GET')
+        return @($batch | ForEach-Object { $_.name })
     }
 
     [string] GetRefSha([string]$projectPath, [string]$branch) {
