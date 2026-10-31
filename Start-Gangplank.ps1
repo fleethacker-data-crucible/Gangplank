@@ -31,6 +31,8 @@ param(
     [switch]$LocalDev,
     # LocalDev only: a synthetic GitHub server (dev/fake-github.mjs), http://127.0.0.1:<port>/
     [string]$DevGitHubUrl,
+    # LocalDev only: a synthetic GitLab server (dev/fake-gitlab.mjs), http://127.0.0.1:<port>/
+    [string]$DevGitLabUrl,
     # Where workspaces go for this run (tests and LocalDev). Normally the workspace folder
     # from Settings (default %USERPROFILE%\Gangplank); the saved session then lives in
     # %LOCALAPPDATA%\Gangplank. With -WorkRoot both live under that folder.
@@ -119,7 +121,7 @@ if ($LocalDev) {
     Write-Host '[i] Lazarette not configured (optional). Using saved Gangplank or environment credentials.' -ForegroundColor DarkGray
 }
 
-$hostArgs = @{ Port = $Port; NoBrowser = $NoBrowser; LocalDev = $LocalDev; DevGitHubUrl = $DevGitHubUrl; UiRoot = (Join-Path $root 'web'); StateRoot = $stateRoot; AutoStop = $autoStop; RuntimeRoot = $root }
+$hostArgs = @{ Port = $Port; NoBrowser = $NoBrowser; LocalDev = $LocalDev; DevGitHubUrl = $DevGitHubUrl; DevGitLabUrl = $DevGitLabUrl; UiRoot = (Join-Path $root 'web'); StateRoot = $stateRoot; AutoStop = $autoStop; RuntimeRoot = $root }
 if ($WorkRoot) {
     $hostArgs.WorkRoot = $WorkRoot
     $hostArgs.WorkRootFixed = $true

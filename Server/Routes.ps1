@@ -147,6 +147,7 @@ function Get-GangplankJobArguments {
         Token = (Resolve-GangplankCredential -Provider $Session.Provider -TargetHost (Get-GangplankSnapshotHost (ConvertTo-GangplankSessionSnapshot $Session))).Value
         WorkRoot = $script:GangplankApp.WorkRoot
         DevGitHubUrl = (Get-GangplankDevProvider)
+        DevGitLabUrl = (Get-GangplankDevGitLabProvider)
     }
 }
 
@@ -337,7 +338,7 @@ function Invoke-GangplankRouteCore {
         Assert-GangplankTrustedRepositoryUrl -Url $url
         $parsed = Parse-GangplankRepoUrl -Url $url
         $token = (Resolve-GangplankCredential -Provider $parsed.Provider -TargetHost (Get-GangplankSnapshotHost $parsed)).Value
-        $id = Start-GangplankJob -Kind 'connect' -Group 'workspace' -Function 'Invoke-GangplankJobConnect' -Arguments @{ Url = $url; Token = $token; DevGitHubUrl = (Get-GangplankDevProvider) } -OnComplete $script:GangplankOnSessionJob -Context (Get-GangplankJobContext -Token $token -Kind 'connect')
+        $id = Start-GangplankJob -Kind 'connect' -Group 'workspace' -Function 'Invoke-GangplankJobConnect' -Arguments @{ Url = $url; Token = $token; DevGitHubUrl = (Get-GangplankDevProvider); DevGitLabUrl = (Get-GangplankDevGitLabProvider) } -OnComplete $script:GangplankOnSessionJob -Context (Get-GangplankJobContext -Token $token -Kind 'connect')
         Send-GangplankJobStarted $id
         return
     }
