@@ -81,6 +81,15 @@ jobs:
         run: |
           .\.github\ci-run.ps1 -Title 'Synthetic GitHub' -Command 'node --test dev/fake-github.test.mjs dev/fake-gitlab.test.mjs'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: UI client (TypeScript run by Node type stripping, against the real host)
+        shell: powershell
+        env:
+          # The runner is a real user account: keep its Gangplank credentials and session out of reach.
+          LOCALAPPDATA: ${{ runner.temp }}\gangplank-appdata
+          GANGPLANK_PWSH: powershell.exe
+        run: |
+          .\.github\ci-run.ps1 -Title 'UI client' -Command 'node --test ui-src/tests/api.test.ts ui-src/tests/host.contract.test.ts'
+          exit $LASTEXITCODE
       - name: Real host under Windows PowerShell 5.1 against the synthetic GitHub
         shell: powershell
         env:
