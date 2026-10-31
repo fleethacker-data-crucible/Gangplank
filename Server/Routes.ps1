@@ -390,6 +390,12 @@ function Invoke-GangplankRouteCore {
         }
         return
     }
+    if ($m -eq 'GET' -and $p -eq '/api/diff') {
+        # Read-only: the text of one pending change, before (baseline commit) and after (local file).
+        $session = Get-GangplankLiveSession -Required
+        Send-GangplankJson -Object (Get-GangplankFileDiff -Session $session -Path ([string](Get-GangplankQueryValue $Req.Query 'path')))
+        return
+    }
     if ($m -eq 'POST' -and $p -eq '/api/save') {
         $session = Get-GangplankLiveSession -Required
         $paths = @([string[]]@(Get-GangplankBodyValue $Req 'paths') | Where-Object { $_ })
@@ -399,6 +405,15 @@ function Invoke-GangplankRouteCore {
         $args2.Paths = $paths
         $args2.Message = [string](Get-GangplankBodyValue $Req 'message')
         $args2.PublicConfirmed = ((Get-GangplankBodyValue $Req 'publicConfirmed') -eq $true)
+        $acks = @{}
+        $rawAcks = Get-GangplankBodyValue $Req 'acknowledgements'
+        if ($rawAcks) {
+            foreach ($prop in $rawAcks.PSObject.Properties) {
+                if ($acks.Count -ge 1000) { throw 'BAD_REQUEST|Too many acknowledgements.' }
+                $acks[[string]$prop.Name] = [string]$prop.Value
+            }
+        }
+        $args2.Acknowledgements = $acks
         $id = Start-GangplankJob -Kind 'save' -Group 'workspace' -Function 'Invoke-GangplankJobSave' -Arguments $args2 -OnComplete $script:GangplankOnSessionJob -Context (Get-GangplankJobContext -Token $args2.Token -Kind 'save')
         Send-GangplankJobStarted $id
         return
@@ -454,6 +469,43 @@ function Invoke-GangplankRouteCore {
     if ($m -eq 'GET' -and $p -eq '/api/reviews') {
         $session = Get-GangplankLiveSession -Required
         Send-GangplankJson -Object @{ reviews = @(Get-GangplankRepositoryReviews -Session $session) }
+        return
+    }
+    # One review request: detail is a quick read (a few API calls, fail-fast like the list);
+    # reply and merge are writes, so they run as background jobs (own 'review' group).
+    if ($p -match '^/api/reviews/([0-9]{1,9})(/comment|/merge)?$') {
+        $number = ConvertTo-GangplankReviewNumber $Matches[1]
+        $action = [string]$Matches[2]
+        if ($m -eq 'GET' -and $action -eq '') {
+            $session = Get-GangplankLiveSession -Required
+            Send-GangplankJson -Object (Get-GangplankReviewDetail -Session $session -Number $number)
+            return
+        }
+        if ($m -eq 'POST' -and $action -eq '/comment') {
+            $session = Get-GangplankLiveSession -Required
+            $text = ConvertTo-GangplankReviewCommentText -Text ([string](Get-GangplankBodyValue $Req 'text'))
+            $args2 = Get-GangplankJobArguments $session
+            $args2.Number = $number
+            $args2.Text = $text
+            $id = Start-GangplankJob -Kind 'review-comment' -Group 'review' -Function 'Invoke-GangplankJobReviewComment' -Arguments $args2
+            Send-GangplankJobStarted $id
+            return
+        }
+        if ($m -eq 'POST' -and $action -eq '/merge') {
+            $session = Get-GangplankLiveSession -Required
+            $confirm = Get-GangplankBodyValue $Req 'confirm'
+            if ($confirm -isnot [bool] -or $confirm -ne $true) { throw 'BAD_REQUEST|Confirm the merge first. Nothing was merged.' }
+            $sha = [string](Get-GangplankBodyValue $Req 'sha')
+            if ($sha -notmatch '^[0-9a-fA-F]{40,64}$') { throw 'BAD_REQUEST|The version to merge is missing. Reload the review request and try again.' }
+            $args2 = Get-GangplankJobArguments $session
+            $args2.Number = $number
+            $args2.Sha = $sha
+            $args2.Confirmed = $true
+            $id = Start-GangplankJob -Kind 'review-merge' -Group 'review' -Function 'Invoke-GangplankJobReviewMerge' -Arguments $args2
+            Send-GangplankJobStarted $id
+            return
+        }
+        Send-GangplankError 404 'NOT_FOUND' 'Route not found.'
         return
     }
     if ($m -eq 'GET' -and $p -eq '/api/insights') {

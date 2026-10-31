@@ -112,6 +112,19 @@ class GitHubProvider : GitProviderBase {
         return $null
     }
 
+    [hashtable] GetFileText([string]$projectPath, [string]$ref, [string]$path, [int]$maxBytes) {
+        # One file at a commit (the diff viewer's "before"), through the Contents API.
+        # @{ Found; Size; TooLarge; Binary; Text }; a file that is not there is Found = $false.
+        $encPath = ($path -split '/' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
+        try {
+            $item = $this.InvokeApi('GET', "repos/$projectPath/contents/$encPath" + '?ref=' + [uri]::EscapeDataString($ref))
+        } catch {
+            if ([string]$_.Exception.Message -match '^NOT_FOUND\|') { return @{ Found = $false } }
+            throw
+        }
+        return (ConvertFrom-GangplankFileContent -Item $item -MaxBytes $maxBytes)
+    }
+
     [hashtable] GetPathModes([string]$projectPath, [string]$treeSha, [string[]]$paths) {
         # Existing Git file modes (100644, 100755, 120000...) for the given paths,
         # walking only the directories that contain them. Paths not in the tree
