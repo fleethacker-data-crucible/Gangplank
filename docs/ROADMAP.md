@@ -28,14 +28,14 @@ needs a smart card, the organization's real GitLab host or workstation applicati
 | Workspace folder | Workspaces live in `%USERPROFILE%\Gangplank\<repo>\<branch>` (configurable), outside the program folder; Gangplank's own state in `%LOCALAPPDATA%\Gangplank` |
 | AI model | One endpoint setting with discovery: OpenAI-compatible, Azure OpenAI, Databricks, Ollama; chat-model filter and ranking; Test; Halyard's `LLM_*` variables honoured |
 | CI (7) | Hygiene job (5.1 parse, non-ASCII without BOM, tracked logs/credentials), pinned actions, concurrency, 5.1 suites, e2e under Windows PowerShell 5.1 |
+| Pagination (4b) | Branch lists follow `Link` (RFC 8288) and `X-Next-Page` headers, with a count-based fallback for a full page that carries neither. Lists stop at 50 pages, and a paging link to another host is refused. Tested offline in `tests/Paging.Tests.ps1` |
+| Job cancel (6b) | A Cancel bar shows while a background job runs and calls `POST /api/jobs/{id}/cancel`. A cancelled job reports that it stopped before finishing, and changes already sent are not undone. The offline checks cover the markup only; a browser check of the button is not yet in CI |
 
 ## Next — host follow-ups (off-workstation)
 
 | # | Item | Notes |
 |---|---|---|
-| 4b | Pagination by `Link` / `X-Next-Page` | Branch lists page by count today (GitHub until a short page; GitLab up to 50 pages of 100) |
 | 5b | Synthetic GitLab | The synthetic server covers GitHub; GitLab paths are covered by unit tests only |
-| 6b | Job cancel in the UI | The API supports `POST /api/jobs/{id}/cancel`; the UI has no cancel button yet |
 
 ## Next — UI rebuild (off-workstation)
 
