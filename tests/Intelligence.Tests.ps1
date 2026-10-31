@@ -75,15 +75,15 @@ try {
         $script:GangplankHttpTransport = $null
 
         # --- settings and precedence ---------------------------------------------
-        # Default: the local phoenix-lai server on this PC, no token, model phoenixlai.
+        # Default: the Fleet router (Fairlead) on this PC, no token required, model auto.
         $cfg = Get-GangplankAiConfiguration
-        Assert ($cfg.Url -eq 'http://127.0.0.1:1234/v1/chat/completions') ('Default AI endpoint should be local phoenix-lai, got ' + $cfg.Url)
-        Assert ($cfg.Model -eq 'phoenixlai' -and $cfg.Loopback -and $cfg.Profile -eq 'openai') ('Default model should be phoenixlai on loopback, got ' + $cfg.Model)
+        Assert ($cfg.Url -eq 'http://127.0.0.1:8776/v1/chat/completions') ('Default AI endpoint should be the Fleet router, got ' + $cfg.Url)
+        Assert ($cfg.Model -eq 'auto' -and $cfg.Loopback -and $cfg.Router -and $cfg.Profile -eq 'openai') ('Default model should be auto on the router, got ' + $cfg.Model)
         Assert ((Get-GangplankAiSettingsView).source -eq 'default') 'Settings view should report the built-in default'
         Assert (-not (Get-GangplankAiSettingsView).tokenRequired) 'No token is required for the local default'
         Assert ($null -eq (Get-GangplankAiRequestToken -Config $cfg)) 'Loopback without a token: no token, no error'
         $script:Seen = New-Object System.Collections.Generic.List[object]
-        $script:Routes = @{ 'http://127.0.0.1:1234/v1/chat/completions' = (Reply 200 @{ choices = @(@{ message = @{ content = 'local answer' } }) }) }
+        $script:Routes = @{ 'http://127.0.0.1:8776/v1/chat/completions' = (Reply 200 @{ choices = @(@{ message = @{ content = 'local answer' } }) }) }
         $script:GangplankHttpTransport = {
             param($Request)
             $script:Seen.Add($Request)
@@ -91,9 +91,10 @@ try {
             return [pscustomobject]@{ Status = 404; Headers = @{}; Text = '{}'; File = $null; NetworkError = '' }
         }
         Assert ((Invoke-GangplankAI -Question 'hi') -eq 'local answer') 'Chat should reach the local default endpoint'
-        Assert ($script:Seen.Count -eq 1 -and [string]$script:Seen[0].Uri -eq 'http://127.0.0.1:1234/v1/chat/completions') 'Chat went to the wrong endpoint'
+        Assert ($script:Seen.Count -eq 1 -and [string]$script:Seen[0].Uri -eq 'http://127.0.0.1:8776/v1/chat/completions') 'Chat went to the wrong endpoint'
         Assert (-not $script:Seen[0].Headers.ContainsKey('Authorization')) 'No Authorization header may be sent to loopback without a token'
-        Assert ((($script:Seen[0].Body | ConvertFrom-Json).model) -eq 'phoenixlai') 'The default request should name the phoenixlai model'
+        Assert ([string]$script:Seen[0].Headers['X-Fairlead-Privacy'] -eq 'local') 'The router default must ask Fairlead to keep the request on this PC'
+        Assert ((($script:Seen[0].Body | ConvertFrom-Json).model) -eq 'auto') 'The default request should ask the router for model auto'
         $env:GANGPLANK_AI_TOKEN = 'local-opt-token'
         $script:Seen.Clear()
         [void](Invoke-GangplankAI -Question 'hi')
@@ -102,10 +103,23 @@ try {
         $script:GangplankHttpTransport = $null
         # The administrator list never blocks this PC, and still blocks other hosts.
         $env:GANGPLANK_AI_ALLOWED_HOSTS = 'ai.example.com'
-        Assert ((Get-GangplankAiConfiguration).Url -eq 'http://127.0.0.1:1234/v1/chat/completions') 'The local default must pass an administrator list'
+        Assert ((Get-GangplankAiConfiguration).Url -eq 'http://127.0.0.1:8776/v1/chat/completions') 'The local default must pass an administrator list'
         $env:LLM_URL = 'https://gateway.example.com/v1'; $env:LLM_MODEL = 'm'
         Assert ((Get-Code { Get-GangplankAiConfiguration }) -eq 'FORBIDDEN') 'An override outside the administrator list must be refused'
         $env:LLM_URL = $null; $env:LLM_MODEL = $null; $env:GANGPLANK_AI_ALLOWED_HOSTS = $null
+        # The router is loopback on port 8776; other loopback servers (phoenix-lai called directly) are not.
+        Assert (Test-GangplankAiRouterUrl -Url 'http://127.0.0.1:8776/v1') 'The router address is recognised'
+        Assert (-not (Test-GangplankAiRouterUrl -Url 'http://127.0.0.1:1234/v1')) 'phoenix-lai called directly is not the router'
+        Assert (-not (Test-GangplankAiRouterUrl -Url 'https://gateway.example.com:8776/v1')) 'A remote host on port 8776 is not the router'
+        Assert ((Get-GangplankAiAuthHeaders -Auth 'bearer' -Token '' -Url 'http://127.0.0.1:8776/v1/chat/completions')['X-Fairlead-Privacy'] -eq 'local') 'Router requests carry the privacy header'
+        Assert (-not (Get-GangplankAiAuthHeaders -Auth 'bearer' -Token '' -Url 'http://127.0.0.1:1234/v1/chat/completions').ContainsKey('X-Fairlead-Privacy')) 'Other servers never get the Fairlead header'
+        $env:LLM_URL = 'http://127.0.0.1:8776/v1'
+        $cfg = Get-GangplankAiConfiguration
+        Assert ($cfg.Router -and $cfg.Model -eq 'auto') ('The router set by hand uses model auto, got ' + $cfg.Model)
+        $env:LLM_URL = 'http://127.0.0.1:1234/v1'
+        $cfg = Get-GangplankAiConfiguration
+        Assert (-not $cfg.Router -and $cfg.Model -eq 'phoenixlai') 'phoenix-lai called directly keeps its own model name'
+        $env:LLM_URL = $null
         # Any loopback override without a model variable uses phoenixlai.
         $env:LLM_URL = 'http://localhost:8080/v1'
         $cfg = Get-GangplankAiConfiguration
@@ -138,7 +152,7 @@ try {
         Assert ((Get-GangplankAiToken) -eq 'shared-token-123') 'LLM_TOKEN (Halyard) should be accepted as the AI token'
         $env:LLM_TOKEN = $null
         [void](Set-GangplankAiSettings -Endpoint '')
-        Assert ((Get-GangplankAiConfiguration).Url -eq 'http://127.0.0.1:1234/v1/chat/completions') 'Reset should return to the local phoenix-lai default'
+        Assert ((Get-GangplankAiConfiguration).Url -eq 'http://127.0.0.1:8776/v1/chat/completions') 'Reset should return to the Fleet router default'
         Assert ((Get-Code { Set-GangplankAiSettings -Endpoint 'https://gateway.example.com/v1' -Model '' }) -eq 'BAD_REQUEST') 'A model is required'
 
         # --- branch names -----------------------------------------------------------
