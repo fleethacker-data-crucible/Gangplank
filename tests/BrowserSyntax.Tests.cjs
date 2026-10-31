@@ -21,7 +21,8 @@ assert.doesNotMatch(html,/<style\b/i,'No inline <style> allowed');
 assert.doesNotMatch(html,/\sstyle="/i,'No inline style attributes allowed');
 assert.doesNotMatch(html,/\son[a-z]+=/i,'No inline event handlers allowed');
 assert.doesNotMatch(html+js,/__GANGPLANK_(CSRF|NONCE)__/,'Old CSRF/nonce placeholders must be gone');
-for(const code of [js,shell,icons])assert.doesNotMatch(code,/\.innerHTML|insertAdjacentHTML|document\.write|\beval\(/,'Use textContent/DOM APIs only');
+const diffWorkerJs=fs.readFileSync(path.join(web,'diff-worker.js'),'utf8');
+for(const code of [js,shell,icons,diffWorkerJs])assert.doesNotMatch(code,/\.innerHTML|insertAdjacentHTML|document\.write|\beval\(/,'Use textContent/DOM APIs only');
 assert.match(html,/<link rel="stylesheet" href="vendor\/fleet\/fleet\.css">\s*<link rel="stylesheet" href="app\.css">/,'fleet.css must be linked before app.css');
 // Fleet Unified UI (docs/UNIFIED-UI.md): teak accent, colours only through --fl-* tokens, the Gangplank mark.
 assert.match(html,/<html[^>]*\sdata-app="gangplank"/,'<html data-app="gangplank"> sets the accent');
@@ -41,7 +42,7 @@ for(const tab of ['overview','changes','branches','compare','activity','reviews'
  assert.match(html,new RegExp('data-tab="'+tab+'"'),'Missing navigation: '+tab);
  assert.ok(ids.has(tab),'Missing section: '+tab);
 }
-for(const route of ['/api/branches','/api/history','/api/compare','/api/reviews','/api/insights','/api/sentinel','/api/session','/api/jobs/','/api/credentials','/api/integrations/lazarette','/api/audit','/api/chat','/api/settings','/api/settings/workspace','/api/settings/intelligence','/api/ai/detect','/api/ai/test'])
+for(const route of ['/api/branches','/api/history','/api/compare','/api/reviews','/api/insights','/api/sentinel','/api/session','/api/jobs/','/api/credentials','/api/integrations/lazarette','/api/audit','/api/chat','/api/settings','/api/settings/workspace','/api/settings/intelligence','/api/ai/detect','/api/ai/test','/api/diff'])
  assert.ok(js.includes(route),'UI missing route: '+route);
 assert.match(js,/'X-Gangplank-Client'/,'API calls must send the client header');
 // Lifecycle: the tab owns the local service (heartbeat, unload beacon, End session).
@@ -50,6 +51,33 @@ assert.match(html,/<aside class="side[^"]*"[^>]*>[\s\S]*id="endSession"[\s\S]*<\
 assert.match(js,/setInterval\(beatNow,5000\)/,'Fallback heartbeat must run every 5 s');
 assert.ok(!/[?&](session|client)=/.test(js),'Session secrets must never go in a query string');
 assert.match(js,/if\(await bootstrap\(\)\)\{startHeartbeat\(\)/,'Heartbeat starts only once the tab has a session');
+// Diff viewer (roadmap 10): the line diff runs in a Web Worker started from app.js; index.html still lists no other script.
+assert.ok(js.includes("new Worker('/diff-worker.js')"),'UI must compute the diff in a Web Worker');
+assert.ok(js.includes("s.src='/diff-worker.js'"),'UI must fall back to the same code on the main thread');
+assert.match(js,/diffWorker\.onerror=/,'A failing worker must fall back to the main thread');
+for(const id of ['diffPanel','diffTitle','diffStatus','diffView','diffClose'])assert.ok(ids.has(id),'Missing diff viewer element: '+id);
+assert.match(html,/id="diffStatus"[^>]*role="status"|role="status"[^>]*id="diffStatus"/,'Diff status text must be a role=status live region');
+assert.match(js,/'View changes'/,'Each changed file needs a View changes button');
+assert.match(js,/mark\.textContent=l\.t==='\+'\|\|l\.t==='-'\?l\.t/,'Added and removed lines need a +/- marker (colour is not the only cue)');
+assert.match(css,/\.diffAdd\{[^}]*var\(--fl-success\)/,'Added lines use a --fl-* token');
+assert.match(css,/\.diffDel\{[^}]*var\(--fl-danger\)/,'Removed lines use a --fl-* token');
+const diffCss=css.slice(css.indexOf('diff viewer'),css.indexOf('/* ----------',css.indexOf('diff viewer')));
+assert.ok(diffCss.includes('.diffAdd'),'diff viewer styles found');
+assert.doesNotMatch(diffCss,/outline|:focus/,'The brass focus ring comes from fleet.css; the diff viewer must not restyle it');
+new vm.Script(diffWorkerJs,{filename:'web/diff-worker.js'});
+// The worker file, run as a worker would run it (importScripts present), answers the page protocol.
+{
+ const sent=[],ctx={importScripts(){},postMessage:m=>sent.push(m)};ctx.globalThis=ctx;
+ vm.createContext(ctx);new vm.Script(diffWorkerJs).runInContext(ctx);
+ assert.equal(typeof ctx.onmessage,'function','worker must listen for messages');
+ ctx.onmessage({data:{type:'diff',id:7,before:'a\nb\nc\n',after:'a\nB\nc\n'}});
+ assert.equal(sent[0].id,7);assert.equal(sent[0].type,'result');
+ assert.equal(sent[0].stats.added,1);assert.equal(sent[0].stats.removed,1);
+ ctx.onmessage({data:{type:'nope',id:8}});assert.equal(sent[1].type,'error');
+ // On the page (no importScripts) the same file only exposes the function and never hooks onmessage.
+ const page={};page.globalThis=page;vm.createContext(page);new vm.Script(diffWorkerJs).runInContext(page);
+ assert.equal(typeof page.GangplankDiff.computeDiff,'function');assert.equal(page.onmessage,undefined);
+}
 const worker=fs.readFileSync(path.join(web,'heartbeat-worker.js'),'utf8');
 new vm.Script(worker,{filename:'web/heartbeat-worker.js'});
 // Run the worker against a fake fetch: it beats at once, then every interval, with the client header.

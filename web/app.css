@@ -95,9 +95,13 @@ select.field{cursor:pointer}
 .notice p{margin:4px 0}
 .mono{font:var(--fl-text-caption)/1.5 var(--fl-font-mono);overflow-wrap:anywhere}
 .files{display:grid;gap:8px;margin:16px 0}
-.file{display:flex;align-items:center;gap:12px;min-height:40px;border:1px solid var(--fl-border);border-radius:var(--fl-radius-control);padding:8px 12px;background:var(--fl-surface);cursor:pointer;font-weight:400}
+.file{display:flex;align-items:center;gap:12px;min-height:40px;border:1px solid var(--fl-border);border-radius:var(--fl-radius-control);padding:8px 12px;background:var(--fl-surface);font-weight:400}
 .file:hover{background:var(--fl-muted)}
-.file:has(input:disabled){opacity:.6;cursor:default}
+.file:has(input:disabled){opacity:.6}
+/* The checkbox label and the "View changes" button are siblings, so a file's accessible name stays its path. */
+.fileMain{display:flex;align-items:center;gap:12px;flex:1;min-width:0;cursor:pointer;font-weight:400;font-size:var(--fl-text-body)}
+.file:has(input:disabled) .fileMain{cursor:default}
+.diffBtn{flex:none}
 .file input{width:16px;height:16px;accent-color:var(--fl-accent)}
 .file .path{flex:1;overflow-wrap:anywhere;font:var(--fl-text-caption) var(--fl-font-mono)}
 .tag{font-size:var(--fl-text-caption);font-weight:600;padding:0 8px;line-height:20px;border-radius:999px;border:1px solid currentColor;color:var(--fl-muted-foreground)}
@@ -121,6 +125,18 @@ select.field{cursor:pointer}
 .credRow .actions{margin-top:8px}
 .credRow .btn{margin-top:8px}
 .progress{color:var(--fl-muted-foreground);font-size:var(--fl-text-caption)}
+
+/* ---------- diff viewer: tinted lines plus a +/- marker, so colour is never the only cue ---------- */
+.diffView{margin-top:12px;max-height:60vh;overflow:auto;border:1px solid var(--fl-border);border-radius:var(--fl-radius-control);background:var(--fl-surface);font:var(--fl-text-caption)/1.5 var(--fl-font-mono)}
+.diffHunk{padding:2px 12px;background:var(--fl-muted);color:var(--fl-muted-foreground)}
+.diffLine{display:grid;grid-template-columns:5ch 5ch 2ch minmax(0,1fr);gap:0 8px;padding:0 12px}
+.diffNo{text-align:right;color:var(--fl-muted-foreground);user-select:none}
+.diffMark{text-align:center;font-weight:700;user-select:none}
+.diffText{white-space:pre-wrap;overflow-wrap:anywhere;tab-size:4;min-height:1.5em}
+.diffAdd{background:color-mix(in srgb,var(--fl-success) 16%,var(--fl-surface))}
+.diffDel{background:color-mix(in srgb,var(--fl-danger) 16%,var(--fl-surface))}
+.diffAdd .diffMark{color:var(--fl-success)}
+.diffDel .diffMark{color:var(--fl-danger)}
 
 /* ---------- Gangplank Assist ---------- */
 .assistant{display:flex;flex-direction:column;min-height:0;background:var(--fl-sidebar);border-left:1px solid var(--fl-border)}
