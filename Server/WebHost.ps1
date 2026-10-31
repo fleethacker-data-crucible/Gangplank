@@ -9,6 +9,7 @@ function Start-GangplankWebHost {
         [switch]$NoBrowser,
         [switch]$LocalDev,
         [string]$DevGitHubUrl,
+        [string]$DevGitLabUrl,
         [Parameter(Mandatory)][string]$WorkRoot,
         [Parameter(Mandatory)][string]$StateRoot,
         [string]$LegacyStateRoot,
@@ -19,9 +20,10 @@ function Start-GangplankWebHost {
         # Folder whose Logs\ gets the runtime file (gangplank-server-<pid>.json).
         [string]$RuntimeRoot
     )
-    if ($DevGitHubUrl) {
-        if (-not $LocalDev) { throw 'A synthetic provider (-DevGitHubUrl) is only allowed with -LocalDev.' }
-        Set-GangplankDevProvider -GitHubUrl $DevGitHubUrl
+    if ($DevGitHubUrl -or $DevGitLabUrl) {
+        if (-not $LocalDev) { throw 'A synthetic provider (-DevGitHubUrl / -DevGitLabUrl) is only allowed with -LocalDev.' }
+        if ($DevGitHubUrl) { Set-GangplankDevProvider -GitHubUrl $DevGitHubUrl }
+        if ($DevGitLabUrl) { Set-GangplankDevProvider -GitLabUrl $DevGitLabUrl }
     }
     Initialize-GangplankApp -WorkRoot $WorkRoot -StateRoot $StateRoot -LegacyStateRoot $LegacyStateRoot -WorkRootFixed:$WorkRootFixed -LocalDev:$LocalDev
     Reset-GangplankPresence -AutoStop $AutoStop

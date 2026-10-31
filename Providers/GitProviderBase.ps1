@@ -104,9 +104,9 @@ function Parse-GangplankRepoUrl {
     $Url = $Url.TrimEnd('/')
     if ($Url -match '\.git$') { $Url = $Url.Substring(0, $Url.Length - 4) }
 
-    if (Test-GangplankDevRepositoryUrl -Url $Url) {
-        $devBase = Get-GangplankDevProvider
-        return [PSCustomObject]@{ Provider = 'GitHub'; BaseUrl = $devBase; ProjectPath = $Url.Substring($devBase.Length).Trim('/') }
+    $dev = Resolve-GangplankDevRepository -Url $Url
+    if ($dev) {
+        return [PSCustomObject]@{ Provider = $dev.Provider; BaseUrl = $dev.BaseUrl; ProjectPath = $Url.Substring($dev.BaseUrl.Length).Trim('/') }
     }
     if ($Url -match '^(https?://[^/]+)/(.+)$') {
         $base = $Matches[1]
