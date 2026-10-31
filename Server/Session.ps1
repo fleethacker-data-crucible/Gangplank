@@ -7,26 +7,45 @@
 # =============================================================================
 
 $script:GangplankDevGitHubUrl = $null
+$script:GangplankDevGitLabUrl = $null
 $script:GangplankSessionFields = @('Provider','BaseUrl','ProjectPath','DefaultBranch','Branches','LocalPath','LastBranch','BaselineSha','BaselineMap','LastSaveMessage','LastSavedFiles','LastReviewUrl')
 
 function Set-GangplankDevProvider {
-    # LocalDev only (Start-Gangplank.ps1 -LocalDev -DevGitHubUrl): treat a local
-    # synthetic GitHub server as the GitHub API. Loopback http only.
+    # LocalDev only (Start-Gangplank.ps1 -LocalDev -DevGitHubUrl / -DevGitLabUrl): treat a
+    # local synthetic GitHub or GitLab server as that provider's API. Loopback http only.
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$GitHubUrl)
-    $u = $null
-    if (-not [uri]::TryCreate($GitHubUrl,[UriKind]::Absolute,[ref]$u) -or $u.Scheme -ne 'http' -or $u.Host -notin @('127.0.0.1','localhost') -or $u.AbsolutePath -ne '/') {
-        throw 'The synthetic provider must be http://127.0.0.1:<port>/'
+    param([string]$GitHubUrl,[string]$GitLabUrl)
+    if (-not $GitHubUrl -and -not $GitLabUrl) { throw 'Give a synthetic GitHub or GitLab address.' }
+    $parsed = @{}
+    foreach ($pair in @(@('GitHub',$GitHubUrl),@('GitLab',$GitLabUrl))) {
+        if (-not $pair[1]) { continue }
+        $u = $null
+        if (-not [uri]::TryCreate($pair[1],[UriKind]::Absolute,[ref]$u) -or $u.Scheme -ne 'http' -or $u.Host -notin @('127.0.0.1','localhost') -or $u.AbsolutePath -ne '/') {
+            throw 'The synthetic provider must be http://127.0.0.1:<port>/'
+        }
+        $parsed[$pair[0]] = $u.GetLeftPart([UriPartial]::Authority)
     }
-    $script:GangplankDevGitHubUrl = $u.GetLeftPart([UriPartial]::Authority)
+    if ($parsed.ContainsKey('GitHub')) { $script:GangplankDevGitHubUrl = $parsed['GitHub'] }
+    if ($parsed.ContainsKey('GitLab')) { $script:GangplankDevGitLabUrl = $parsed['GitLab'] }
 }
 
 function Get-GangplankDevProvider { return $script:GangplankDevGitHubUrl }
 
+function Get-GangplankDevGitLabProvider { return $script:GangplankDevGitLabUrl }
+
+function Resolve-GangplankDevRepository {
+    # Which synthetic provider (if any) serves this URL: @{ Provider; BaseUrl } or $null.
+    param([string]$Url)
+    if (-not $Url) { return $null }
+    foreach ($pair in @(@('GitHub',$script:GangplankDevGitHubUrl),@('GitLab',$script:GangplankDevGitLabUrl))) {
+        if ($pair[1] -and $Url.StartsWith($pair[1] + '/',[StringComparison]::OrdinalIgnoreCase)) { return @{ Provider = $pair[0]; BaseUrl = $pair[1] } }
+    }
+    return $null
+}
+
 function Test-GangplankDevRepositoryUrl {
     param([string]$Url)
-    if (-not $script:GangplankDevGitHubUrl) { return $false }
-    return $Url.StartsWith($script:GangplankDevGitHubUrl + '/',[StringComparison]::OrdinalIgnoreCase)
+    return [bool](Resolve-GangplankDevRepository -Url $Url)
 }
 
 function ConvertTo-GangplankSessionSnapshot {
