@@ -38,7 +38,7 @@ function Invoke-GangplankJobSave {
     param($Shared,[hashtable]$Arguments)
     $session = New-GangplankSessionFromSnapshot -Snapshot $Arguments.Session -Token $Arguments.Token
     Set-GangplankJobProgress $Shared 'Checking and publishing selected files'
-    $saved = Invoke-GangplankWorkspaceSave -Session $session -SelectedPaths ([string[]]@($Arguments.Paths)) -Message ([string]$Arguments.Message) -PublicConfirmed:([bool]$Arguments.PublicConfirmed)
+    $saved = Invoke-GangplankWorkspaceSave -Session $session -SelectedPaths ([string[]]@($Arguments.Paths)) -Message ([string]$Arguments.Message) -PublicConfirmed:([bool]$Arguments.PublicConfirmed) -Acknowledgements $(if ($Arguments.Acknowledgements) { $Arguments.Acknowledgements } else { @{} })
     $session | Add-Member -MemberType NoteProperty -Name LastSaveMessage -Value $saved.Message -Force
     $session | Add-Member -MemberType NoteProperty -Name LastSavedFiles -Value @($Arguments.Paths) -Force
     $session | Add-Member -MemberType NoteProperty -Name LastReviewUrl -Value $null -Force

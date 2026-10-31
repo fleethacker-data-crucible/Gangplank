@@ -390,6 +390,15 @@ function Invoke-GangplankRouteCore {
         $args2.Paths = $paths
         $args2.Message = [string](Get-GangplankBodyValue $Req 'message')
         $args2.PublicConfirmed = ((Get-GangplankBodyValue $Req 'publicConfirmed') -eq $true)
+        $acks = @{}
+        $rawAcks = Get-GangplankBodyValue $Req 'acknowledgements'
+        if ($rawAcks) {
+            foreach ($prop in $rawAcks.PSObject.Properties) {
+                if ($acks.Count -ge 1000) { throw 'BAD_REQUEST|Too many acknowledgements.' }
+                $acks[[string]$prop.Name] = [string]$prop.Value
+            }
+        }
+        $args2.Acknowledgements = $acks
         $id = Start-GangplankJob -Kind 'save' -Group 'workspace' -Function 'Invoke-GangplankJobSave' -Arguments $args2 -OnComplete $script:GangplankOnSessionJob -Context (Get-GangplankJobContext -Token $args2.Token -Kind 'save')
         Send-GangplankJobStarted $id
         return
