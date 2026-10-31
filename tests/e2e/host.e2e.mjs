@@ -203,6 +203,20 @@ test('connect, start, edit, Smart Save, review', async () => {
   for (const a of ['branch.created', 'commit.created', 'review.created']) assert.ok(actions.includes(a), 'Audit missing ' + a);
   assert.doesNotMatch(JSON.stringify(r.json), new RegExp(fake.token), 'Audit leaked the token');
 
+  // Adopt: a copy of the workspace, matched to the work branch, becomes the workspace; then back to the original.
+  const copy = path.join(workRoot, 'adopted-copy');
+  fs.cpSync(folder, copy, { recursive: true });
+  r = await job(h, '/api/adopt', { folder: copy, branch });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  assert.equal(r.json.source, 'plain folder');
+  assert.ok(r.json.same > 0, 'Files that match the branch are counted');
+  r = await call(h, 'GET', '/api/status');
+  assert.equal(fs.realpathSync.native(r.json.workspace), fs.realpathSync.native(copy), 'The adopted folder is the workspace');
+  r = await job(h, '/api/adopt', { folder: path.join(workRoot, 'nowhere'), branch });
+  assert.equal(r.status, 500, 'A folder that does not exist is refused');
+  r = await job(h, '/api/adopt', { folder, branch });
+  assert.equal(r.status, 200, JSON.stringify(r));
+
   // A teammate pushes to the work branch: saving must stop.
   await (await fetch(fake.url + '/__fake/advance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ branch, path: 'teammate.txt', content: 'hi' }) })).text();
   fs.appendFileSync(path.join(folder, 'notes.md'), 'More.\n');

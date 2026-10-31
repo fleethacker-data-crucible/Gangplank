@@ -34,6 +34,21 @@ function Invoke-GangplankJobDownload {
     return @{ Session = (ConvertTo-GangplankSessionSnapshot $session); Folder = $session.LocalPath; Branch = $branch; Sha = $session.BaselineSha }
 }
 
+function Invoke-GangplankJobAdopt {
+    param($Shared,[hashtable]$Arguments)
+    $session = New-GangplankSessionFromSnapshot -Snapshot $Arguments.Session -Token $Arguments.Token
+    Set-GangplankJobProgress $Shared 'Comparing the folder with the project'
+    $r = Add-GangplankExistingFolder -Session $session -Folder ([string]$Arguments.Folder) -Branch ([string]$Arguments.Branch)
+    return @{
+        Session = (ConvertTo-GangplankSessionSnapshot $session)
+        Adopted = [ordered]@{
+            folder = $r.Folder; branch = $r.Branch; sha = $r.Sha; source = $r.Source
+            same = $r.Same; modified = $r.Modified; new = $r.New; missing = $r.Missing
+            behind = $r.Behind; onDefaultBranch = $r.OnDefaultBranch
+        }
+    }
+}
+
 function Invoke-GangplankJobSave {
     param($Shared,[hashtable]$Arguments)
     $session = New-GangplankSessionFromSnapshot -Snapshot $Arguments.Session -Token $Arguments.Token

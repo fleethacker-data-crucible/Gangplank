@@ -183,6 +183,16 @@ $script:GangplankOnReviewJob = {
     return @{ url = $Result.Url; title = $Result.Title }
 }
 
+$script:GangplankOnAdoptJob = {
+    param($Result,$Context)
+    if ($Context.Generation -ne $script:GangplankApp.Generation) {
+        Write-GangplankLog -Level INFO -Message 'Result of an adopt job for a previous session was not applied.'
+        return [ordered]@{ stale = $true }
+    }
+    Set-GangplankAppSession -Snapshot $Result.Session -Token $Context.Token
+    return $Result.Adopted
+}
+
 function Send-GangplankJobStarted {
     param([string]$Id)
     Send-GangplankJson -Status 202 -Object @{ job = $Id }
@@ -402,6 +412,20 @@ function Invoke-GangplankRouteCore {
         if ($session.LastReviewUrl) { Send-GangplankJson -Object @{ url = $session.LastReviewUrl; title = 'Review already created'; existing = $true }; return }
         $args2 = Get-GangplankJobArguments $session
         $id = Start-GangplankJob -Kind 'review' -Group 'workspace' -Function 'Invoke-GangplankJobReview' -Arguments $args2 -OnComplete $script:GangplankOnReviewJob -Context (Get-GangplankJobContext -Token $args2.Token -Kind 'review')
+        Send-GangplankJobStarted $id
+        return
+    }
+
+    if ($m -eq 'POST' -and $p -eq '/api/adopt') {
+        $session = Get-GangplankLiveSession -Required
+        $folder = [string](Get-GangplankBodyValue $Req 'folder')
+        $branch = [string](Get-GangplankBodyValue $Req 'branch')
+        if (-not $folder -or $folder.Length -gt 500) { throw 'BAD_REQUEST|Enter the full path of the folder.' }
+        if ($branch.Length -gt 200 -or $branch -match '[\x00-\x1f]') { throw 'BAD_REQUEST|Branch name is not valid.' }
+        $args2 = Get-GangplankJobArguments $session
+        $args2.Folder = $folder
+        $args2.Branch = $branch
+        $id = Start-GangplankJob -Kind 'adopt' -Group 'workspace' -Function 'Invoke-GangplankJobAdopt' -Arguments $args2 -OnComplete $script:GangplankOnAdoptJob -Context (Get-GangplankJobContext -Token $args2.Token -Kind 'adopt')
         Send-GangplankJobStarted $id
         return
     }
