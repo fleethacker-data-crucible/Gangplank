@@ -372,8 +372,8 @@ test('AI: detect models, save, test and chat through a synthetic gateway', async
   const bad = await call(h, 'POST', '/api/ai/detect', { endpoint: 'http://gateway.example.com/v1' });
   assert.equal(bad.status, 400, 'Plain http to another host must be refused before any request');
   const reset = await call(h, 'POST', '/api/settings/intelligence', { endpoint: '' });
-  assert.equal(reset.json.intelligence.endpoint, 'http://127.0.0.1:1234/v1', 'Reset returns to the local phoenix-lai default');
+  assert.equal(reset.json.intelligence.endpoint, 'http://127.0.0.1:8776/v1', 'Reset returns to the Fleet router default');
   assert.equal(reset.json.intelligence.source, 'default');
-  assert.equal(reset.json.intelligence.model, 'phoenixlai', 'The local default model is phoenixlai');
+  assert.equal(reset.json.intelligence.model, 'auto', 'The router default model is auto');
   assert.equal(reset.json.intelligence.tokenRequired, false, 'No token is required on this PC');
 });

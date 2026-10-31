@@ -14,10 +14,15 @@
 #  LLM_MODEL / OPENAI_MODEL, LLM_TOKEN / OPENAI_API_KEY.
 # ============================================================
 
-# Built-in default: the local phoenix-lai server's OpenAI-compatible API on this PC
-# (http://127.0.0.1:1234/v1/chat/completions). GANGPLANK_AI_URL / LLM_URL / OPENAI_BASE_URL or a
-# saved setting overrides it. A loopback endpoint needs no token; any other endpoint does.
-$script:GangplankAiDefaultEndpoint = 'http://127.0.0.1:1234/v1'
+# Built-in default: the Fleet router (Fairlead) on this PC, http://127.0.0.1:8776/v1/chat/completions.
+# Fairlead picks the engine (phoenix-lai, Windlass, or a provider where the team allows it). Every
+# request to it carries X-Fairlead-Privacy: local, so Gangplank's prompts stay on this PC. GANGPLANK_AI_URL /
+# LLM_URL / OPENAI_BASE_URL or a saved setting overrides it. A loopback endpoint needs no token (Fairlead
+# only asks for its client key when requireClientKey is on: save it as the AI token); any other endpoint does.
+$script:GangplankAiDefaultEndpoint = 'http://127.0.0.1:8776/v1'
+$script:GangplankAiRouterPort = 8776
+# Model name Fairlead understands as "pick a route". Fairlead's default.
+$script:GangplankAiRouterModel = 'auto'
 # Model for any loopback endpoint when no model variable is set (phoenix-lai's model id).
 # Remote endpoints never get a built-in model name: the model must be configured.
 $script:GangplankAiLoopbackModel = 'phoenixlai'
@@ -42,6 +47,14 @@ function Test-GangplankAiLoopbackUrl {
     $u = $null
     if ([string]::IsNullOrWhiteSpace($Url) -or -not [uri]::TryCreate($Url.Trim(),[UriKind]::Absolute,[ref]$u)) { return $false }
     return [bool]$u.IsLoopback
+}
+
+function Test-GangplankAiRouterUrl {
+    # True when the URL is the Fleet router (Fairlead) on this PC: loopback, port 8776.
+    param([AllowEmptyString()][AllowNull()][string]$Url)
+    $u = $null
+    if ([string]::IsNullOrWhiteSpace($Url) -or -not [uri]::TryCreate($Url.Trim(),[UriKind]::Absolute,[ref]$u)) { return $false }
+    return ([bool]$u.IsLoopback -and $u.Port -eq $script:GangplankAiRouterPort)
 }
 
 function Get-GangplankAiAuthToken {
@@ -118,8 +131,10 @@ function Get-GangplankAiOpenAiBase {
 }
 
 function Get-GangplankAiAuthHeaders {
-    param([string]$Auth,[string]$Token)
+    param([string]$Auth,[string]$Token,[string]$Url)
     $h = @{ 'Content-Type' = 'application/json'; Accept = 'application/json' }
+    # Keep the request on local models when it goes through the Fleet router.
+    if (Test-GangplankAiRouterUrl -Url $Url) { $h['X-Fairlead-Privacy'] = 'local' }
     if ($Token) {
         if ($Auth -eq 'api-key') { $h['api-key'] = $Token } else { $h['Authorization'] = "Bearer $Token" }
     }
@@ -160,7 +175,7 @@ function Find-GangplankAiModels {
     $ids = @(); $note = ''; $auth = 'bearer'; $base = $origin
     $get = {
         param($Url,$AuthStyle)
-        $r = Invoke-GangplankHttpRequest -Method GET -Uri $Url -Headers (Get-GangplankAiAuthHeaders -Auth $AuthStyle -Token $Token) -TimeoutSec 20 -MaxAttempts 1
+        $r = Invoke-GangplankHttpRequest -Method GET -Uri $Url -Headers (Get-GangplankAiAuthHeaders -Auth $AuthStyle -Token $Token -Url $Url) -TimeoutSec 20 -MaxAttempts 1
         if ($r.Status -ge 200 -and $r.Status -lt 300 -and $r.Text) { return ($r.Text | ConvertFrom-Json) }
         if ($r.Status -in @(401,403)) { throw ("{0}|The endpoint refused the AI token (HTTP {1}). Check the token in Credentials." -f (Get-GangplankProviderErrorCode -Status $r.Status -Headers $r.Headers), $r.Status) }
         return $null
@@ -252,7 +267,7 @@ function Get-GangplankAiConfiguration {
     if ($envAi.Endpoint) {
         $uri = Assert-GangplankAiEndpoint -Url $envAi.Endpoint
         $flavorName = Get-GangplankAiFlavor -Uri $uri
-        $model = if ($envAi.Model) { $envAi.Model } elseif ($uri.IsLoopback) { $script:GangplankAiLoopbackModel } elseif ($saved.Model) { [string]$saved.Model } else { '' }
+        $model = if ($envAi.Model) { $envAi.Model } elseif (Test-GangplankAiRouterUrl -Url $envAi.Endpoint) { $script:GangplankAiRouterModel } elseif ($uri.IsLoopback) { $script:GangplankAiLoopbackModel } elseif ($saved.Model) { [string]$saved.Model } else { '' }
         if (-not $model) { throw 'AI_MODEL_MISSING|No AI model is set for this endpoint. Set LLM_MODEL (or GANGPLANK_AI_MODEL), or choose a model in Settings.' }
         $base = if ($flavorName -eq 'openai') { Get-GangplankAiOpenAiBase -Uri $uri } else { Get-GangplankAiOrigin $uri }
         $chat = if ($uri.AbsolutePath -match '(?i)/(chat/completions|invocations)$') { $uri.AbsoluteUri } else { Get-GangplankAiChatUrl -Flavor $flavorName -Base $base -Model $model }
@@ -264,9 +279,9 @@ function Get-GangplankAiConfiguration {
         $auth = if ($saved.Auth -eq 'api-key') { 'api-key' } else { 'bearer' }
         $endpoint = [string]$saved.Endpoint
     } else {
-        # Built-in default: the local phoenix-lai server on this PC.
+        # Built-in default: the Fleet router (Fairlead) on this PC.
         $flavorName = 'openai'
-        $model = if ($envAi.Model) { $envAi.Model } else { $script:GangplankAiLoopbackModel }
+        $model = if ($envAi.Model) { $envAi.Model } else { $script:GangplankAiRouterModel }
         $chat = $script:GangplankAiDefaultEndpoint + '/chat/completions'
         [void](Assert-GangplankAiEndpoint -Url $chat)
         $auth = 'bearer'; $endpoint = $script:GangplankAiDefaultEndpoint
@@ -274,6 +289,7 @@ function Get-GangplankAiConfiguration {
     return [pscustomobject]@{
         Endpoint = $endpoint; Profile = $flavorName; Model = $model; Url = $chat; Auth = $auth
         Loopback = (Test-GangplankAiLoopbackUrl -Url $chat)
+        Router = (Test-GangplankAiRouterUrl -Url $chat)
         # Databricks serving and some gateways do not stream: ask once, show the whole answer.
         Streams = ($flavorName -ne 'databricks')
     }
@@ -309,7 +325,7 @@ function Test-GangplankAiConnection {
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $payload = @{ model = $config.Model; messages = @(@{ role = 'user'; content = 'Reply with the single word OK.' }); max_tokens = 5; temperature = 0 }
     if ($config.Profile -eq 'databricks') { $payload.Remove('model') }
-    $r = Invoke-GangplankHttpRequest -Method POST -Uri $config.Url -Headers (Get-GangplankAiAuthHeaders -Auth $config.Auth -Token $Token) -Body ($payload | ConvertTo-Json -Depth 6 -Compress) -TimeoutSec 30
+    $r = Invoke-GangplankHttpRequest -Method POST -Uri $config.Url -Headers (Get-GangplankAiAuthHeaders -Auth $config.Auth -Token $Token -Url $config.Url) -Body ($payload | ConvertTo-Json -Depth 6 -Compress) -TimeoutSec 30
     $doc = ConvertFrom-GangplankApiResponse -Provider 'AI' -Method POST -Endpoint (Get-GangplankSafeUrl $config.Url) -Response $r
     $text = Get-GangplankAiAnswerText -Response $doc
     return [ordered]@{ ok = $true; model = $config.Model; profile = $config.Profile; milliseconds = [int]$clock.ElapsedMilliseconds; reply = $(if ($text.Length -gt 40) { $text.Substring(0,40) } else { $text }) }
