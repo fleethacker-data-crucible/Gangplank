@@ -70,13 +70,15 @@ Only HTTPS github.com, your organization's GitLab host (`GANGPLANK_GITLAB_HOST`,
 Names from earlier releases still work as legacy aliases: the former AI token variable and credential name, the former default Lazarette item names (used only when the current default item is missing), and the GitLab host that used to be built in. They are listed in one place, `Core/Configuration.ps1`.
 
 ## Lazarette (optional, opt-in)
+Reference for the bridge, what it reads and what it never does: [docs/LAZARETTE-BRIDGE.md](docs/LAZARETTE-BRIDGE.md).
+
 Lazarette is still in development, so Gangplank never looks for it on its own. To use it, open **Credentials → Lazarette vault**, tick **Use Lazarette**, enter the Lazarette folder (the one containing its engine loader: `lib\Arc.ps1` in current Lazarette, or `lib\Lazarette.ps1` once Lazarette ships it; Gangplank accepts either) and restart Gangplank; or set `GANGPLANK_LAZARETTE_PATH` (the former `KEYSTONE_ARC_PATH` still works). Like before the rename, the generic `LAZARETTE_PATH` / `ARC_PATH` variables and sibling folders are not searched: Lazarette stays opt-in. Settings are stored in `config\gangplank.local.json` (not committed).
 
 When Lazarette is on, Gangplank loads it once at startup and runs Lazarette's own unlock (`Unlock-LazaretteVaultInteractive`, or the matching command on an older Lazarette that still uses its earlier command names: passphrase or smart card PIN, then authenticator) in the Gangplank PowerShell window, before the server starts. It then reads items with `Get-LazaretteSecret` (or its earlier-named equivalent). By default it reads one item each for GitHub, GitLab and the AI model; Credentials shows the item names and lets you change the mapping. Gangplank has no unlock code of its own and never unlocks from a browser request. Older vault installs that use `pm.ps1` (versions 3 and 4) are still supported.
 
 ## AI model
 
-> **Intelligence router:** AI defaults to local phoenix-lai at http://127.0.0.1:1234/v1, with explicit endpoint overrides. GitHub uses its public API; GitLab requires a configured and allowlisted host. See [TechStack](TechStack) for the current routing contract.
+> **Intelligence router:** AI defaults to the Fleet router (Fairlead) at http://127.0.0.1:8776/v1, which picks the engine and keeps Gangplank's requests on this PC; explicit endpoint overrides still work. GitHub uses its public API; GitLab requires a configured and allowlisted host. See [TechStack](TechStack) for the current routing contract.
 
 Open **Settings → AI model**, enter your organisation's endpoint and select **Detect models**. Gangplank asks the endpoint what it is and which chat models it offers, filters out embedding, speech and image models, and preselects the best match; **Test** sends one short message to prove it works. Supported:
 
@@ -87,7 +89,7 @@ Open **Settings → AI model**, enter your organisation's endpoint and select **
 | Databricks model serving | `/serving-endpoints` or a Databricks host | Chat endpoints only; answers arrive in one piece |
 | Ollama on this PC | `/api/tags` (port 11434) | No token needed; plain http allowed for this PC only |
 
-The token is the **AI** credential (Settings, or `GANGPLANK_AI_TOKEN`). The environment names Halyard uses also work, so one setup serves both apps: `LLM_URL` or `OPENAI_BASE_URL`, `LLM_MODEL` or `OPENAI_MODEL`, `LLM_TOKEN` or `OPENAI_API_KEY`. By default Gangplank uses the local phoenix-lai server on this PC (`http://127.0.0.1:1234/v1/chat/completions`); `GANGPLANK_AI_URL` / `LLM_URL` or a saved setting overrides it. On a loopback endpoint the token is optional (no `Authorization` header is sent without one) and, when no model variable is set, the model is `phoenixlai`. Any other endpoint must use HTTPS, needs a token and a configured model; if `GANGPLANK_AI_ALLOWED_HOSTS` is set, only those hosts (and this PC) are allowed.
+The token is the **AI** credential (Settings, or `GANGPLANK_AI_TOKEN`). The environment names Halyard uses also work, so one setup serves both apps: `LLM_URL` or `OPENAI_BASE_URL`, `LLM_MODEL` or `OPENAI_MODEL`, `LLM_TOKEN` or `OPENAI_API_KEY`. By default Gangplank uses the Fleet router, Fairlead, on this PC (`http://127.0.0.1:8776/v1/chat/completions`, model `auto`) and sends `X-Fairlead-Privacy: local` with every request so it stays on local models; `GANGPLANK_AI_URL` / `LLM_URL` or a saved setting overrides it. On a loopback endpoint the token is optional (no `Authorization` header is sent without one): if Fairlead asks for a client key, create it with `fairlead clients add` and save it as the AI token. When no model variable is set, the model is `auto` for the router and `phoenixlai` for any other loopback server (phoenix-lai called directly). Any other endpoint must use HTTPS, needs a token and a configured model; if `GANGPLANK_AI_ALLOWED_HOSTS` is set, only those hosts (and this PC) are allowed.
 
 The assistant is advisory only: it cannot change files, run tools or publish. Chat sends your typed text and the project/branch name; commit-title help sends file names and statuses only. Source code is never sent automatically.
 
@@ -116,7 +118,7 @@ Every remote write (branch, commit, review request) and every credential or Laza
 Gangplank runs on this PC and serves its page on `127.0.0.1` only. Data leaves the machine only where you set it up:
 
 - **Your Git host.** Downloads and saves go to and from github.com or your allowlisted GitLab host, using your token.
-- **The AI model.** An AI request sends your question and the project content it includes to the configured endpoint. The default is local phoenix-lai on this PC, so nothing leaves; if you point Gangplank at a cloud or organization endpoint, that provider's terms and your organization's AI policy apply.
+- **The AI model.** An AI request sends your question and the project content it includes to the configured endpoint. The default is the Fleet router on this PC, and Gangplank asks it to keep every request on local models, so nothing leaves; if you point Gangplank at a cloud or organization endpoint, that provider's terms and your organization's AI policy apply.
 
 Tokens are sealed with DPAPI for your Windows account and never sent to the browser. The audit log records what changed and where, never file contents or tokens. Gangplank sends no usage data anywhere.
 

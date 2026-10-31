@@ -76,6 +76,7 @@ or a release zip is required.
 
 ## Shared with sibling products
 
+- Fleet integrations (issue 37): AI now defaults to the Fleet router, Fairlead, at 127.0.0.1:8776 (model auto, X-Fairlead-Privacy: local; tested with a scripted transport and the host e2e). The Lazarette bridge has a reference, docs/LAZARETTE-BRIDGE.md, and a vault-flow test. Not done: spoken status (TalkForge and speech in, through Fairlead), publishing Capstan and Scrimshaw output, reading the Fairlead client key from Lazarette, Fleet UI v0.2, and a CLI/API beyond the text menu.
 - Halyard's Lazarette bridge (`module/Halyard/Lazarette.ps1`) still loads `pm.ps1` and is broken
   against Lazarette the same way Gangplank was. Gangplank's `LazaretteBridge.ps1` is the model fix.
 - The local server, Lazarette bridge, mock-provider and CI-hygiene pieces are near-identical
