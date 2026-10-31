@@ -306,6 +306,39 @@ test('a disconnect during a job is not undone by the job', async () => {
   assert.equal(st.json.connected, false, 'Disconnect must stick');
 });
 
+test('publish a folder: a work branch from a plain folder, then Smart Save', async () => {
+  const h = host;
+  let r = await job(h, '/api/connect', { url: fake.url + '/gangplank-demo/sample' });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  const src = path.join(workRoot, 'course-source');
+  fs.mkdirSync(path.join(src, 'lessons'), { recursive: true });
+  fs.writeFileSync(path.join(src, 'lessons', 'one.md'), '# Lesson one\n\nFictional course.\n');
+  fs.writeFileSync(path.join(src, 'course.json'), '{"title":"Fictional course"}\n');
+  fs.writeFileSync(path.join(src, 'export.mp4'), Buffer.alloc(6 * 1024 * 1024, 1));
+  r = await job(h, '/api/publish-folder', { folder: path.join(workRoot, 'nowhere'), name: 'never created' });
+  assert.equal(r.status, 500, 'A missing folder is refused before any branch is created');
+  r = await call(h, 'POST', '/api/publish-folder', { folder: src, name: 'bad..name' });
+  assert.equal(r.status, 400, 'A bad branch name is refused before any work starts');
+  r = await job(h, '/api/publish-folder', { folder: src, name: 'course source' });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  assert.equal(r.json.branch, 'course-source');
+  assert.equal(r.json.source, 'published folder');
+  r = await call(h, 'GET', '/api/preview');
+  const byPath = Object.fromEntries(r.json.changes.map((c) => [c.Path, c]));
+  assert.equal(byPath['course.json'].Kind, 'New');
+  assert.equal(byPath['lessons/one.md'].Kind, 'New');
+  assert.equal(byPath['export.mp4'].Blocked, true, 'A 6 MB export is too large for Smart Save and says so');
+  r = await job(h, '/api/save', { paths: ['course.json', 'lessons/one.md'], message: 'Add course source' });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  const auth = { headers: { Authorization: 'Bearer ' + fake.token } };
+  const commit = await (await fetch(`${fake.url}/repos/gangplank-demo/sample/git/commits/${r.json.saved.Commit}`, auth)).json();
+  const tree = await (await fetch(`${fake.url}/repos/gangplank-demo/sample/git/trees/${commit.tree.sha}?recursive=1`, auth)).json();
+  const names = tree.tree.map((e) => e.path);
+  assert.ok(names.includes('course.json') && names.includes('lessons/one.md'), 'The folder files are on the new branch');
+  assert.ok(!names.includes('export.mp4'), 'The blocked export is not published');
+  assert.ok(names.includes('scripts/build.sh'), 'The project files that were already there stay (nothing is deleted)');
+});
+
 test('AI: detect models, save, test and chat through a synthetic gateway', async () => {
   const h = host;
   let r = await job(h, '/api/ai/detect', { endpoint: fakeAi.url + '/v1' });

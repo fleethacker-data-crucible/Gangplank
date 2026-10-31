@@ -40,14 +40,16 @@ function Read-GangplankCloneHead {
 
 function Add-GangplankExistingFolder {
     [CmdletBinding()]
-    param([Parameter(Mandatory)]$Session,[Parameter(Mandatory)][AllowEmptyString()][string]$Folder,[string]$Branch)
+    param([Parameter(Mandatory)]$Session,[Parameter(Mandatory)][AllowEmptyString()][string]$Folder,[string]$Branch,[switch]$Unrelated)
     if ([string]::IsNullOrWhiteSpace($Folder) -or $Folder.Length -gt 500 -or $Folder -match '[\x00-\x1f]') { throw 'BAD_REQUEST|Enter the full path of the folder.' }
     if (-not (Test-Path -LiteralPath $Folder -PathType Container)) { throw 'NOT_FOUND|That folder was not found.' }
     $full = [IO.Path]::GetFullPath($Folder).TrimEnd('\','/')
     if ($full.Length -le 3 -or $full -eq [IO.Path]::GetPathRoot($full).TrimEnd('\','/')) { throw 'BAD_REQUEST|Choose a project folder, not a whole drive.' }
     if (((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'BAD_REQUEST|Linked folders are not supported. Enter the real folder path.' }
 
-    $clone = Read-GangplankCloneHead -Folder $full
+    # -Unrelated: publish a folder that is not a copy of the project (every file is new). A git clone is then
+    # treated as a plain folder, and the "some file must match" rule is waived.
+    $clone = if ($Unrelated) { $null } else { Read-GangplankCloneHead -Folder $full }
     if ($clone) {
         $source = 'git clone'
         $branchName = $clone.Branch
@@ -84,7 +86,7 @@ function Add-GangplankExistingFolder {
         else { $modified++ }
     }
     $missing = @($remoteMap.Keys | Where-Object { -not $localMap.ContainsKey($_) }).Count
-    if (-not $clone -and $remoteMap.Count -gt 0 -and $same -eq 0) {
+    if (-not $clone -and -not $Unrelated -and $remoteMap.Count -gt 0 -and $same -eq 0) {
         throw "BAD_REQUEST|This folder does not look like a copy of $($Session.ProjectPath): none of its files match the branch '$branchName'."
     }
 

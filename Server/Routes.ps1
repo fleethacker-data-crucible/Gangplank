@@ -430,6 +430,20 @@ function Invoke-GangplankRouteCore {
         return
     }
 
+    if ($m -eq 'POST' -and $p -eq '/api/publish-folder') {
+        $session = Get-GangplankLiveSession -Required
+        $folder = [string](Get-GangplankBodyValue $Req 'folder')
+        $name = [string](Get-GangplankBodyValue $Req 'name')
+        if (-not $folder -or $folder.Length -gt 500) { throw 'BAD_REQUEST|Enter the full path of the folder.' }
+        if ($name) { $name = ConvertTo-GangplankBranchName -Name $name }   # validate before any work starts
+        $args2 = Get-GangplankJobArguments $session
+        $args2.Folder = $folder
+        $args2.Name = $name
+        $id = Start-GangplankJob -Kind 'publish-folder' -Group 'workspace' -Function 'Invoke-GangplankJobPublishFolder' -Arguments $args2 -OnComplete $script:GangplankOnAdoptJob -Context (Get-GangplankJobContext -Token $args2.Token -Kind 'publish-folder')
+        Send-GangplankJobStarted $id
+        return
+    }
+
     # ---- read-only repository views (quick, synchronous) ---------------------
     if ($m -eq 'GET' -and $p -eq '/api/branches') {
         $session = Get-GangplankLiveSession -Required
