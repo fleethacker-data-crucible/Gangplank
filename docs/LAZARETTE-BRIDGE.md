@@ -10,7 +10,7 @@ vault on the workstation (roadmap W1); that needs the real card and Lazarette's 
 ## Turning it on
 
 1. Credentials → Lazarette vault → tick **Use Lazarette** and enter the Lazarette folder (the one that
-   contains `lib\Lazarette.ps1`, or the older `lib\Arc.ps1`). `GANGPLANK_LAZARETTE_PATH` does the same
+   contains `lib\Lazarette.ps1`, or that engine's previous loader file). `GANGPLANK_LAZARETTE_PATH` does the same
    from the environment. Generic names such as `LAZARETTE_PATH` never enable it.
 2. Restart Gangplank. It loads Lazarette once and runs Lazarette's own unlock
    (`Unlock-LazaretteVaultInteractive`) in the console, **once, at startup**. Gangplank never implements
