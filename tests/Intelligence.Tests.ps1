@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 # AI endpoint discovery, model choice and settings; branch naming; workspace folder.
 # Offline: HTTP answers are scripted through the transport seam.
 $ErrorActionPreference = 'Stop'
@@ -27,7 +27,7 @@ try {
         $env:GANGPLANK_AI_ALLOWED_HOSTS = 'ai.example.com'
         Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'https://gateway.example.com/v1' }) -eq 'FORBIDDEN') 'The administrator list must be strict'
         Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'https://ai.example.com/v1' }) -eq '') 'Listed host allowed'
-        Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'https://api.example.net/v1' }) -eq 'FORBIDDEN') 'No built-in host bypasses the administrator list'
+        Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'https://api.github.com/v1' }) -eq 'FORBIDDEN') 'No built-in host bypasses the administrator list'
         $env:GANGPLANK_AI_ALLOWED_HOSTS = $null
 
         # --- model filtering and ranking --------------------------------------
