@@ -34,11 +34,11 @@ function Invoke-GangplankAI {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Question, $Session, [switch]$CommitTitle, [string]$Token)
     $config = Get-GangplankAiConfiguration
-    # A loopback endpoint (local phoenix-lai) needs no token; remote endpoints do.
+    # A loopback endpoint (the Fleet router or phoenix-lai on this PC) needs no token; remote endpoints do.
     $token = if ($Token) { $Token } else { Get-GangplankAiRequestToken -Config $config }
     $payload = New-GangplankAiPayload -Question $Question -Session $Session -Model $config.Model -CommitTitle:$CommitTitle
     if ($config.Profile -eq 'databricks') { $payload.Remove('model'); $payload.Remove('stream') }
-    $response = Invoke-GangplankHttpRequest -Method POST -Uri $config.Url -Headers (Get-GangplankAiAuthHeaders -Auth $config.Auth -Token $token) -Body ($payload | ConvertTo-Json -Depth 8 -Compress) -TimeoutSec 90
+    $response = Invoke-GangplankHttpRequest -Method POST -Uri $config.Url -Headers (Get-GangplankAiAuthHeaders -Auth $config.Auth -Token $token -Url $config.Url) -Body ($payload | ConvertTo-Json -Depth 8 -Compress) -TimeoutSec 90
     $token = $null
     $result = ConvertFrom-GangplankApiResponse -Provider 'AI' -Method POST -Endpoint (Get-GangplankSafeUrl $config.Url) -Response $response
     $answer = Get-GangplankAiAnswerText -Response $result
@@ -52,7 +52,7 @@ function Invoke-GangplankAIStream {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Question, $Session, [Parameter(Mandatory)][scriptblock]$OnChunk, [string]$Token)
     $config = Get-GangplankAiConfiguration
-    # A loopback endpoint (local phoenix-lai) needs no token; remote endpoints do.
+    # A loopback endpoint (the Fleet router or phoenix-lai on this PC) needs no token; remote endpoints do.
     $token = if ($Token) { $Token } else { Get-GangplankAiRequestToken -Config $config }
     if (-not $config.Streams) {
         # Gateway without streaming: one request, the whole answer as one chunk.
@@ -66,6 +66,7 @@ function Invoke-GangplankAIStream {
     $request.Method = 'POST'
     $request.ContentType = 'application/json; charset=utf-8'
     $request.Accept = 'text/event-stream'
+    if (Test-GangplankAiRouterUrl -Url $config.Url) { $request.Headers.Add('X-Fairlead-Privacy','local') }
     if ($token) {
         if ($config.Auth -eq 'api-key') { $request.Headers.Add('api-key',$token) } else { $request.Headers.Add('Authorization',"Bearer $token") }
     }
