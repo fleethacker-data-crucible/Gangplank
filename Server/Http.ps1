@@ -23,7 +23,7 @@ $script:GangplankHttp = @{
     Port = 0; Listener = $null; Stream = $null; Client = $null; Responded = $false
     Nonce = $null; NonceExpires = [datetime]::MinValue
     SessionToken = $null; ClientSecret = $null; StopRequested = $false
-    UiRoot = ''; Manifest = @('index.html','app.js','app.css','logo.svg','heartbeat-worker.js','shell.js','icons.js','vendor/fleet/fleet.css','favicon.ico','brand/icon-256.png','brand/emblem-dark.png','brand/emblem-light.png')
+    UiRoot = ''; Manifest = @('index.html','app.js','app.css','logo.svg','heartbeat-worker.js','diff-worker.js','shell.js','icons.js','vendor/fleet/fleet.css','favicon.ico','brand/icon-256.png','brand/emblem-dark.png','brand/emblem-light.png')
     Csp = "default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     PeerCheck = 'unknown'
     MaxBody = 1048576

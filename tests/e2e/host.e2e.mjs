@@ -263,6 +263,32 @@ test('a session saved by Keystone (before the rename) is picked up', async () =>
   assert.equal(after.hasBaseline, true);
 });
 
+test('Sentinel review: a possible personal identifier needs a reason that is audited', async () => {
+  const h = host;
+  let r = await job(h, '/api/connect', { url: fake.url + '/gangplank-demo/sample' });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  r = await job(h, '/api/start', { name: 'sentinel review' });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  const folder = r.json.folder;
+  fs.writeFileSync(path.join(folder, 'people.csv'), 'id,note\n1,123-45-6789\n');   // synthetic, fictional
+  fs.writeFileSync(path.join(folder, 'logo.png'), Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32)]));
+  r = await job(h, '/api/save', { paths: ['people.csv'] });
+  assert.equal(r.status, 500, 'A review finding blocks publishing without a reason');
+  assert.match(String(r.error), /SSN_CANDIDATE/);
+  r = await job(h, '/api/save', { paths: ['people.csv'], acknowledgements: { 'people.csv': 'ok' } });
+  assert.equal(r.status, 500, 'A reason shorter than 5 characters is refused');
+  const since = new Date().toISOString();   // the audit log keeps earlier runs, so count only this save
+  r = await job(h, '/api/save', {
+    paths: ['people.csv', 'logo.png'], message: 'Add sample data and logo',
+    acknowledgements: { 'people.csv': 'Synthetic test data, not real people', 'logo.png': 'Team logo, checked by eye' },
+  });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  const entries = (await call(h, 'GET', '/api/audit?last=50')).json.entries;
+  const acks = entries.filter((e) => e.action === 'sentinel.acknowledged' && e.time >= since);
+  assert.equal(acks.length, 2, 'Each acknowledged file is audited');
+  assert.ok(acks.some((e) => e.path === 'people.csv' && /SSN_CANDIDATE/.test(e.codes) && /Synthetic test data/.test(e.reason)), 'The audit entry has the codes and the reason');
+});
+
 test('jobs never overlap and bad jobs are clean', async () => {
   const a = await call(host, 'POST', '/api/download', { branch: 'main' });
   const b = await call(host, 'POST', '/api/download', { branch: 'main' });

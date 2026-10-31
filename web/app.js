@@ -1,7 +1,7 @@
 'use strict';const el=id=>document.getElementById(id);let connected=false,workspace='',changes=[],stale=false,lastSaved=false;
 function tab(name){document.querySelectorAll('.section').forEach(x=>x.classList.toggle('active',x.id===name));document.querySelectorAll('.nav button[data-tab]').forEach(x=>{const on=x.dataset.tab===name;x.classList.toggle('active',on);if(on){x.setAttribute('aria-current','page');el('crumb').textContent=x.querySelector('.navLabel')?.textContent||name}else x.removeAttribute('aria-current')});el('main').scrollTop=0;if(connected){if(name==='branches')loadBranches();if(name==='compare')loadBranchSelectors();if(name==='activity')loadHistory();if(name==='reviews')loadReviews();}if(name==='integrations'){loadIntegrations();loadAudit();loadSettings()}}
 document.querySelectorAll('.nav button[data-tab]').forEach(x=>x.addEventListener('click',()=>tab(x.dataset.tab)));
-function note(id,t,k=''){let x=el(id);x.hidden=!t;x.className='notice '+k;x.textContent=t;}
+function note(id,t,k=''){let x=el(id);x.hidden=!t;x.className='notice '+k;x.textContent=t;if(speakable(k,t,speechOn()))speak(t);}
 function log(t){let d=document.createElement('div'),x=document.createElement('time');d.className='activityItem';d.textContent=t;x.textContent=new Date().toLocaleTimeString();d.append(x);el('activityList').prepend(d);}
 async function api(path,method='GET',body){let r=await fetch(path,{method,headers:{'X-Gangplank-Client':clientSecret(),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,cache:'no-store',credentials:'same-origin'}),t=await r.text(),x;try{x=JSON.parse(t)}catch{throw Error('Invalid service response')}if(r.status===401&&x.error==='SESSION'){ended(x.message);throw Error(x.message)}if(!r.ok){const e=Error(plain(x.message||x.error||'Request failed'));e.code=x.error||'';throw e}return x;}
 function ended(t,state='stopped'){sessionEnded=true;stopHeartbeat();el('ended').hidden=false;if(t)el('endedText').textContent=t;el('online').textContent='Session ended';engine(state);document.querySelector('.shell').inert=true;el('ended').querySelector('[tabindex]').focus()}
@@ -54,9 +54,83 @@ function selected(){return [...document.querySelectorAll('#files input:checked')
 function suggest(){let a=changes.filter(x=>selected().includes(x.Path)),roots=[...new Set(a.map(x=>x.Path.replace(/\\/g,'/').split('/')[0]))],scope=roots.length===1&&!roots[0].includes('.')?roots[0].toLowerCase():'project',type=a.every(x=>x.Kind==='New')?'feat':'chore';return a.length?(type+'('+scope+'): update '+(a.length===1?a[0].Path.split('/').pop():a.length+' files')):'No changes';}
 function controls(){const project=connected?el('projectTitle').textContent:'',branch=el('statBranch').textContent;el('headerProject').hidden=!project;el('headerProjectText').textContent=project+(branch&&branch!=='\u2014'?' \u00b7 '+branch:'');el('statusProject').textContent=project?'Project: '+project:'No project connected';el('startBtn').disabled=!connected;el('reviewBtn').disabled=!lastSaved;el('downloadBtn').disabled=!connected;el('refreshBtn').disabled=!workspace;el('selectBtn').disabled=!changes.length;el('localBtn').disabled=!selected().length;el('aiBtn').disabled=!selected().length||stale;el('saveBtn').disabled=!selected().length||stale;}
 function changed(){el('selectedCount').textContent=selected().length+' selected';el('message').value=suggest();controls();}
-function render(){el('files').replaceChildren();for(let f of changes){let row=document.createElement('label'),input=document.createElement('input'),path=document.createElement('span'),tag=document.createElement('span');row.className='file';input.type='checkbox';input.value=f.Path;input.checked=f.Selected&&!f.Blocked;input.disabled=f.Blocked;input.addEventListener('change',changed);path.className='path';path.textContent=f.Path;tag.className='tag';tag.textContent=f.Blocked?'Excluded':f.Kind;row.append(input,path,tag);if(!f.Blocked&&f.Kind!=='New'){let rv=document.createElement('button');rv.type='button';rv.className='btn fl-btn fl-btn--secondary rowBtn';rv.textContent='Revert';rv.title='Go back to the downloaded version of this file. Your edited copy is saved aside first.';rv.setAttribute('aria-label','Revert '+f.Path);rv.addEventListener('click',ev=>{ev.preventDefault();revertFile(f.Path)});row.append(rv)}el('files').append(row);}el('diffSummary').textContent=changes.length?changes.length+' pending files; deletions are never selected automatically.':'No local changes yet.';el('statChanges').textContent=changes.length;el('stale').hidden=!stale;changed();}
+function render(){closeDiff(false);el('files').replaceChildren();for(let f of changes){let row=document.createElement('div'),main=document.createElement('label'),input=document.createElement('input'),path=document.createElement('span'),tag=document.createElement('span');row.className='file';main.className='fileMain';input.type='checkbox';input.value=f.Path;input.checked=f.Selected&&!f.Blocked;input.disabled=f.Blocked;input.addEventListener('change',changed);path.className='path';path.textContent=f.Path;tag.className='tag';tag.textContent=f.Blocked?'Excluded':f.Kind;main.append(input,path,tag);row.append(main);
+ // Excluded files (secrets, oversize) get no viewer; the host refuses them too.
+ if(!f.Blocked){const v=document.createElement('button');v.type='button';v.className='btn fl-btn fl-btn--secondary diffBtn';v.textContent='View changes';v.setAttribute('aria-label','View changes in '+f.Path);v.addEventListener('click',()=>showDiff(f,v));row.append(v)}
+ if(!f.Blocked&&f.Kind!=='New'){let rv=document.createElement('button');rv.type='button';rv.className='btn fl-btn fl-btn--secondary rowBtn';rv.textContent='Revert';rv.title='Go back to the downloaded version of this file. Your edited copy is saved aside first.';rv.setAttribute('aria-label','Revert '+f.Path);rv.addEventListener('click',ev=>{ev.preventDefault();revertFile(f.Path)});row.append(rv)}
+ el('files').append(row);}el('diffSummary').textContent=changes.length?changes.length+' pending files; deletions are never selected automatically.':'No local changes yet.';el('statChanges').textContent=changes.length;el('stale').hidden=!stale;changed();}
 async function revertFile(p){if(!confirm('Go back to the downloaded version of '+p+'? Your edited copy is saved in a backup folder next to the workspace first.'))return;try{const r=await runJob('/api/revert',{path:p},x=>note('saveNotice',x+'...'));note('saveNotice','Reverted '+p+(r.BackupPath?'. Your edited copy is in '+r.BackupPath:'.'),'ok');await refresh()}catch(e){note('saveNotice',e.message,'error')}}
 async function refresh(){if(!workspace)return;try{let x=await api('/api/preview');changes=x.changes||[];stale=!!x.remoteChanged;render();}catch(e){note('saveNotice',e.message,'error')}}
+// ---- Diff viewer (Changes tab). The line diff is computed by diff-worker.js in a Web Worker,
+// so a big file never freezes the page. If the worker cannot start (blocked, or it fails to
+// load), the same function is loaded as a plain script and run on the main thread instead.
+// File text is untrusted: every line is shown with textContent.
+const DIFF_ROWS=3000;
+let diffWorker=null,diffWorkerOff=false,diffNext=0,diffToken=0,diffOpener=null;const diffJobs=new Map();
+function diffLocal(before,after){
+ const load=window.GangplankDiff?Promise.resolve(window.GangplankDiff):new Promise((ok,no)=>{const s=document.createElement('script');s.src='/diff-worker.js';s.onload=()=>window.GangplankDiff?ok(window.GangplankDiff):no(Error('The comparison code could not be loaded.'));s.onerror=()=>no(Error('The comparison code could not be loaded.'));document.head.append(s)});
+ return load.then(d=>new Promise(r=>setTimeout(r,0)).then(()=>d.computeDiff(before,after)));
+}
+function diffWorkerFailed(){
+ diffWorkerOff=true;if(diffWorker){try{diffWorker.terminate()}catch{}diffWorker=null}
+ const jobs=[...diffJobs.values()];diffJobs.clear();for(const j of jobs)diffLocal(j.before,j.after).then(j.resolve,j.reject);
+}
+function diffCancel(){if(diffWorker&&diffJobs.size){try{diffWorker.terminate()}catch{}diffWorker=null}diffJobs.clear()}
+function diffCompute(before,after){
+ return new Promise((resolve,reject)=>{
+  if(!diffWorker&&!diffWorkerOff){
+   try{diffWorker=new Worker('/diff-worker.js');diffWorker.onmessage=e=>{const m=e.data||{},j=diffJobs.get(m.id);if(!j)return;diffJobs.delete(m.id);if(m.type==='result')j.resolve(m);else j.reject(Error(m.message||'The comparison failed.'))};diffWorker.onerror=e=>{if(e&&e.preventDefault)e.preventDefault();diffWorkerFailed()}}
+   catch{diffWorker=null;diffWorkerOff=true}
+  }
+  if(!diffWorker){diffLocal(before,after).then(resolve,reject);return}
+  const id=++diffNext;diffJobs.set(id,{before,after,resolve,reject});diffWorker.postMessage({type:'diff',id,before,after});
+ });
+}
+function diffStatus(t){el('diffStatus').textContent=t}
+function closeDiff(focusBack=true){
+ diffToken++;diffCancel();el('diffPanel').hidden=true;el('diffView').hidden=true;el('diffView').replaceChildren();diffStatus('');
+ const o=diffOpener;diffOpener=null;if(focusBack&&o&&o.isConnected)o.focus();
+}
+function renderDiff(r,path){
+ const view=el('diffView'),s=r.stats||{};view.replaceChildren();
+ if(!r.hunks.length){view.hidden=true;diffStatus(s.endingsOnly?'The text is the same; only line endings or the final newline changed.':'No differences in the text.');return}
+ diffStatus(path+': '+s.added+' line'+(s.added===1?'':'s')+' added, '+s.removed+' removed. A + marks an added line and a - a removed line.');
+ let shown=0,cut=false;const frag=document.createDocumentFragment();
+ outer:for(const h of r.hunks){
+  const head=document.createElement('div');head.className='diffHunk';head.textContent='@@ -'+h.aStart+','+h.aCount+' +'+h.bStart+','+h.bCount+' @@';frag.append(head);
+  for(const l of h.lines){
+   if(shown>=DIFF_ROWS){cut=true;break outer}
+   shown++;
+   const row=document.createElement('div'),a=document.createElement('span'),b=document.createElement('span'),mark=document.createElement('span'),text=document.createElement('span');
+   row.className='diffLine '+(l.t==='+'?'diffAdd':l.t==='-'?'diffDel':'diffCtx');
+   a.className='diffNo';a.textContent=l.a||'';b.className='diffNo';b.textContent=l.b||'';
+   mark.className='diffMark';mark.textContent=l.t==='+'||l.t==='-'?l.t:' ';
+   text.className='diffText';text.textContent=l.text;
+   row.append(a,b,mark,text);frag.append(row);
+  }
+ }
+ if(cut){const more=document.createElement('div');more.className='diffHunk';more.textContent='Only the first '+DIFF_ROWS+' lines are shown.';frag.append(more)}
+ view.append(frag);view.hidden=false;
+}
+async function showDiff(f,opener){
+ const token=++diffToken;diffCancel();diffOpener=opener;
+ el('diffPanel').hidden=false;el('diffView').hidden=true;el('diffView').replaceChildren();
+ el('diffTitle').textContent='Changes in '+f.Path;diffStatus('Loading the file...');
+ el('diffTitle').focus();el('diffPanel').scrollIntoView({block:'nearest'});
+ try{
+  const d=await api('/api/diff?'+new URLSearchParams({path:f.Path}).toString());
+  if(token!==diffToken)return;
+  if(d.excluded){diffStatus('This file is excluded from saving (it may hold secrets), so its contents are not shown.');return}
+  if(d.binary){diffStatus('This is not a text file, so there is nothing to compare line by line.');return}
+  if(d.truncated){diffStatus('Too large to show: files above '+Math.round((d.limit||524288)/1024)+' KB are not compared here.');return}
+  diffStatus('Computing...');
+  const r=await diffCompute(d.before||'',d.after||'');
+  if(token!==diffToken)return;
+  if(r.tooLarge){diffStatus(r.message||'Too large to show.');return}
+  renderDiff(r,f.Path);
+ }catch(e){if(token===diffToken)diffStatus('Could not show the changes: '+e.message)}
+}
+el('diffClose').addEventListener('click',()=>closeDiff());
 async function init(){try{let x=await api('/api/status');connected=!!x.connected;workspace=x.workspace||'';lastSaved=!!x.canReview;el('online').textContent='Local service connected';engine('running');el('projectTitle').textContent=x.project||'Ready when you are';el('testBanner').hidden=!x.localDev;if(x.localDev&&x.devProvider&&!el('repoUrl').value)el('repoUrl').value=x.devProvider+'/gangplank-demo/sample';el('projectHint').textContent=x.restoredWaiting?'Your previous session is saved. Add a token in Credentials to continue it.':connected?(workspace?'Workspace ready. Edit files there, then Smart Save.':'Connected; download a workspace to begin.'):'Paste a GitHub or GitLab project URL to get started.';if(x.branch)el('branch').value=x.branch;el('statProvider').textContent=x.provider||'—';el('statBranch').textContent=x.branch||'—';el('workspacePath').textContent=workspace||'No workspace downloaded.';if(workspace)await refresh();if(connected)await loadInsights();await loadIntegrations();}catch(e){el('online').textContent='Open this page through Start-Gangplank.ps1';engine('disconnected');note('notice','Start Gangplank using Start-Gangplank.ps1, then open the localhost URL.','warn')}controls()}
 el('connectBtn').addEventListener('click',async()=>{let b=el('connectBtn');b.disabled=true;try{let x=await runJob('/api/connect',{url:el('repoUrl').value.trim()},p=>note('notice',p+'...'));connected=true;workspace='';changes=[];lastSaved=false;el('workspacePath').textContent='No workspace downloaded.';el('projectTitle').textContent=x.project;el('projectHint').textContent='Connected. Download a clean workspace to start.';el('statProvider').textContent=x.provider;el('statBranch').textContent=x.branch;el('statChanges').textContent='—';el('branch').value=x.branch;note('notice','Connected! Credentials remain in the PowerShell process.','ok');log('Connected to '+x.project);await loadInsights()}catch(e){const message=e.message;note('notice',message,'error');if(/^(ARC_|CREDENTIAL_)/.test(e.code||'')){tab('integrations');await loadIntegrations();note('lazaretteNotice',message,'error')}}finally{b.disabled=false;controls()}});
 el('startBtn').addEventListener('click',async()=>{let b=el('startBtn');b.disabled=true;try{let x=await runJob('/api/start',{name:el('workName').value.trim()},p=>note('notice',p+'...'));el('workName').value='';workspace=x.folder;el('workspacePath').textContent=workspace;el('statBranch').textContent=x.branch;el('branch').value=x.branch;note('notice','Safe work branch '+x.branch+' created and downloaded. Edit your files, then Smart Save.','ok');log('Started safe branch '+x.branch);await refresh()}catch(e){note('notice',e.message,'error')}finally{controls()}});
@@ -71,7 +145,8 @@ el('saveBtn').addEventListener('click',async()=>{let paths=selected();if(!paths.
   publicConfirmed=confirm('PUBLIC GITHUB/GITLAB REPOSITORY: Anyone may see the selected files and committed history. Confirm you have authorization to release this information. Continue publishing '+paths.length+' change(s)?');
   if(!publicConfirmed)return;
  }else if(!confirm('Publish '+paths.length+' file change(s) to your online branch? This creates a remote commit.'))return;
- const r=await runJob('/api/save',{paths,message:el('message').value.trim(),publicConfirmed},p=>note('saveNotice',p+'...')),x=r.saved;
+ const acks={},reviews=(check.findings||[]).filter(f=>paths.includes(f.Path)&&f.Severity==='Review');for(const p of [...new Set(reviews.map(f=>f.Path))]){const what=reviews.filter(f=>f.Path===p).map(f=>f.Detail).join(' '),why=prompt('Sentinel review: '+p+'\n'+what+'\n\nTo publish this file anyway, type the reason (5 to 300 characters). It is recorded in the audit log. Cancel to stop.');if(why===null||why.trim().length<5)throw Error('Not published: '+p+' needs a reason.');acks[p]=why.trim().slice(0,300)}
+ const r=await runJob('/api/save',{paths,message:el('message').value.trim(),publicConfirmed,acknowledgements:acks},p=>note('saveNotice',p+'...')),x=r.saved;
  note('saveNotice','Published '+x.FileCount+' file(s) as '+x.Commit.slice(0,10)+'. '+x.Message,'ok');log('Published '+x.FileCount+' files: '+x.Message);lastSaved=true;await refresh();
  }catch(e){note('saveNotice',e.message,'error')}finally{controls()}});
 function chat(who,txt){let wrap=document.createElement('div'),head=document.createElement('span'),body=document.createElement('span');wrap.className='bubble '+(who==='You'?'user':'');head.className='who';head.textContent=who;body.textContent=txt;wrap.append(head,body);el('messages').append(wrap);el('messages').scrollTop=el('messages').scrollHeight;return body}
@@ -207,3 +282,11 @@ el('aiDetect').addEventListener('click',async()=>{const b=el('aiDetect');b.disab
 el('aiSave').addEventListener('click',async()=>{try{const d=aiDetected||{};await api('/api/settings/intelligence','POST',{endpoint:el('aiEndpoint').value.trim(),model:el('aiModel').value.trim(),profile:d.profile||'',base:d.base||'',auth:d.auth||''});note('aiNotice','AI setting saved.','ok');await loadSettings()}catch(e){note('aiNotice',e.message,'error')}});
 el('aiReset').addEventListener('click',async()=>{try{await api('/api/settings/intelligence','POST',{endpoint:''});el('aiEndpoint').value='';el('aiModel').value='';aiDetected=null;note('aiNotice','Back to the default AI endpoint.','ok');await loadSettings()}catch(e){note('aiNotice',e.message,'error')}});
 el('aiTest').addEventListener('click',async()=>{const b=el('aiTest');b.disabled=true;note('aiNotice','Testing...','');try{const r=await runJob('/api/ai/test',{});note('aiNotice','Working: '+r.model+' answered in '+r.milliseconds+' ms.','ok')}catch(e){note('aiNotice','Test failed: '+e.message,'error')}finally{b.disabled=false}});
+// Spoken status (opt-in). Results and errors are read aloud with the voices installed on this PC through
+// the browser; nothing is sent anywhere, and progress messages are never spoken. With no voices the toggle is off and the text stays on screen.
+function speakable(k,t,on){return !!(on&&t&&(k==='ok'||k==='error'||k==='warn'))}
+function speechOn(){try{return localStorage.getItem('gp.speak')==='1'}catch{return false}}
+function speechReady(){return !!(window.speechSynthesis&&window.SpeechSynthesisUtterance)}
+function speak(t){if(!speechReady())return;try{window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(String(t).slice(0,240));u.lang=document.documentElement.lang||'en';window.speechSynthesis.speak(u)}catch{}}
+function initSpeech(){const t=el('speakToggle'),h=el('speakHint'),ok=speechReady();t.disabled=!ok;t.checked=ok&&speechOn();h.textContent=ok?'Uses the voices installed on this PC. Nothing is sent anywhere.':'This browser has no local voices, so messages stay on screen only.';t.addEventListener('change',()=>{try{localStorage.setItem('gp.speak',t.checked?'1':'0')}catch{}if(t.checked)speak('Spoken status is on.')})}
+initSpeech();

@@ -154,3 +154,79 @@ function Split-GangplankPushBatches {
     if ($current.Count -gt 0) { [void]$batches.Add(@($current.ToArray())) }
     return @($batches)
 }
+
+
+# ---------------------------------------------------------------------------
+# Diff viewer (roadmap 10): the text of one pending change, before and after.
+# The line diff itself is computed in the browser (web/diff-worker.js); the host
+# only fetches the two texts, with the same exclusions Smart Save applies.
+# ---------------------------------------------------------------------------
+$script:GangplankDiffMaxBytes = 524288
+
+function ConvertFrom-GangplankDiffBytes {
+    # One side of a diff as text. A NUL byte in the first 8 KB means binary: no text is returned.
+    param([byte[]]$Bytes,[int]$MaxBytes = 524288)
+    if ($null -eq $Bytes) { $Bytes = New-Object byte[] 0 }
+    if ($Bytes.Length -gt $MaxBytes) { return @{ Found = $true; Size = $Bytes.Length; TooLarge = $true; Binary = $false; Text = '' } }
+    $nul = [Array]::IndexOf($Bytes,[byte]0)
+    if ($nul -ge 0 -and $nul -lt 8000) { return @{ Found = $true; Size = $Bytes.Length; TooLarge = $false; Binary = $true; Text = '' } }
+    $text = (New-Object System.Text.UTF8Encoding($false)).GetString($Bytes)
+    if ($text.Length -gt 0 -and [int]$text[0] -eq 0xFEFF) { $text = $text.Substring(1) }
+    return @{ Found = $true; Size = $Bytes.Length; TooLarge = $false; Binary = $false; Text = $text }
+}
+
+function ConvertFrom-GangplankFileContent {
+    # A file as GitHub's Contents API or GitLab's repository files API describes it
+    # ({ type; size; encoding; content }, base64) -> the same shape as ConvertFrom-GangplankDiffBytes.
+    param($Item,[int]$MaxBytes = 524288)
+    if ($null -eq $Item -or $Item -is [array]) { return @{ Found = $false } }
+    $type = 'file'
+    if ($Item.PSObject.Properties['type']) { $type = [string]$Item.type }
+    if ($type -ne 'file') { return @{ Found = $true; Size = 0; TooLarge = $false; Binary = $true; Text = '' } }   # link or submodule
+    $size = [int64]0
+    if ($Item.PSObject.Properties['size']) { $size = [int64]$Item.size }
+    $encoding = ''
+    if ($Item.PSObject.Properties['encoding']) { $encoding = [string]$Item.encoding }
+    # GitHub sends no content above 1 MB (encoding "none"); the cap is lower than that anyway.
+    if ($size -gt $MaxBytes -or $encoding -ne 'base64') { return @{ Found = $true; Size = $size; TooLarge = $true; Binary = $false; Text = '' } }
+    $bytes = [Convert]::FromBase64String(([string]$Item.content) -replace '\s','')
+    return (ConvertFrom-GangplankDiffBytes -Bytes $bytes -MaxBytes $MaxBytes)
+}
+
+function Get-GangplankFileDiff {
+    # GET /api/diff: { path; kind; binary; truncated; excluded; limit; before; after } for one
+    # pending change. Only paths Get-GangplankWorkspacePreview lists are served; files Smart
+    # Save would exclude (secrets, oversize) are never read.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Session,[string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path) -or $Path.Length -gt 1000 -or $Path -match '[\x00-\x1f\\]' -or $Path.StartsWith('/') -or $Path -match '^[A-Za-z]:' -or $Path -match '(^|/)\.\.?(/|$)') {
+        throw 'BAD_REQUEST|Choose a changed file from the list.'
+    }
+    $max = [int]$script:GangplankDiffMaxBytes
+    $preview = Get-GangplankWorkspacePreview -Session $Session
+    $change = @($preview.Changes | Where-Object { $_.Path -ceq $Path })[0]
+    if (-not $change) { throw 'NOT_FOUND|That file is not a pending change.' }
+    $result = [ordered]@{ path = [string]$change.Path; kind = [string]$change.Kind; binary = $false; truncated = $false; excluded = $false; limit = $max; before = ''; after = '' }
+    if ($change.Blocked) { $result.excluded = $true; return $result }
+
+    if ($change.Kind -ne 'Deleted') {
+        $root = [IO.Path]::GetFullPath($Session.LocalPath).TrimEnd('\','/')
+        $full = [IO.Path]::GetFullPath((Join-Path $root ($Path.Replace('/',[IO.Path]::DirectorySeparatorChar))))
+        if (-not $full.StartsWith(($root + [IO.Path]::DirectorySeparatorChar),[StringComparison]::OrdinalIgnoreCase)) { throw 'BAD_REQUEST|Unsafe file path.' }
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { throw 'NOT_FOUND|That file is no longer in the workspace. Refresh the list.' }
+        $item = Get-Item -LiteralPath $full -Force
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { $result.excluded = $true; return $result }
+        if ($item.Length -gt $max) { $result.truncated = $true } else {
+            $side = ConvertFrom-GangplankDiffBytes -Bytes ([IO.File]::ReadAllBytes($full)) -MaxBytes $max
+            if ($side.Binary) { $result.binary = $true } elseif ($side.TooLarge) { $result.truncated = $true } else { $result.after = $side.Text }
+        }
+    }
+    if ($change.Kind -ne 'New' -and -not $result.binary -and -not $result.truncated) {
+        $side = $Session.ProviderObj.GetFileText([string]$Session.ProjectPath,[string]$Session.BaselineSha,[string]$Path,$max)
+        if ($side.Found) {
+            if ($side.Binary) { $result.binary = $true } elseif ($side.TooLarge) { $result.truncated = $true } else { $result.before = $side.Text }
+        }
+    }
+    if ($result.binary -or $result.truncated) { $result.before = ''; $result.after = '' }
+    return $result
+}
