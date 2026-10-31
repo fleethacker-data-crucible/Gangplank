@@ -374,6 +374,161 @@ test('validation: malformed trees and bad JSON are rejected', async () => {
   assert.equal(state.calls.at(-1).invalidUtf8Body, true);
 });
 
+// ---- reviews: detail, checks, comments, files and merge ----
+
+// A work branch off main with one new file, and an open pull request for it.
+async function workPull(name, file = 'notes/work.md') {
+  const main = await headOf('main');
+  assert.equal((await api('POST', `/repos/${REPO}/git/refs`, { ref: `refs/heads/${name}`, sha: main })).status, 201);
+  await control('POST', '/__fake/advance', { branch: name, path: file, content: `# ${name}\n` });
+  const pr = await api('POST', `/repos/${REPO}/pulls`, { title: `Work ${name}`, head: name, base: 'main', body: 'Fictional work.' });
+  assert.equal(pr.status, 201);
+  return pr.json.number;
+}
+
+test('pull detail reports mergeability; the list does not', async () => {
+  const detail = (await api('GET', `/repos/${REPO}/pulls/1`)).json;
+  assert.equal(detail.mergeable, true);
+  assert.equal(detail.mergeable_state, 'clean');
+  assert.equal(detail.draft, false);
+  assert.equal(detail.merged, false);
+  assert.equal(detail.head.ref, 'feature/demo');
+  assert.equal(detail.head.sha, await headOf('feature/demo'));
+  const list = (await api('GET', `/repos/${REPO}/pulls`)).json;
+  assert.equal('mergeable' in list[0], false, 'The list omits mergeability, like GitHub');
+  assert.equal((await api('GET', `/repos/${REPO}/pulls/99`)).status, 404);
+});
+
+test('issue comments: seeded, listed in order, created, validated', async () => {
+  const seeded = (await api('GET', `/repos/${REPO}/issues/1/comments`)).json;
+  assert.equal(seeded.length, 1);
+  assert.equal(seeded[0].user.login, 'teammate-tess');
+  const made = await api('POST', `/repos/${REPO}/issues/1/comments`, { body: 'Thanks, merging after lunch.' });
+  assert.equal(made.status, 201);
+  assert.equal(made.json.user.login, 'fake-gangplank-user');
+  assert.equal(made.json.body, 'Thanks, merging after lunch.');
+  const after = (await api('GET', `/repos/${REPO}/issues/1/comments`)).json;
+  assert.deepEqual(after.map((c) => c.body), [seeded[0].body, 'Thanks, merging after lunch.']);
+  assert.equal((await api('GET', `/repos/${REPO}/pulls/1`)).json.comments, 2);
+  assert.equal((await api('POST', `/repos/${REPO}/issues/1/comments`, { body: '   ' })).status, 422);
+  assert.equal((await api('POST', `/repos/${REPO}/issues/1/comments`, {})).status, 422);
+  assert.equal((await api('GET', `/repos/${REPO}/issues/77/comments`)).status, 404);
+  assert.equal((await api('POST', `/repos/${REPO}/issues/1/comments`, { body: 'x' }, { token: null })).status, 401);
+  const page = await api('GET', `/repos/${REPO}/issues/1/comments?per_page=1&page=2`);
+  assert.equal(page.json.length, 1);
+});
+
+test('check-runs and combined status for a ref (sha or branch), seeded and controlled', async () => {
+  const sha = await headOf('feature/demo');
+  const runs = (await api('GET', `/repos/${REPO}/commits/${sha}/check-runs?per_page=100`)).json;
+  assert.equal(runs.total_count, 2);
+  assert.deepEqual(runs.check_runs.map((r) => [r.name, r.status, r.conclusion]), [['build', 'completed', 'success'], ['unit-tests', 'completed', 'success']]);
+  const status = (await api('GET', `/repos/${REPO}/commits/${sha}/status`)).json;
+  assert.equal(status.state, 'success');
+  assert.deepEqual(status.statuses.map((s) => [s.context, s.state]), [['ci/lint', 'success']]);
+  // a branch name with a slash works as the ref, and a commit without checks reads as none / pending
+  const byBranch = (await api('GET', `/repos/${REPO}/commits/feature/demo/check-runs`)).json;
+  assert.equal(byBranch.total_count, 2);
+  const mainSha = await headOf('main');
+  assert.equal((await api('GET', `/repos/${REPO}/commits/${mainSha}/check-runs`)).json.total_count, 0);
+  assert.equal((await api('GET', `/repos/${REPO}/commits/${mainSha}/status`)).json.state, 'pending');
+  await control('POST', '/__fake/checks', { branch: 'feature/demo', runs: [{ name: 'build', status: 'completed', conclusion: 'failure' }, { name: 'slow', status: 'in_progress' }], statuses: [{ context: 'ci/lint', state: 'error' }] });
+  const failing = (await api('GET', `/repos/${REPO}/commits/${sha}/check-runs`)).json.check_runs;
+  assert.deepEqual(failing.map((r) => [r.name, r.status, r.conclusion]), [['build', 'completed', 'failure'], ['slow', 'in_progress', null]]);
+  assert.equal((await api('GET', `/repos/${REPO}/commits/${sha}/status`)).json.state, 'failure');
+  assert.equal((await api('GET', `/repos/${REPO}/pulls/1`)).json.mergeable_state, 'unstable', 'a failing check makes the pull unstable, not blocked');
+  assert.equal((await api('GET', `/repos/${REPO}/commits/${'0'.repeat(40)}/status`)).status, 422);
+});
+
+test('pull files list the changes since the merge base (metadata only)', async () => {
+  const files = (await api('GET', `/repos/${REPO}/pulls/1/files`)).json;
+  const byName = Object.fromEntries(files.map((f) => [f.filename, f]));
+  assert.equal(byName['src/demo.ps1'].status, 'added');
+  assert.equal(byName['docs/guide.md'].status, 'modified');
+  assert.equal(byName['docs/guide.md'].additions, 1);
+  assert.ok(!('patch' in byName['docs/guide.md']) && !('content' in byName['docs/guide.md']), 'No file contents');
+  assert.equal((await api('GET', `/repos/${REPO}/pulls/99/files`)).status, 404);
+});
+
+test('merge: a real merge commit, sha guard, then the pull is closed and merged', async () => {
+  const number = await workPull('work/ok');
+  const head = await headOf('work/ok');
+  const mainBefore = await headOf('main');
+  const done = await api('PUT', `/repos/${REPO}/pulls/${number}/merge`, { merge_method: 'merge', sha: head });
+  assert.equal(done.status, 200);
+  assert.equal(done.json.merged, true);
+  const mainAfter = await headOf('main');
+  assert.equal(mainAfter, done.json.sha);
+  const mergeCommit = (await api('GET', `/repos/${REPO}/git/commits/${mainAfter}`)).json;
+  assert.deepEqual(mergeCommit.parents.map((p) => p.sha), [mainBefore, head], 'Parents: the target tip, then the reviewed head');
+  assert.match(mergeCommit.message, /^Merge pull request #\d+ from gangplank-demo\/work\/ok/);
+  assert.equal((await treeMap(mergeCommit.tree.sha)).has('notes/work.md'), true, 'The reviewed change is in the target branch');
+  assert.equal((await treeMap(mergeCommit.tree.sha)).has('src/app.ps1'), true, 'Existing files stay');
+  const pr = (await api('GET', `/repos/${REPO}/pulls/${number}`)).json;
+  assert.equal(pr.state, 'closed');
+  assert.equal(pr.merged, true);
+  assert.equal(pr.merge_commit_sha, mainAfter);
+  assert.ok(pr.merged_at);
+  assert.equal((await headOf('work/ok')), head, 'The work branch is left alone');
+  const open = (await api('GET', `/repos/${REPO}/pulls?state=open`)).json.map((p) => p.number);
+  assert.ok(!open.includes(number));
+  const again = await api('PUT', `/repos/${REPO}/pulls/${number}/merge`, { sha: head });
+  assert.equal(again.status, 405, 'A merged pull cannot be merged twice');
+});
+
+test('merge refusals: stale sha 409, draft / blocked / conflict / closed 405, bad input 422', async () => {
+  const number = await workPull('work/refuse');
+  const head = await headOf('work/refuse');
+  const merge = (body) => api('PUT', `/repos/${REPO}/pulls/${number}/merge`, body);
+  const main = await headOf('main');
+
+  const stale = await merge({ sha: main });
+  assert.equal(stale.status, 409);
+  assert.match(stale.json.message, /Head branch was modified/);
+  assert.equal(await headOf('main'), main, 'A refused merge changes nothing');
+
+  await control('POST', '/__fake/pull', { number, draft: true });
+  assert.equal((await api('GET', `/repos/${REPO}/pulls/${number}`)).json.mergeable_state, 'draft');
+  const draft = await merge({ sha: head });
+  assert.equal(draft.status, 405);
+  await control('POST', '/__fake/pull', { number, draft: false, blocked: true });
+  assert.equal((await api('GET', `/repos/${REPO}/pulls/${number}`)).json.mergeable_state, 'blocked');
+  assert.equal((await merge({ sha: head })).status, 405);
+  await control('POST', '/__fake/pull', { number, blocked: false });
+
+  assert.equal((await merge({ sha: head, merge_method: 'octopus' })).status, 422);
+  assert.equal((await merge({ sha: head, merge_method: 'squash' })).status, 405);
+  assert.equal((await merge({ sha: 12345 })).status, 422);
+  assert.equal((await api('PUT', `/repos/${REPO}/pulls/999/merge`, { sha: head })).status, 404);
+  assert.equal((await api('PUT', `/repos/${REPO}/pulls/${number}/merge`, { sha: head }, { token: null })).status, 401);
+  assert.equal(await headOf('main'), main, 'Nothing was merged by any refusal');
+
+  // The same file changed on both sides: dirty, mergeable false, 405.
+  await control('POST', '/__fake/advance', { branch: 'main', path: 'notes/work.md', content: '# different\n' });
+  const conflicted = (await api('GET', `/repos/${REPO}/pulls/${number}`)).json;
+  assert.equal(conflicted.mergeable, false);
+  assert.equal(conflicted.mergeable_state, 'dirty');
+  assert.equal((await merge({ sha: head })).status, 405);
+});
+
+test('merge of a pull whose branch is behind (no conflicts) keeps the newer target changes', async () => {
+  const number = await workPull('work/behind', 'notes/behind.md');
+  await control('POST', '/__fake/advance', { branch: 'main', path: 'TEAMMATE.md', content: '# teammate\n' });
+  const head = await headOf('work/behind');
+  assert.equal((await api('GET', `/repos/${REPO}/pulls/${number}`)).json.mergeable_state, 'clean');
+  const done = await api('PUT', `/repos/${REPO}/pulls/${number}/merge`, { sha: head });
+  assert.equal(done.status, 200);
+  const tree = await treeMap((await api('GET', `/repos/${REPO}/git/commits/${done.json.sha}`)).json.tree.sha);
+  assert.ok(tree.has('notes/behind.md') && tree.has('TEAMMATE.md'), 'Both the reviewed work and the newer target change are present');
+});
+
+test('a closed pull is not mergeable and reports unknown mergeability', async () => {
+  const detail = (await api('GET', `/repos/${REPO}/pulls/2`)).json;
+  assert.equal(detail.state, 'closed');
+  assert.equal(detail.mergeable, null);
+  assert.equal((await api('PUT', `/repos/${REPO}/pulls/2/merge`, {})).status, 405);
+});
+
 test('CLI prints one JSON line with url and token', async () => {
   const script = fileURLToPath(new URL('./fake-github.mjs', import.meta.url));
   const child = spawn(process.execPath, [script, '0', '--token=cli-token'], { stdio: ['ignore', 'pipe', 'inherit'] });

@@ -57,6 +57,22 @@ function Invoke-GangplankJobReview {
     return @{ Url = $url; Title = $title }
 }
 
+function Invoke-GangplankJobReviewComment {
+    param($Shared,[hashtable]$Arguments)
+    $session = New-GangplankSessionFromSnapshot -Snapshot $Arguments.Session -Token $Arguments.Token
+    Set-GangplankJobProgress $Shared 'Posting your reply'
+    $c = Add-GangplankReviewComment -Session $session -Number $Arguments.Number -Text ([string]$Arguments.Text)
+    return [ordered]@{ number = [int]$Arguments.Number; id = $c.Id; author = $c.Author; created = $c.Created }
+}
+
+function Invoke-GangplankJobReviewMerge {
+    param($Shared,[hashtable]$Arguments)
+    $session = New-GangplankSessionFromSnapshot -Snapshot $Arguments.Session -Token $Arguments.Token
+    Set-GangplankJobProgress $Shared 'Merging the review request'
+    $done = Merge-GangplankReview -Session $session -Number $Arguments.Number -Sha ([string]$Arguments.Sha) -Confirmed ($Arguments.Confirmed -eq $true)
+    return [ordered]@{ merged = $true; number = $done.Number; source = $done.Source; target = $done.Target; sha = $done.Sha; mergeCommit = $done.MergeCommit; url = $done.Url }
+}
+
 function Invoke-GangplankJobCommitTitle {
     param($Shared,[hashtable]$Arguments)
     Set-GangplankJobProgress $Shared 'Asking the AI gateway for a title'

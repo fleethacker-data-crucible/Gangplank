@@ -429,6 +429,43 @@ function Invoke-GangplankRouteCore {
         Send-GangplankJson -Object @{ reviews = @(Get-GangplankRepositoryReviews -Session $session) }
         return
     }
+    # One review request: detail is a quick read (a few API calls, fail-fast like the list);
+    # reply and merge are writes, so they run as background jobs (own 'review' group).
+    if ($p -match '^/api/reviews/([0-9]{1,9})(/comment|/merge)?$') {
+        $number = ConvertTo-GangplankReviewNumber $Matches[1]
+        $action = [string]$Matches[2]
+        if ($m -eq 'GET' -and $action -eq '') {
+            $session = Get-GangplankLiveSession -Required
+            Send-GangplankJson -Object (Get-GangplankReviewDetail -Session $session -Number $number)
+            return
+        }
+        if ($m -eq 'POST' -and $action -eq '/comment') {
+            $session = Get-GangplankLiveSession -Required
+            $text = ConvertTo-GangplankReviewCommentText -Text ([string](Get-GangplankBodyValue $Req 'text'))
+            $args2 = Get-GangplankJobArguments $session
+            $args2.Number = $number
+            $args2.Text = $text
+            $id = Start-GangplankJob -Kind 'review-comment' -Group 'review' -Function 'Invoke-GangplankJobReviewComment' -Arguments $args2
+            Send-GangplankJobStarted $id
+            return
+        }
+        if ($m -eq 'POST' -and $action -eq '/merge') {
+            $session = Get-GangplankLiveSession -Required
+            $confirm = Get-GangplankBodyValue $Req 'confirm'
+            if ($confirm -isnot [bool] -or $confirm -ne $true) { throw 'BAD_REQUEST|Confirm the merge first. Nothing was merged.' }
+            $sha = [string](Get-GangplankBodyValue $Req 'sha')
+            if ($sha -notmatch '^[0-9a-fA-F]{40,64}$') { throw 'BAD_REQUEST|The version to merge is missing. Reload the review request and try again.' }
+            $args2 = Get-GangplankJobArguments $session
+            $args2.Number = $number
+            $args2.Sha = $sha
+            $args2.Confirmed = $true
+            $id = Start-GangplankJob -Kind 'review-merge' -Group 'review' -Function 'Invoke-GangplankJobReviewMerge' -Arguments $args2
+            Send-GangplankJobStarted $id
+            return
+        }
+        Send-GangplankError 404 'NOT_FOUND' 'Route not found.'
+        return
+    }
     if ($m -eq 'GET' -and $p -eq '/api/insights') {
         $session = Get-GangplankLiveSession -Required
         Send-GangplankJson -Object (Get-GangplankRepositoryInsights -Session $session)
