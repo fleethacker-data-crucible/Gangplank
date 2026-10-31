@@ -72,7 +72,7 @@ function Invoke-GangplankJobSave {
     param($Shared,[hashtable]$Arguments)
     $session = New-GangplankSessionFromSnapshot -Snapshot $Arguments.Session -Token $Arguments.Token
     Set-GangplankJobProgress $Shared 'Checking and publishing selected files'
-    $saved = Invoke-GangplankWorkspaceSave -Session $session -SelectedPaths ([string[]]@($Arguments.Paths)) -Message ([string]$Arguments.Message) -PublicConfirmed:([bool]$Arguments.PublicConfirmed)
+    $saved = Invoke-GangplankWorkspaceSave -Session $session -SelectedPaths ([string[]]@($Arguments.Paths)) -Message ([string]$Arguments.Message) -PublicConfirmed:([bool]$Arguments.PublicConfirmed) -Acknowledgements $(if ($Arguments.Acknowledgements) { $Arguments.Acknowledgements } else { @{} })
     $session | Add-Member -MemberType NoteProperty -Name LastSaveMessage -Value $saved.Message -Force
     $session | Add-Member -MemberType NoteProperty -Name LastSavedFiles -Value @($Arguments.Paths) -Force
     $session | Add-Member -MemberType NoteProperty -Name LastReviewUrl -Value $null -Force
@@ -89,6 +89,22 @@ function Invoke-GangplankJobReview {
     $review = New-GangplankMergeRequest -Session $session -SourceBranch $session.LastBranch -TargetBranch $session.DefaultBranch -Title $title -Description $desc
     $url = if ($review.html_url) { [string]$review.html_url } else { [string]$review.web_url }
     return @{ Url = $url; Title = $title }
+}
+
+function Invoke-GangplankJobReviewComment {
+    param($Shared,[hashtable]$Arguments)
+    $session = New-GangplankSessionFromSnapshot -Snapshot $Arguments.Session -Token $Arguments.Token
+    Set-GangplankJobProgress $Shared 'Posting your reply'
+    $c = Add-GangplankReviewComment -Session $session -Number $Arguments.Number -Text ([string]$Arguments.Text)
+    return [ordered]@{ number = [int]$Arguments.Number; id = $c.Id; author = $c.Author; created = $c.Created }
+}
+
+function Invoke-GangplankJobReviewMerge {
+    param($Shared,[hashtable]$Arguments)
+    $session = New-GangplankSessionFromSnapshot -Snapshot $Arguments.Session -Token $Arguments.Token
+    Set-GangplankJobProgress $Shared 'Merging the review request'
+    $done = Merge-GangplankReview -Session $session -Number $Arguments.Number -Sha ([string]$Arguments.Sha) -Confirmed ($Arguments.Confirmed -eq $true)
+    return [ordered]@{ merged = $true; number = $done.Number; source = $done.Source; target = $done.Target; sha = $done.Sha; mergeCommit = $done.MergeCommit; url = $done.Url }
 }
 
 function Invoke-GangplankJobCommitTitle {
