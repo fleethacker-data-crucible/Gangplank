@@ -68,5 +68,18 @@ new vm.Script(worker,{filename:'web/heartbeat-worker.js'});
  await new Promise(r=>setImmediate(r));assert.ok(sent.length>=1&&sent[0].ok,'worker reports heartbeat results to the page');
  timers[0].f();assert.equal(calls.length,2,'next tick beats again once the previous one answered');
  ctx.onmessage({data:{type:'stop'}});assert.equal(timers.length,0,'worker stops beating');
+ // Spoken status: opt-in, results and errors only (never progress), degrades to silence without local voices.
+ {
+  const m=/function speakable\([^\n]*\}\r?\n/.exec(js);assert.ok(m,'speakable() decides what is spoken');
+  const speakable=vm.runInNewContext('('+m[0].trim()+')');
+  assert.equal(speakable('ok','Saved 2 files',true),true,'results are spoken when the setting is on');
+  assert.equal(speakable('error','It failed',true),true,'errors are spoken when the setting is on');
+  assert.equal(speakable('','Downloading...',true),false,'progress is never spoken');
+  assert.equal(speakable('ok','Saved',false),false,'nothing is spoken while the setting is off');
+  assert.equal(speakable('ok','',true),false,'an empty message is not spoken');
+  assert.match(js,/localStorage\.getItem\('gp\.speak'\)==='1'/,'spoken status is off unless the viewer turned it on');
+  assert.match(js,/window\.speechSynthesis&&window\.SpeechSynthesisUtterance/,'local voices are feature-detected');
+  assert.doesNotMatch(html,/id="speakToggle"[^>]*checked/,'the toggle is off by default');
+ }
  console.log('Browser markup, element references, lifecycle heartbeat, and JavaScript syntax passed.');
 })().catch(e=>{console.error(e);process.exit(1)});
