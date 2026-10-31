@@ -77,7 +77,7 @@ or a release zip is required.
 ## Built, waiting to merge (draft pull requests, 2026-10-31)
 
 Each row has code and tests on its branch and is not on `main` yet, so it stays out of the Done table
-until its pull request merges. Rows already in the tables above that these cover: 4b, 6b, 10, 12, 13, 15, 16b, 17.
+until its pull request merges. Rows already in the tables above that these cover: 4b, 6b, 10, 12, 13, 14, 15, 16 (in part), 16b, 16c (the contract), 17, and a first slice of 8 and 9.
 
 | # | Item | Where | Tested by |
 |---|---|---|---|
@@ -91,13 +91,18 @@ until its pull request merges. Rows already in the tables above that these cover
 | new | Publish a plain folder to a new work branch (stacked on 16b) | branch `feature/publish-folder` | `tests/Adopt.Tests.ps1`, host e2e |
 | new | Spoken status with the browser's local voices (opt-in) | branch `feature/spoken-status` | `tests/BrowserSyntax.Tests.cjs` |
 | new | AI defaults to the Fleet router; Lazarette bridge reference and vault-flow test | PR #43 | `tests/Intelligence.Tests.ps1`, `tests/LazaretteVaultFlow.Tests.ps1` |
+| 14 | Sentinel review flow: reasoned, audited acknowledgements; verified images and PDFs; one rule list | branch `feature/sentinel-acknowledge` | `tests/Sentinel.Tests.ps1`, host e2e |
+| 16 | AI with explicit consent: "Explain this file" shows exactly what is sent and sends only that. "Summarize this review" is not built | branch `feature/ai-explain-consent` | `tests/AiConsent.Tests.ps1`, host e2e |
+| 16c | Shared AI module: version, documented host contract, contract test. The copies in Halyard and Shellback are not made | branch `feature/shared-ai-contract` | `tests/IntelligenceContract.Tests.ps1` |
+| 8, 9 | First slice of the UI rebuild: a typed API client in `ui-src` (no Svelte project or screens yet) | branch `feature/ui-src-api-client` | `ui-src/tests/api.test.ts`, `ui-src/tests/host.contract.test.ts` |
+| CI | The diff worker test runs in CI (merge after #40) | branch `ci/diff-worker-test` | the CI run itself |
 
 Already true on `main`: 5b (synthetic GitLab, #39) and 11 (the Playwright browser test runs in CI on the
 Windows runner with Edge: run 41224330942 ran it, 1 test, 0 skipped). Both rows above still read as open and
 are updated when the pull requests above merge.
 
-**Not started:** 8 and 9 (the TypeScript UI rebuild), 14 (Sentinel review flow), 16 (AI with explicit
-consent), 16c (shared AI module), and Fleet UI v0.2. **Needs the workstation or a live service:** W1 to W5,
+**Not finished:** 8 and 9 (the Svelte project, every screen and the dist staleness check), 16 (only the
+first action), 16c (the copies in the sibling products). **Not started:** Fleet UI v0.2. **Needs the workstation or a live service:** W1 to W5,
 a live Fairlead or TalkForge (spoken status through the router is not wired), and a smart card vault.
 
 ## Shared with sibling products
