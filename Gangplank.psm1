@@ -19,6 +19,7 @@ if (-not $script:GangplankRoot) {
 . (Join-Path $script:GangplankRoot "Core\Credentials.ps1")
 . (Join-Path $script:GangplankRoot "Core\WorkspaceBaseline.ps1")
 . (Join-Path $script:GangplankRoot "Core\AiConsent.ps1")
+. (Join-Path $script:GangplankRoot "Core\Adopt.ps1")
 . (Join-Path $script:GangplankRoot "Core\Diff.ps1")
 . (Join-Path $script:GangplankRoot "Core\SmartSave.ps1")
 . (Join-Path $script:GangplankRoot "Core\Workspace.ps1")
@@ -293,6 +294,7 @@ Export-ModuleMember -Function @(
     "Invoke-GangplankAI",
     "Invoke-GangplankAIStream",
     "Get-GangplankWorkspacePreview",
+    "Add-GangplankExistingFolder",
     "Invoke-GangplankWorkspaceSave",
     "New-GangplankSmartMessage",
     "Get-GangplankSmartSavePrompt",
