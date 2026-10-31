@@ -74,6 +74,19 @@ class GitLabProvider : GitProviderBase {
         return $all
     }
 
+    [hashtable] GetFileText([string]$projectPath, [string]$ref, [string]$path, [int]$maxBytes) {
+        # One file at a commit (the diff viewer's "before"), through the repository files API.
+        # @{ Found; Size; TooLarge; Binary; Text }; a file that is not there is Found = $false.
+        $enc = $this.EncodePath($projectPath)
+        try {
+            $item = $this.InvokeApi('GET', "projects/$enc/repository/files/" + $this.EncodePath($path) + '?ref=' + [uri]::EscapeDataString($ref))
+        } catch {
+            if ([string]$_.Exception.Message -match '^NOT_FOUND\|') { return @{ Found = $false } }
+            throw
+        }
+        return (ConvertFrom-GangplankFileContent -Item $item -MaxBytes $maxBytes)
+    }
+
     [void] DownloadArchive([string]$projectPath, [string]$ref, [string]$outZip) {
         $enc = $this.EncodePath($projectPath)
         $refEnc = [uri]::EscapeDataString($ref)
