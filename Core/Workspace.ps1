@@ -99,7 +99,7 @@ function Test-GangplankSensitivePath {
     $p = $Path.Replace('\','/').ToLowerInvariant()
     $name = ($p -split '/')[-1]
     if ($p -match '(^|/)(\.git|node_modules|logs|work|\.vs|\.venv|__pycache__)(/|$)') { return $true }
-    if ($name -match '(^\.env($|\.)|^id_(rsa|ed25519)|^\.npmrc$|^\.pypirc$|^credentials($|\.)|^token($|\.)|\.p(12|fx|em|pk)$|\.key$|^secrets?\.json$)') { return $true }
+    if (Test-GangplankSecretName -Name $name) { return $true }
     return $false
 }
 
@@ -111,8 +111,7 @@ function Test-GangplankSecretContent {
     if ($file.Length -gt 5242880) { return $true }
     if ($file.Extension.ToLowerInvariant() -notin @('.txt','.ps1','.psm1','.json','.yaml','.yml','.py','.js','.ts','.cs','.html','.xml','.config','.properties','.md','.sh','.bat','.cmd','.env')) { return $false }
     $text = [IO.File]::ReadAllText($file.FullName)
-    if ($text -match '-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----') { return $true }
-    if ($text -match '\b(?:gh[pousr]_[A-Za-z0-9_]{24,}|github_pat_[A-Za-z0-9_]{24,}|(?:AKIA|ASIA)[0-9A-Z]{16})\b') { return $true }
+    if (Test-GangplankSecretText -Text $text) { return $true }
     return $false
 }
 
@@ -162,7 +161,8 @@ function Invoke-GangplankWorkspaceSave {
         [Parameter(Mandatory)]$Session,
         [Parameter(Mandatory)][string[]]$SelectedPaths,
         [string]$Message,
-        [switch]$PublicConfirmed
+        [switch]$PublicConfirmed,
+        [hashtable]$Acknowledgements = @{}
     )
     $preview = Get-GangplankWorkspacePreview -Session $Session
     if ($preview.RemoteChanged) { throw 'The project changed online. No files were uploaded. Download a fresh workspace and reconcile your edits.' }
@@ -176,9 +176,9 @@ function Invoke-GangplankWorkspaceSave {
     }
     # Fail closed before any remote write; publication is not public-release authorization.
     $scanPaths = @($paths | Where-Object { $available[$_].Kind -ne 'Deleted' })
-    $sentinel = Test-GangplankSentinelPublication -Session $Session -Paths $scanPaths
+    $sentinel = Test-GangplankSentinelPublication -Session $Session -Paths $scanPaths -Acknowledgements $Acknowledgements
     if (-not $sentinel.Allowed) {
-        $codes = @($sentinel.Findings | Where-Object { $_.Severity -in @('Block','Review') } | ForEach-Object Code | Select-Object -Unique)
+        $codes = @($sentinel.Findings | Where-Object { $_.Severity -in @('Block','Review') -and -not $_.Acknowledged } | ForEach-Object Code | Select-Object -Unique)
         throw ('Sentinel blocked publication: ' + ($codes -join ', '))
     }
     if ($sentinel.RequiresPublicConfirmation) {
@@ -282,6 +282,13 @@ function Invoke-GangplankWorkspaceSave {
     Write-GangplankAudit -Action 'commit.created' -Data @{
         provider = $Session.Provider; project = $Session.ProjectPath; branch = $branch; parent = $head; commit = $newHead
         message = $Message; added = @($added); modified = @($modified); deleted = @($deleted)
+    }
+    foreach ($group in @($sentinel.Acknowledged | Group-Object Path)) {
+        Write-GangplankAudit -Action 'sentinel.acknowledged' -Data @{
+            provider = $Session.Provider; project = $Session.ProjectPath; branch = $branch; commit = $newHead
+            path = [string]$group.Name; codes = ((@($group.Group | ForEach-Object Code) | Select-Object -Unique) -join ',')
+            reason = ([string]$Acknowledgements[[string]$group.Name]).Trim()
+        }
     }
     return [pscustomobject]@{
         Saved = $true; Commit = $newHead; Message = $Message; FileCount = $paths.Count
