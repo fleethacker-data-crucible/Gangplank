@@ -143,7 +143,8 @@ el('saveBtn').addEventListener('click',async()=>{let paths=selected();if(!paths.
   publicConfirmed=confirm('PUBLIC GITHUB/GITLAB REPOSITORY: Anyone may see the selected files and committed history. Confirm you have authorization to release this information. Continue publishing '+paths.length+' change(s)?');
   if(!publicConfirmed)return;
  }else if(!confirm('Publish '+paths.length+' file change(s) to your online branch? This creates a remote commit.'))return;
- const r=await runJob('/api/save',{paths,message:el('message').value.trim(),publicConfirmed},p=>note('saveNotice',p+'...')),x=r.saved;
+ const acks={},reviews=(check.findings||[]).filter(f=>paths.includes(f.Path)&&f.Severity==='Review');for(const p of [...new Set(reviews.map(f=>f.Path))]){const what=reviews.filter(f=>f.Path===p).map(f=>f.Detail).join(' '),why=prompt('Sentinel review: '+p+'\n'+what+'\n\nTo publish this file anyway, type the reason (5 to 300 characters). It is recorded in the audit log. Cancel to stop.');if(why===null||why.trim().length<5)throw Error('Not published: '+p+' needs a reason.');acks[p]=why.trim().slice(0,300)}
+ const r=await runJob('/api/save',{paths,message:el('message').value.trim(),publicConfirmed,acknowledgements:acks},p=>note('saveNotice',p+'...')),x=r.saved;
  note('saveNotice','Published '+x.FileCount+' file(s) as '+x.Commit.slice(0,10)+'. '+x.Message,'ok');log('Published '+x.FileCount+' files: '+x.Message);lastSaved=true;await refresh();
  }catch(e){note('saveNotice',e.message,'error')}finally{controls()}});
 function chat(who,txt){let wrap=document.createElement('div'),head=document.createElement('span'),body=document.createElement('span');wrap.className='bubble '+(who==='You'?'user':'');head.className='who';head.textContent=who;body.textContent=txt;wrap.append(head,body);el('messages').append(wrap);el('messages').scrollTop=el('messages').scrollHeight;return body}
