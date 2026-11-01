@@ -180,6 +180,17 @@ test('connect, start, edit, Smart Save, review', async () => {
   assert.equal(changes['notes.md'].Kind, 'New');
   assert.equal(changes['.env'].Blocked, true, '.env must be blocked');
 
+  // Revert: the edited script goes back to the downloaded text, the edited copy is saved aside,
+  // and a new file (nothing to go back to) is refused.
+  const editedBuild = fs.readFileSync(path.join(folder, 'scripts', 'build.sh'), 'utf8');
+  r = await job(h, '/api/revert', { path: 'notes.md' });
+  assert.equal(r.status, 500, 'A new file has no earlier version');
+  r = await job(h, '/api/revert', { path: 'scripts/build.sh' });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  assert.ok(!fs.readFileSync(path.join(folder, 'scripts', 'build.sh'), 'utf8').includes('echo extra'), 'Revert must restore the downloaded text');
+  assert.equal(fs.readFileSync(r.json.BackupPath, 'utf8'), editedBuild, 'The edited copy must be saved aside');
+  fs.writeFileSync(path.join(folder, 'scripts', 'build.sh'), editedBuild);   // edit it again for the save below
+
   r = await job(h, '/api/save', { paths: ['.env'] });
   assert.equal(r.status, 500, '.env must not be publishable');
   r = await job(h, '/api/save', { paths: ['scripts/build.sh', 'notes.md'], message: 'Update build script and add notes' });
