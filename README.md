@@ -13,14 +13,9 @@ A browser-first workspace that gets people without Git training safely onto GitH
 
 ## The name
 
-A gangplank is how people who aren't sailors get aboard a ship without falling in. Gangplank gets people without Git training onto a repository safely. Formerly Keystone (Keystone Workspace, Keystone Enterprise Workspace).
+A gangplank is how people who aren't sailors get aboard a ship without falling in. Gangplank gets people without Git training onto a repository safely.
 
-**Upgrading from Keystone.** Everything keeps working:
-- `Launch-Keystone.bat` and `Stop-Keystone.ps1` remain as small stubs that forward to `Launch-Gangplank.bat` and `Stop-Gangplank.ps1`. `Stop-Gangplank.ps1` and the launcher's one-instance check also find a Keystone host that is still running.
-- On first launch, `%LOCALAPPDATA%\Keystone` (saved session, sealed tokens) is copied once to `%LOCALAPPDATA%\Gangplank`; the original stays as it was. Saved tokens remain readable (same Windows account, same DPAPI seal).
-- Workspaces are never moved: if you have `%USERPROFILE%\Keystone` and no `%USERPROFILE%\Gangplank`, Gangplank keeps using the Keystone folder (a folder chosen in Settings is kept as is).
-- Environment variables that start with the former product name still work; `GANGPLANK_*` wins when both are set.
-- New work branches are named `gangplank/work-…`; existing `keystone/work-…` branches open, download and save like any other branch.
+Data saved under the former name (`%LOCALAPPDATA%\Keystone`, `%USERPROFILE%\Keystone`) is not picked up automatically; move it by hand once to `%LOCALAPPDATA%\Gangplank` and `%USERPROFILE%\Gangplank`.
 
 | Night watch (dark) | Chart room (light) |
 | --- | --- |

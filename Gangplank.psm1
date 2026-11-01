@@ -311,7 +311,6 @@ Export-ModuleMember -Function @(
     "Test-GangplankJobsBusy",
     "Request-GangplankHostStop",
     "Get-GangplankHostLifecycleState",
-    "Copy-GangplankLegacyStateFolder",
     "Get-GangplankEnv",
     "Get-GangplankLazarettePathEnv"
 )

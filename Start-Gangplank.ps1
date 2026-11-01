@@ -95,14 +95,6 @@ if ($running.Count -gt 0) {
     }
 }
 
-# Gangplank was Keystone: carry its saved session, sealed tokens and (with -WorkRoot)
-# LocalDev config forward once. Done after the single-instance check, so no Keystone
-# host is still writing to the old folder; the old folder is left as it was.
-$legacyStateRoot = if ($WorkRoot) { Join-Path $WorkRoot '.keystone' } else { Join-Path (Split-Path $stateRoot -Parent) 'Keystone' }
-if (Copy-GangplankLegacyStateFolder -From $legacyStateRoot -To $stateRoot) {
-    Write-Host ("[i] Copied your Keystone data from {0} to {1} (the original is unchanged)." -f $legacyStateRoot, $stateRoot) -ForegroundColor DarkGray
-}
-
 Import-Module (Join-Path $root 'Gangplank.psm1') -Force -WarningAction SilentlyContinue
 # With -WorkRoot (tests, LocalDev) every setting Gangplank writes stays under that folder.
 if ($WorkRoot) { Initialize-Gangplank -ConfigPath (Join-Path (Join-Path (Join-Path $WorkRoot '.gangplank') 'config') 'gangplank-config.json') }
@@ -127,8 +119,6 @@ if ($WorkRoot) {
     $hostArgs.WorkRootFixed = $true
 } else {
     $hostArgs.WorkRoot = Get-GangplankWorkspaceRoot
-    # Sessions saved by Keystone before the host refactor (<tool>\work\.keystone).
-    $hostArgs.LegacyStateRoot = Join-Path (Join-Path $root 'work') '.keystone'
 }
 Write-Host ("[i] Workspaces: {0}" -f $hostArgs.WorkRoot) -ForegroundColor DarkGray
 Start-GangplankWebHost @hostArgs

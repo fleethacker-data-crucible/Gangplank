@@ -8,9 +8,6 @@ function Assert([bool]$Condition,[string]$Message) { if (-not $Condition) { thro
 
 # The BAT entrypoint users double-click must keep its PowerShell switches.
 $batchText = [IO.File]::ReadAllText((Join-Path $root 'Launch-Gangplank.bat'))
-$stubText = [IO.File]::ReadAllText((Join-Path $root 'Launch-Keystone.bat'))
-Assert ($stubText -match '(?i)call "%~dp0Launch-Gangplank\.bat" %\*') 'Launch-Keystone.bat must forward to Launch-Gangplank.bat with all options'
-Assert ([IO.File]::ReadAllText((Join-Path $root 'Stop-Keystone.ps1')) -match 'Stop-Gangplank\.ps1') 'Stop-Keystone.ps1 must forward to Stop-Gangplank.ps1'
 Assert ($batchText -match '(?i)-ExecutionPolicy\s+Bypass') 'Gangplank launcher is missing the process-scoped execution-policy option used by Lazarette/Halyard.'
 Assert ($batchText -match '(?i)-STA') 'Gangplank launcher is missing the STA option.'
 Assert ($batchText -notmatch '(?i)set "LAZARETTE_PATH=') 'The launcher must not auto-configure Lazarette.'
@@ -81,32 +78,6 @@ try {
     Assert (Test-GangplankSameStateRoot (Join-Path $scratch 'a') (Join-Path $scratch 'A')) 'state folders compare case-insensitively'
     Assert (-not (Test-GangplankSameStateRoot (Join-Path $scratch 'a') (Join-Path $scratch 'b'))) 'different state folders are different sessions'
     Assert ((Get-GangplankCommandLineStateRoot -CommandLine 'powershell -File "C:\k\Start-Gangplank.ps1" -LocalDev -WorkRoot "C:\tmp\w x"') -eq [IO.Path]::Combine('C:\tmp\w x', '.gangplank')) 'quoted -WorkRoot parsed from a command line'
-} finally { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
-# ---- Rename compatibility: Keystone data folder, runtime files and host names ----
-$scratch = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-rename-' + [Guid]::NewGuid().ToString('N'))
-try {
-    $old = Join-Path $scratch 'Keystone'; $new = Join-Path $scratch 'Gangplank'
-    [void](New-Item -ItemType Directory -Path $old -Force)
-    [IO.File]::WriteAllText((Join-Path $old 'session.json'), '{"Version":1}')
-    Assert (Copy-GangplankLegacyStateFolder -From $old -To $new) 'Keystone data folder copied forward'
-    Assert ([IO.File]::ReadAllText((Join-Path $new 'session.json')) -eq '{"Version":1}') 'saved session copied'
-    Assert (Test-Path -LiteralPath (Join-Path $old 'session.json')) 'the Keystone folder is left untouched'
-    [IO.File]::WriteAllText((Join-Path $new 'session.json'), '{"Version":2}')
-    Assert (-not (Copy-GangplankLegacyStateFolder -From $old -To $new)) 'copy-forward runs once (new folder exists)'
-    Assert ([IO.File]::ReadAllText((Join-Path $new 'session.json')) -eq '{"Version":2}') 'a later run never overwrites Gangplank data'
-    Assert (-not (Copy-GangplankLegacyStateFolder -From (Join-Path $scratch 'none') -To (Join-Path $scratch 'x'))) 'nothing to copy is fine'
-    Assert (@(Get-ChildItem -LiteralPath $scratch -Force | Where-Object { $_.Name -like '.*-migrating-*' }).Count -eq 0) 'no temporary folder left behind'
-    # A Keystone-era host shares the session it was copied from.
-    Assert (Test-GangplankSameStateRoot (Join-Path $scratch 'Keystone') (Join-Path $scratch 'Gangplank')) '%LOCALAPPDATA%\Keystone and \Gangplank are the same session'
-    Assert (Test-GangplankSameStateRoot (Join-Path $scratch '.keystone') (Join-Path $scratch '.gangplank')) '<WorkRoot>\.keystone and \.gangplank are the same session'
-    Assert ((Get-GangplankCommandLineStateRoot -CommandLine 'powershell -File "C:\k\Start-KeystoneWeb.ps1" -WorkRoot "C:\w"') -eq [IO.Path]::Combine('C:\w', '.keystone')) 'Keystone host command line recognised'
-    Assert ((Get-GangplankStopEventName -ProcessId 7 -Legacy) -eq 'Local\Keystone-Stop-7') 'Keystone stop event name kept for older hosts'
-    # A stale Keystone runtime file is cleaned up like a Gangplank one.
-    [void](New-Item -ItemType Directory -Path (Join-Path $scratch 'Logs') -Force)
-    $staleOld = Join-Path $scratch 'Logs\keystone-server-999998.json'
-    [IO.File]::WriteAllText($staleOld, '{"pid":999998,"port":1,"url":"http://localhost:1/","startedAt":"2000-01-01T00:00:00Z"}')
-    [void](Get-GangplankServerProcesses -Root $scratch -ThisCheckout)
-    Assert (-not (Test-Path -LiteralPath $staleOld)) 'stale Keystone runtime file removed'
 } finally { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
 Write-Host 'Browser presence rule, auto-stop switch and runtime files passed.' -ForegroundColor Green
 

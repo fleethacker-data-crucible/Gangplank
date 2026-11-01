@@ -132,27 +132,11 @@ function Get-GangplankFullPath {
     try { return [IO.Path]::GetFullPath($Path).TrimEnd('\','/') } catch { return $Path.TrimEnd('\','/') }
 }
 
-function ConvertTo-GangplankCurrentStateRoot {
-    <#
-      A Keystone-era saved-session folder (%LOCALAPPDATA%\Keystone or <WorkRoot>\.keystone)
-      is the same session as its Gangplank successor (the folder is copied forward on
-      first launch), so an older Keystone host still counts as "already running".
-    #>
-    param([string]$Path)
-    $full = Get-GangplankFullPath $Path
-    if (-not $full) { return '' }
-    $leaf = [IO.Path]::GetFileName($full)
-    $parent = [IO.Path]::GetDirectoryName($full)
-    if ($leaf -ieq 'Keystone') { return [IO.Path]::Combine($parent, 'Gangplank') }
-    if ($leaf -ieq '.keystone') { return [IO.Path]::Combine($parent, '.gangplank') }
-    return $full
-}
-
 function Test-GangplankSameStateRoot {
     <# Same saved-session folder? Windows paths compare case-insensitively. #>
     param([string]$A, [string]$B)
     if (-not $A -or -not $B) { return $false }
-    return [string]::Equals((ConvertTo-GangplankCurrentStateRoot $A), (ConvertTo-GangplankCurrentStateRoot $B), [StringComparison]::OrdinalIgnoreCase)
+    return [string]::Equals((Get-GangplankFullPath $A), (Get-GangplankFullPath $B), [StringComparison]::OrdinalIgnoreCase)
 }
 
 function Get-GangplankCommandLineStateRoot {
@@ -161,45 +145,14 @@ function Get-GangplankCommandLineStateRoot {
       with -WorkRoot, otherwise %LOCALAPPDATA%\Gangplank (same user, so the same variable).
     #>
     param([string]$CommandLine)
-    # A Keystone-era host (Start-KeystoneWeb.ps1) used the Keystone folder names.
-    $legacy = ([string]$CommandLine -match '(?i)Start-KeystoneWeb\.ps1')
     $m = [regex]::Match([string]$CommandLine, '(?i)-WorkRoot\s+(?:"([^"]+)"|''([^'']+)''|(\S+))')
     if ($m.Success) {
         $w = $m.Groups[1].Value; if (-not $w) { $w = $m.Groups[2].Value }; if (-not $w) { $w = $m.Groups[3].Value }
         # [IO.Path]::Combine: Join-Path would fail for a drive that does not exist here.
-        return [IO.Path]::Combine($w, $(if ($legacy) { '.keystone' } else { '.gangplank' }))
+        return [IO.Path]::Combine($w, '.gangplank')
     }
     $appData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } elseif ($env:HOME) { Join-Path $env:HOME '.local/share' } else { [IO.Path]::GetTempPath() }
-    return (Join-Path $appData $(if ($legacy) { 'Keystone' } else { 'Gangplank' }))
-}
-
-# ---------- data folders from before the rename (Keystone -> Gangplank) ----------
-
-function Copy-GangplankLegacyStateFolder {
-    <#
-      One-time, idempotent copy of a Keystone-era data folder (%LOCALAPPDATA%\Keystone or
-      <WorkRoot>\.keystone: saved session, sealed credentials, LocalDev config) to its
-      Gangplank name. Runs only when the new folder does not exist yet and the old one
-      does; the old folder is left untouched, so an older Keystone still works. Copies
-      into a temporary sibling first and renames it, so an interrupted copy is retried
-      on the next launch instead of leaving a half-filled folder behind.
-      Returns $true when it copied.
-    #>
-    param([Parameter(Mandatory)][string]$From, [Parameter(Mandatory)][string]$To)
-    if (Test-Path -LiteralPath $To) { return $false }
-    if (-not (Test-Path -LiteralPath $From -PathType Container)) { return $false }
-    $parent = Split-Path $To -Parent
-    $tmp = Join-Path $parent ('.' + (Split-Path $To -Leaf) + '-migrating-' + [guid]::NewGuid().ToString('N').Substring(0,8))
-    try {
-        Copy-Item -LiteralPath $From -Destination $tmp -Recurse -Force -ErrorAction Stop
-        Move-Item -LiteralPath $tmp -Destination $To -ErrorAction Stop
-        return $true
-    } catch {
-        Write-Warning ('Could not copy ' + $From + ' to ' + $To + ': ' + $_.Exception.Message + ' Gangplank starts without the earlier session.')
-        return $false
-    } finally {
-        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
-    }
+    return (Join-Path $appData 'Gangplank')
 }
 
 # ---------- runtime files: Logs\gangplank-server-<pid>.json ----------
@@ -258,9 +211,7 @@ function Get-GangplankServerProcesses {
     $otherSession = @{}
     $dir = Get-GangplankRuntimeDirectory -Root $Root
     if (Test-Path -LiteralPath $dir) {
-        # keystone-server-*.json: hosts started before the rename (Keystone) are found too.
-        $runtimeFiles = @(Get-ChildItem -LiteralPath $dir -Filter 'gangplank-server-*.json' -File -ErrorAction SilentlyContinue) +
-                        @(Get-ChildItem -LiteralPath $dir -Filter 'keystone-server-*.json' -File -ErrorAction SilentlyContinue)
+        $runtimeFiles = @(Get-ChildItem -LiteralPath $dir -Filter 'gangplank-server-*.json' -File -ErrorAction SilentlyContinue)
         foreach ($f in $runtimeFiles) {
             try {
                 $info = [IO.File]::ReadAllText($f.FullName) | ConvertFrom-Json
@@ -287,15 +238,14 @@ function Get-GangplankServerProcesses {
             }
         }
     }
-    $hostScripts = @((Join-Path $Root 'Start-Gangplank.ps1'), (Join-Path $Root 'Start-KeystoneWeb.ps1'))
+    $hostScripts = @((Join-Path $Root 'Start-Gangplank.ps1'))
     try {
         $rows = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction Stop)
         foreach ($row in $rows) {
             $id = [int]$row.ProcessId
             $cmd = [string]$row.CommandLine
             if ($id -eq $PID -or $found.ContainsKey($id) -or $otherSession.ContainsKey($id) -or -not $cmd) { continue }
-            # Start-KeystoneWeb.ps1: a host from before the rename (Keystone).
-            if ($cmd -notmatch '(?i)Start-(Gangplank|KeystoneWeb)\.ps1') { continue }
+            if ($cmd -notmatch '(?i)Start-Gangplank\.ps1') { continue }
             if ($ThisCheckout -and -not @($hostScripts | Where-Object { $cmd.IndexOf($_, [StringComparison]::OrdinalIgnoreCase) -ge 0 }).Count) { continue }
             if ($StateRoot -and -not (Test-GangplankSameStateRoot $StateRoot (Get-GangplankCommandLineStateRoot -CommandLine $cmd))) { continue }
             $found[$id] = [pscustomobject]@{ Pid = $id; Port = $null; Url = $null; Started = $row.CreationDate; RuntimeFile = $null }
@@ -305,9 +255,7 @@ function Get-GangplankServerProcesses {
 }
 
 function Get-GangplankStopEventName {
-    # -Legacy: the name a Keystone-era host listens on.
-    param([Parameter(Mandatory)][int]$ProcessId, [switch]$Legacy)
-    if ($Legacy) { return ('Local\Keystone-Stop-{0}' -f $ProcessId) }
+    param([Parameter(Mandatory)][int]$ProcessId)
     return ('Local\Gangplank-Stop-{0}' -f $ProcessId)
 }
 
@@ -324,22 +272,19 @@ function New-GangplankStopEvent {
 
 function Request-GangplankServerStop {
     <#
-      Sets the host's stop event: the Gangplank name, then the Keystone name an older
-      host listens on. False when it has neither (very old host, or not a host).
+      Sets the host's stop event. False when the host has none (very old host, or not a host).
     #>
     param([Parameter(Mandatory)][int]$ProcessId)
-    foreach ($legacy in @($false,$true)) {
-        $handle = $null
-        try {
-            $handle = [Threading.EventWaitHandle]::OpenExisting((Get-GangplankStopEventName -ProcessId $ProcessId -Legacy:$legacy))
-            [void]$handle.Set()
-            return $true
-        } catch {
-        } finally {
-            if ($handle) { $handle.Dispose() }
-        }
+    $handle = $null
+    try {
+        $handle = [Threading.EventWaitHandle]::OpenExisting((Get-GangplankStopEventName -ProcessId $ProcessId))
+        [void]$handle.Set()
+        return $true
+    } catch {
+        return $false
+    } finally {
+        if ($handle) { $handle.Dispose() }
     }
-    return $false
 }
 
 function Stop-GangplankServerProcesses {
