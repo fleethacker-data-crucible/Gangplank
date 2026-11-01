@@ -5,7 +5,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-cred-' + [guid]::NewGuid().ToString('N'))
-$names = @('GITHUB_TOKEN','GITLAB_TOKEN','GENAI_TOKEN','GANGPLANK_AI_TOKEN','LLM_TOKEN','OPENAI_API_KEY','GANGPLANK_LAZARETTE_PATH','ARC_PATH','ARC_ROOT','ARC_HOME')
+$names = @('GITHUB_TOKEN','GITLAB_TOKEN','GANGPLANK_AI_TOKEN','LLM_TOKEN','OPENAI_API_KEY','GANGPLANK_LAZARETTE_PATH','LAZARETTE_PATH')
 $saved = @{}
 foreach ($n in $names) { $saved[$n] = [Environment]::GetEnvironmentVariable($n); [Environment]::SetEnvironmentVariable($n,$null) }
 try {
@@ -25,24 +25,24 @@ try {
         Assert ((Get-Code { Resolve-GangplankCredential -Provider GitHub }) -eq 'CREDENTIAL_MISSING') 'Missing credential must be CREDENTIAL_MISSING'
         Assert ((Get-Code { Resolve-GangplankCredential -Provider Jira }) -eq 'BAD_REQUEST') 'Unknown provider must be rejected'
 
-        # Lazarette is never picked up from ARC_PATH or other tools' settings.
-        $laz = Join-Path $Temp 'arc'
+        # Lazarette is never picked up from LAZARETTE_PATH or other tools' settings.
+        $laz = Join-Path $Temp 'lazarette'
         [void](New-Item -ItemType Directory -Path (Join-Path $laz 'lib') -Force)
-        [IO.File]::WriteAllText((Join-Path (Join-Path $laz 'lib') 'Arc.ps1'),'function Test-ArcVaultUnlocked { $false }')
-        $env:ARC_PATH = $laz; $env:ARC_HOME = $laz
-        Assert ($null -eq (Find-GangplankLazaretteRoot)) 'ARC_PATH must not enable Lazarette; it is opt-in'
+        [IO.File]::WriteAllText((Join-Path (Join-Path $laz 'lib') 'Lazarette.ps1'),'function Test-LazaretteVaultUnlocked { $false }')
+        $env:LAZARETTE_PATH = $laz
+        Assert ($null -eq (Find-GangplankLazaretteRoot)) 'LAZARETTE_PATH must not enable Lazarette; it is opt-in'
         Assert (-not (Test-GangplankLazaretteConfigured)) 'Lazarette must start unconfigured'
         $init = Initialize-GangplankLazaretteAuthentication -Quiet
         Assert (-not $init.Configured -and -not $init.Loaded) 'Unconfigured Lazarette must not load or prompt'
-        Assert ((Get-GangplankLazaretteConnectionStatus).code -eq 'ARC_NOT_CONFIGURED') 'Status must say Lazarette is not configured'
-        $env:ARC_PATH = $null; $env:ARC_HOME = $null
+        Assert ((Get-GangplankLazaretteConnectionStatus).code -eq 'LAZARETTE_NOT_CONFIGURED') 'Status must say Lazarette is not configured'
+        $env:LAZARETTE_PATH = $null
 
         # Lazarette settings are validated and stored as a path only.
         Assert ((Get-Code { Set-GangplankLazaretteSettings -Enabled $true -Path '' }) -eq 'BAD_REQUEST') 'Enabling needs a path'
-        Assert ((Get-Code { Set-GangplankLazaretteSettings -Enabled $true -Path 'relative\arc' }) -eq 'BAD_REQUEST') 'Relative path must be rejected'
+        Assert ((Get-Code { Set-GangplankLazaretteSettings -Enabled $true -Path 'relative\lazarette' }) -eq 'BAD_REQUEST') 'Relative path must be rejected'
         Assert ((Get-Code { Set-GangplankLazaretteSettings -Enabled $true -Path (Join-Path $Temp 'nowhere') }) -eq 'BAD_REQUEST') 'Folder without Lazarette must be rejected'
-        Assert ((Get-Code { Set-GangplankLazaretteSettings -Enabled $true -Path '\\fileserver\share\arc' }) -eq 'BAD_REQUEST') 'Lazarette on a network share must be rejected'
-        Assert ((Get-Code { Set-GangplankLazaretteSettings -Enabled $true -Path '//fileserver/share/arc' }) -eq 'BAD_REQUEST') 'Lazarette on a network share must be rejected (slashes)'
+        Assert ((Get-Code { Set-GangplankLazaretteSettings -Enabled $true -Path '\\fileserver\share\lazarette' }) -eq 'BAD_REQUEST') 'Lazarette on a network share must be rejected'
+        Assert ((Get-Code { Set-GangplankLazaretteSettings -Enabled $true -Path '//fileserver/share/lazarette' }) -eq 'BAD_REQUEST') 'Lazarette on a network share must be rejected (slashes)'
         [void](Set-GangplankLazaretteSettings -Enabled $true -Path $laz)
         Assert ((Get-GangplankConfiguredLazarettePath) -eq $laz) 'Configured Lazarette path not returned'
         Assert ((Find-GangplankLazaretteRoot) -eq [IO.Path]::GetFullPath($laz)) 'Configured Lazarette not found'
@@ -101,20 +101,9 @@ try {
         $env:GANGPLANK_AI_TOKEN = 'ai-env-token-1'
         Assert ((Get-GangplankAiToken) -eq 'ai-env-token-1') 'AI token should come from GANGPLANK_AI_TOKEN'
         $env:GANGPLANK_AI_TOKEN = $null
-        # Legacy alias: the former AI token variable is still read.
-        $legacyEnv = @($script:GangplankLegacyAliases.TokenEnv['AI'])[0]
-        [Environment]::SetEnvironmentVariable($legacyEnv,'ai-legacy-token-1')
-        Assert ((Get-GangplankAiToken) -eq 'ai-legacy-token-1') 'AI token should still come from the legacy variable'
-        [Environment]::SetEnvironmentVariable($legacyEnv,$null)
-        # Legacy alias: the former purpose name resolves to AI for the store and the routes.
-        $legacyPurpose = @($script:GangplankLegacyAliases.Purpose.Keys | Where-Object { $script:GangplankLegacyAliases.Purpose[$_] -eq 'AI' })[0]
-        Assert ((Resolve-GangplankPurposeName $legacyPurpose -Strict) -eq 'AI') 'Legacy purpose name should resolve to AI'
         Assert ((Resolve-GangplankPurposeName 'github' -Strict) -eq 'github') 'Strict resolution must not fold case of current names'
-        [void](Set-GangplankStoredCredential -Provider $legacyPurpose -Token 'FakeLegacyPurposeToken1')
-        Assert ((Get-GangplankStoredCredential -Provider AI) -eq 'FakeLegacyPurposeToken1') 'Token saved under the legacy purpose should be read as AI'
-        $storeText = [IO.File]::ReadAllText((Get-GangplankCredentialStorePath))
-        [IO.File]::WriteAllText((Get-GangplankCredentialStorePath),$storeText.Replace('"AI"',('"' + $legacyPurpose + '"')))
-        Assert ((Get-GangplankStoredCredential -Provider AI) -eq 'FakeLegacyPurposeToken1') 'A store entry under the legacy purpose key should be read as AI'
+        [void](Set-GangplankStoredCredential -Provider AI -Token 'FakeAiStoredToken1')
+        Assert ((Get-GangplankStoredCredential -Provider AI) -eq 'FakeAiStoredToken1') 'A stored AI token should be read back'
         Assert (Remove-GangplankStoredCredential -Provider AI) 'Remove AI token'
         Assert ($null -eq (Get-GangplankAiToken)) 'AI token must be null when unconfigured'
 
@@ -125,26 +114,14 @@ try {
         Write-GangplankAudit -Action 'test' -Data @{ token = 'nope'; files = @('a') }
         Assert (((Get-GangplankAuditEntries -Last 1)[0].PSObject.Properties.Name) -notcontains 'token') 'Audit must drop token-like keys'
 
-        # Pre-rename config files (Keystone / ARC names) are copied forward once and still read.
-        $old = Join-Path $Temp 'oldcfg'
-        [void](New-Item -ItemType Directory -Path $old -Force)
-        [IO.File]::WriteAllText((Join-Path $old 'keystone-config.json'), '{"Version":"1.0","ArcItems":{"GitHub":"gh-from-arcitems"},"LogLevel":"INFO"}')
-        [IO.File]::WriteAllText((Join-Path $old 'keystone.local.json'), ('{"Arc":{"Enabled":true,"Path":' + (ConvertTo-Json $laz) + '},"Workspaces":{"Root":""}}'))
-        [IO.File]::WriteAllText((Join-Path $old 'arc-items.local.json'), '{"GitLab":"gl-from-arc-items"}')
-        Initialize-GangplankConfig -ConfigPath (Join-Path $old 'gangplank-config.json')
-        foreach ($n in @('gangplank-config.json','gangplank.local.json','lazarette-items.local.json')) { Assert (Test-Path -LiteralPath (Join-Path $old $n)) "$n copied forward" }
-        foreach ($n in @('keystone-config.json','keystone.local.json','arc-items.local.json')) { Assert (Test-Path -LiteralPath (Join-Path $old $n)) "$n left in place" }
-        Assert ((Get-GangplankLazaretteItemName -Provider GitHub) -eq 'gh-from-arcitems') 'ArcItems key in an old config is still read'
-        Assert ((Get-GangplankLazaretteItemName -Provider GitLab) -eq 'gl-from-arc-items') 'arc-items mapping carried forward'
-        Assert ((Get-GangplankConfiguredLazarettePath) -eq $laz) 'Arc key in an old keystone.local.json still enables Lazarette'
+        # Saving the Lazarette setting writes only the Lazarette key.
+        $cfgDir = Join-Path $Temp 'cfg'
+        [void](New-Item -ItemType Directory -Path $cfgDir -Force)
+        Initialize-GangplankConfig -ConfigPath (Join-Path $cfgDir 'gangplank-config.json')
         [void](Set-GangplankLazaretteSettings -Enabled $false -Path $laz)
-        Assert (-not (Test-GangplankLazaretteConfigured)) 'Saving writes the Lazarette key and takes effect'
-        Assert ([IO.File]::ReadAllText((Join-Path $old 'gangplank.local.json')) -match '"Lazarette"') 'New settings use the Lazarette key'
-        Assert ([IO.File]::ReadAllText((Join-Path $old 'keystone.local.json')) -match '"Enabled":true') 'The old file is never written'
-        [IO.File]::WriteAllText((Join-Path $old 'keystone-config.json'), '{"ArcItems":{"GitHub":"changed-later"}}')
-        Initialize-GangplankConfig -ConfigPath (Join-Path $old 'gangplank-config.json')
-        Assert ((Get-GangplankLazaretteItemName -Provider GitHub) -eq 'gh-from-arcitems') 'Copy-forward runs once and never overwrites'
-        Assert (@(Get-ChildItem -LiteralPath $old -Filter '*.tmp').Count -eq 0) 'No temporary files left behind'
+        Assert (-not (Test-GangplankLazaretteConfigured)) 'Saving takes effect'
+        Assert ([IO.File]::ReadAllText((Join-Path $cfgDir 'gangplank.local.json')) -match '"Lazarette"') 'Settings use the Lazarette key'
+        Assert (@(Get-ChildItem -LiteralPath $cfgDir -Filter '*.tmp').Count -eq 0) 'No temporary files left behind'
     } $temp
     Write-Host 'Credential store, opt-in Lazarette and audit checks passed.' -ForegroundColor Green
 } finally {

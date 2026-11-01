@@ -4,7 +4,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-intel-' + [guid]::NewGuid().ToString('N'))
-$names = @('GANGPLANK_AI_URL','LLM_URL','OPENAI_BASE_URL','GANGPLANK_AI_MODEL','LLM_MODEL','OPENAI_MODEL','GANGPLANK_AI_ALLOWED_HOSTS','GANGPLANK_WORK_ROOT','GANGPLANK_AI_TOKEN','GENAI_TOKEN','LLM_TOKEN','OPENAI_API_KEY')
+$names = @('GANGPLANK_AI_URL','LLM_URL','OPENAI_BASE_URL','GANGPLANK_AI_MODEL','LLM_MODEL','OPENAI_MODEL','GANGPLANK_AI_ALLOWED_HOSTS','GANGPLANK_WORK_ROOT','GANGPLANK_AI_TOKEN','LLM_TOKEN','OPENAI_API_KEY')
 $saved = @{}
 foreach ($n in $names) { $saved[$n] = [Environment]::GetEnvironmentVariable($n); [Environment]::SetEnvironmentVariable($n,$null) }
 try {

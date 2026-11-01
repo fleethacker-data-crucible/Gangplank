@@ -19,8 +19,7 @@ A gangplank is how people who aren't sailors get aboard a ship without falling i
 - `Launch-Keystone.bat` and `Stop-Keystone.ps1` remain as small stubs that forward to `Launch-Gangplank.bat` and `Stop-Gangplank.ps1`. `Stop-Gangplank.ps1` and the launcher's one-instance check also find a Keystone host that is still running.
 - On first launch, `%LOCALAPPDATA%\Keystone` (saved session, sealed tokens) is copied once to `%LOCALAPPDATA%\Gangplank`; the original stays as it was. Saved tokens remain readable (same Windows account, same DPAPI seal).
 - Workspaces are never moved: if you have `%USERPROFILE%\Keystone` and no `%USERPROFILE%\Gangplank`, Gangplank keeps using the Keystone folder (a folder chosen in Settings is kept as is).
-- `KEYSTONE_*` environment variables still work; `GANGPLANK_*` wins when both are set. `KEYSTONE_ARC_PATH` becomes `GANGPLANK_LAZARETTE_PATH` and `KEYSTONE_ARC_ITEM_*` becomes `GANGPLANK_LAZARETTE_ITEM_*`.
-- Config files are copied forward once, the originals left as they were: `config\keystone-config.json` → `config\gangplank-config.json` (if you edited it), `config\keystone.local.json` → `config\gangplank.local.json` (workspace folder, AI model and the Lazarette, formerly ARC, setting) and `config\arc-items.local.json` → `config\lazarette-items.local.json`. The old `ArcItems` / `Arc` keys inside them are still read.
+- Environment variables that start with the former product name still work; `GANGPLANK_*` wins when both are set.
 - New work branches are named `gangplank/work-…`; existing `keystone/work-…` branches open, download and save like any other branch.
 
 | Night watch (dark) | Chart room (light) |
@@ -67,14 +66,13 @@ Gangplank looks for a token in this order:
 
 Only HTTPS github.com, your organization's GitLab host (`GANGPLANK_GITLAB_HOST`, or `GitLabHost` in `config\gangplank-config.json`; none by default) and administrator-approved `GANGPLANK_GITLAB_ALLOWED_HOSTS` are accepted for repositories. Provider errors are reported as codes (`AUTH_REJECTED`, `FORBIDDEN`, `NOT_FOUND`, `RATE_LIMITED`...); response bodies stay in the local log.
 
-Names from earlier releases still work as legacy aliases: the former AI token variable and credential name, the former default Lazarette item names (used only when the current default item is missing), and the GitLab host that used to be built in. They are listed in one place, `Core/Configuration.ps1`.
 
 ## Lazarette (optional, opt-in)
 Reference for the bridge, what it reads and what it never does: [docs/LAZARETTE-BRIDGE.md](docs/LAZARETTE-BRIDGE.md).
 
-Lazarette is still in development, so Gangplank never looks for it on its own. To use it, open **Credentials → Lazarette vault**, tick **Use Lazarette**, enter the Lazarette folder (the one containing its engine loader: `lib\Arc.ps1` in current Lazarette, or `lib\Lazarette.ps1` once Lazarette ships it; Gangplank accepts either) and restart Gangplank; or set `GANGPLANK_LAZARETTE_PATH` (the former `KEYSTONE_ARC_PATH` still works). Like before the rename, the generic `LAZARETTE_PATH` / `ARC_PATH` variables and sibling folders are not searched: Lazarette stays opt-in. Settings are stored in `config\gangplank.local.json` (not committed).
+Lazarette is still in development, so Gangplank never looks for it on its own. To use it, open **Credentials → Lazarette vault**, tick **Use Lazarette**, enter the Lazarette folder (the one containing its engine loader, `lib\Lazarette.ps1`) and restart Gangplank; or set `GANGPLANK_LAZARETTE_PATH`. The generic `LAZARETTE_PATH` variable and sibling folders are not searched: Lazarette stays opt-in. Settings are stored in `config\gangplank.local.json` (not committed).
 
-When Lazarette is on, Gangplank loads it once at startup and runs Lazarette's own unlock (`Unlock-LazaretteVaultInteractive`, or the matching command on an older Lazarette that still uses its earlier command names: passphrase or smart card PIN, then authenticator) in the Gangplank PowerShell window, before the server starts. It then reads items with `Get-LazaretteSecret` (or its earlier-named equivalent). By default it reads one item each for GitHub, GitLab and the AI model; Credentials shows the item names and lets you change the mapping. Gangplank has no unlock code of its own and never unlocks from a browser request. Older vault installs that use `pm.ps1` (versions 3 and 4) are still supported.
+When Lazarette is on, Gangplank loads it once at startup and runs Lazarette's own unlock (`Unlock-LazaretteVaultInteractive`: passphrase or smart card PIN, then authenticator) in the Gangplank PowerShell window, before the server starts. It then reads items with `Get-LazaretteSecret`. By default it reads one item each for GitHub, GitLab and the AI model; Credentials shows the item names and lets you change the mapping. Gangplank has no unlock code of its own and never unlocks from a browser request.
 
 ## AI model
 

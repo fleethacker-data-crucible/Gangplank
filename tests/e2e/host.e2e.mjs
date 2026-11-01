@@ -26,7 +26,7 @@ function startHost() {
     '-LocalDev', '-NoBrowser', '-Port', String(port), '-DevGitHubUrl', fake.url + '/', '-WorkRoot', workRoot];
   if (shell.toLowerCase().includes('powershell')) args.unshift('-STA');
   const env = { ...process.env, GITHUB_TOKEN: fake.token, LOCALAPPDATA: path.join(temp, 'appdata'), HOME: temp,
-    GANGPLANK_LAZARETTE_PATH: '', GITLAB_TOKEN: '', GANGPLANK_AI_TOKEN: fakeAi.token, GENAI_TOKEN: '', LLM_TOKEN: '', OPENAI_API_KEY: '', LLM_URL: '', GANGPLANK_AI_URL: '', GANGPLANK_WORK_ROOT: '' };
+    GANGPLANK_LAZARETTE_PATH: '', GITLAB_TOKEN: '', GANGPLANK_AI_TOKEN: fakeAi.token, LLM_TOKEN: '', OPENAI_API_KEY: '', LLM_URL: '', GANGPLANK_AI_URL: '', GANGPLANK_WORK_ROOT: '' };
   const child = spawn(shell, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   return new Promise((resolve, reject) => {

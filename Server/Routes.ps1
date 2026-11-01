@@ -44,7 +44,7 @@ function Get-GangplankAppSnapshot {
 }
 
 function Get-GangplankSnapshotHost {
-    # The host a session's token is sent to (so a legacy GitLab vault item only goes to the configured host).
+    # The host a session's token is sent to.
     param($Snapshot)
     try { return ([uri]([string]$Snapshot.BaseUrl)).Host } catch { return '' }
 }
@@ -111,7 +111,7 @@ function Get-GangplankErrorStatus {
     switch -Regex ($Code) {
         '^(BAD_REQUEST|INVALID)' { return 400 }
         '^(NOT_FOUND)$' { return 404 }
-        '^(BUSY|CONFLICT|NOT_CONNECTED|BAD_STATE|CREDENTIAL_MISSING|CREDENTIAL_STORE_UNAVAILABLE|ARC_[A-Z_]+|AI_NOT_CONFIGURED|AI_TOKEN_MISSING|AI_MODEL_MISSING|GIT_[A-Z_]+)$' { return 409 }
+        '^(BUSY|CONFLICT|NOT_CONNECTED|BAD_STATE|CREDENTIAL_MISSING|CREDENTIAL_STORE_UNAVAILABLE|LAZARETTE_[A-Z_]+|AI_NOT_CONFIGURED|AI_TOKEN_MISSING|AI_MODEL_MISSING|GIT_[A-Z_]+)$' { return 409 }
         '^(AUTH_REJECTED|FORBIDDEN|RATE_LIMITED|SERVER_ERROR|NETWORK)$' { return 502 }
         default { return 400 }
     }
@@ -334,9 +334,9 @@ function Invoke-GangplankRouteCore {
     if ($m -eq 'POST' -and $p -eq '/api/integrations/map') {
         $provider = [string](Get-GangplankBodyValue $Req 'provider')
         $item = [string](Get-GangplankBodyValue $Req 'item')
-        $provider = Resolve-GangplankPurposeName $provider -Strict   # legacy purpose names still accepted
+        $provider = Resolve-GangplankPurposeName $provider -Strict
         if ($provider -notin @('GitHub','GitLab','AI')) { throw 'BAD_REQUEST|Unsupported credential provider.' }
-        if (-not (Test-GangplankLazaretteConfigured)) { throw 'ARC_NOT_CONFIGURED|Enable Lazarette first.' }
+        if (-not (Test-GangplankLazaretteConfigured)) { throw 'LAZARETTE_NOT_CONFIGURED|Enable Lazarette first.' }
         $names = @(Get-GangplankLazaretteServiceNames)
         if ($names.Count -gt 0 -and $item -notin $names) { throw 'BAD_REQUEST|Select an item that exists in the unlocked Lazarette vault.' }
         [void](Set-GangplankLazaretteItemName -Provider $provider -ServiceName $item)

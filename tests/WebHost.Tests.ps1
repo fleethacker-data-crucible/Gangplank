@@ -13,7 +13,7 @@ Assert ($stubText -match '(?i)call "%~dp0Launch-Gangplank\.bat" %\*') 'Launch-Ke
 Assert ([IO.File]::ReadAllText((Join-Path $root 'Stop-Keystone.ps1')) -match 'Stop-Gangplank\.ps1') 'Stop-Keystone.ps1 must forward to Stop-Gangplank.ps1'
 Assert ($batchText -match '(?i)-ExecutionPolicy\s+Bypass') 'Gangplank launcher is missing the process-scoped execution-policy option used by Lazarette/Halyard.'
 Assert ($batchText -match '(?i)-STA') 'Gangplank launcher is missing the STA option.'
-Assert ($batchText -notmatch '(?i)set "ARC_PATH=') 'The launcher must not auto-configure Lazarette.'
+Assert ($batchText -notmatch '(?i)set "LAZARETTE_PATH=') 'The launcher must not auto-configure Lazarette.'
 
 # ---- Lifecycle rule: the tab owns the server (simulated clock, no sleeping) ----
 . (Join-Path $root 'Core\Lifecycle.ps1')

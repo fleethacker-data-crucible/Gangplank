@@ -7,8 +7,8 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-vault-flow-' + [guid]::NewGuid().ToString('N'))
-$names = @('ARC_PATH','ARC_ROOT','ARC_HOME','LAZARETTE_PATH','KEYSTONE_ARC_PATH','GANGPLANK_LAZARETTE_PATH','GITHUB_TOKEN','GH_TOKEN','GITLAB_TOKEN',
-    'GANGPLANK_AI_TOKEN','GANGPLANK_AI_URL','LLM_URL','LLM_TOKEN','OPENAI_BASE_URL','OPENAI_API_KEY','GENAI_TOKEN',
+$names = @('LAZARETTE_PATH','GANGPLANK_LAZARETTE_PATH','GITHUB_TOKEN','GH_TOKEN','GITLAB_TOKEN',
+    'GANGPLANK_AI_TOKEN','GANGPLANK_AI_URL','LLM_URL','LLM_TOKEN','OPENAI_BASE_URL','OPENAI_API_KEY',
     'GANGPLANK_LAZARETTE_ITEM_GitHub','GANGPLANK_LAZARETTE_ITEM_AI')
 $saved = @{}
 foreach ($n in $names) { $saved[$n] = [Environment]::GetEnvironmentVariable($n); [Environment]::SetEnvironmentVariable($n,$null) }

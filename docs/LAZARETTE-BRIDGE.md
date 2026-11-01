@@ -51,7 +51,7 @@ key, create one with `fairlead clients add` and save it as the **AI** token in S
 | `tests/LazaretteContract.Tests.ps1` | The Lazarette integration contract against a stub engine: unlock once, no secret in the status |
 | `tests/LazaretteIntegration.Tests.ps1` | Missing libraries are diagnosed, no unlock from request handlers, the catalog is unwrapped |
 | `tests/LazaretteCoreOnly.Tests.ps1` | An older Lazarette without the optional helper still works |
-| `tests/LazaretteNames.Tests.ps1` | Current and former function names, item-name overrides, legacy aliases |
+| `tests/LazaretteNames.Tests.ps1` | Lazarette function names, item-name overrides, and that no other name or variable is read |
 | `tests/LazaretteVaultFlow.Tests.ps1` | Unlock once, tokens read by item name, the router skips the vault, nothing written to disk |
 | `tests/LazaretteReal.Tests.ps1` | The real engine in the software profile (skipped when no checkout is found) |
 
