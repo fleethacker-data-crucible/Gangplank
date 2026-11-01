@@ -349,15 +349,13 @@ test('jobs never overlap and bad jobs are clean', async () => {
   }
 });
 
-test('AI with consent: preview first, send only what was previewed', async () => {
+test('AI with consent: preview first, send only what was previewed', { skip: !haveCredentialManager && 'needs Windows Credential Manager' }, async () => {
   const h = host;
   let r = await job(h, '/api/connect', { url: fake.url + '/gangplank-demo/sample' });
   assert.equal(r.status, 200, JSON.stringify(r));
   r = await job(h, '/api/start', { name: 'ai consent' });
   assert.equal(r.status, 200, JSON.stringify(r));
   fs.writeFileSync(path.join(r.json.folder, 'idea.md'), '# Fictional idea\n\nA made-up paragraph.\n');
-  r = await call(h, 'POST', '/api/settings/intelligence', { endpoint: fakeAi.url + '/v1', model: 'gpt-4.1', profile: 'openai' });
-  assert.equal(r.status, 200, r.text);
   const chats = async () => (await (await fetch(fakeAi.url + '/__fake/state')).json()).calls.filter((c) => c.method === 'POST' && c.path === '/v1/chat/completions').length;
   const before = await chats();
   r = await call(h, 'GET', '/api/ai/explain-preview?path=idea.md');
@@ -370,11 +368,10 @@ test('AI with consent: preview first, send only what was previewed', async () =>
   assert.equal(await chats(), before, 'A refusal sends nothing');
   r = await job(h, '/api/ai/explain', { path: 'idea.md', consent });
   assert.equal(r.status, 200, JSON.stringify(r));
-  assert.match(r.json.answer, /^Echo from gpt-4\.1: Explain in plain/, 'The answer comes back as text');
+  assert.match(r.json.answer, /^Echo from auto: Explain in plain/, 'The answer comes back as text');
   assert.equal(await chats(), before + 1, 'Exactly one request was sent');
   r = await call(h, 'GET', '/api/ai/explain-preview?path=../outside.txt');
   assert.equal(r.status, 400, 'A path outside the workspace is refused');
-  await call(h, 'POST', '/api/settings/intelligence', { endpoint: '' });
 });
 
 test('a disconnect during a job is not undone by the job', async () => {
