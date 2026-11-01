@@ -173,6 +173,15 @@ $script:GangplankOnSessionJob = {
         saved = $(if ($Result.ContainsKey('Saved')) { $Result.Saved } else { $null })
     }
 }
+$script:GangplankOnLatestJob = {
+    param($Result,$Context)
+    if ($Context.Generation -ne $script:GangplankApp.Generation) {
+        Write-GangplankLog -Level INFO -Message 'Result of a get-latest job for a previous session was not applied.'
+        return [ordered]@{ stale = $true }
+    }
+    Set-GangplankAppSession -Snapshot $Result.Session -Token $Context.Token
+    return $Result.Latest
+}
 $script:GangplankOnReviewJob = {
     param($Result,$Context)
     $s = $script:GangplankApp.Session
@@ -416,6 +425,23 @@ function Invoke-GangplankRouteCore {
         }
         $args2.Acknowledgements = $acks
         $id = Start-GangplankJob -Kind 'save' -Group 'workspace' -Function 'Invoke-GangplankJobSave' -Arguments $args2 -OnComplete $script:GangplankOnSessionJob -Context (Get-GangplankJobContext -Token $args2.Token -Kind 'save')
+        Send-GangplankJobStarted $id
+        return
+    }
+    if ($m -eq 'POST' -and $p -eq '/api/latest') {
+        $session = Get-GangplankLiveSession -Required
+        $choices = @{}
+        $raw = Get-GangplankBodyValue $Req 'choices'
+        if ($raw) {
+            foreach ($prop in $raw.PSObject.Properties) {
+                if ($choices.Count -ge 1000) { throw 'BAD_REQUEST|Too many choices.' }
+                if ([string]$prop.Value -notin @('mine','theirs')) { throw 'BAD_REQUEST|Choose mine or theirs for each file.' }
+                $choices[[string]$prop.Name] = [string]$prop.Value
+            }
+        }
+        $args2 = Get-GangplankJobArguments $session
+        $args2.Choices = $choices
+        $id = Start-GangplankJob -Kind 'latest' -Group 'workspace' -Function 'Invoke-GangplankJobLatest' -Arguments $args2 -OnComplete $script:GangplankOnLatestJob -Context (Get-GangplankJobContext -Token $args2.Token -Kind 'latest')
         Send-GangplankJobStarted $id
         return
     }

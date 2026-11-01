@@ -49,7 +49,7 @@ try {
         [void](New-ArcVault -Profile software -DataDir $Dir -Ctx $ctx)
         [void](Add-ArcRecord (New-ArcRecord -Service 'github' -User 'dev' -Secret 'real-lazarette-github-test-token'))
         [void](Add-ArcRecord (New-ArcRecord -Service 'gitlab' -User 'dev' -Secret 'real-lazarette-gitlab-test-token'))
-        Lock-ArcVault
+        Lock-LazaretteVault
     } $data $pass
 
     $locked = Get-GangplankLazaretteConnectionStatus
@@ -73,11 +73,11 @@ try {
     $state = Initialize-GangplankLazaretteAuthentication -Quiet
     Assert ($state.Unlocked) 'Initialize must not re-prompt an open vault'
 
-    & $lazModule { Lock-ArcVault }
+    & $lazModule { Lock-LazaretteVault }
     Assert (-not (Test-GangplankLazaretteVaultUnlocked)) 'Lock was not observed'
     Write-Host 'Gangplank against the real Lazarette engine (software profile) passed.' -ForegroundColor Green
 } finally {
-    try { & (Get-Module GangplankLazarette) { Lock-ArcVault } } catch { }
+    try { & (Get-Module GangplankLazarette) { Lock-LazaretteVault } } catch { }
     foreach ($n in $saved.Keys) { [Environment]::SetEnvironmentVariable($n,$saved[$n]) }
     Remove-Module GangplankLazarette -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $data -Recurse -Force -ErrorAction SilentlyContinue
