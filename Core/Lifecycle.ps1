@@ -116,10 +116,8 @@ function Test-GangplankAutoStopEnabled {
     #>
     param([switch]$Stay, [object]$Config)
     if ($Stay) { return $false }
-    # GANGPLANK_AUTO_STOP, then the pre-rename KEYSTONE_AUTO_STOP (inline: this file
-    # is also used without the module).
+    # GANGPLANK_AUTO_STOP (read inline: this file is also used without the module).
     $flag = [string]$env:GANGPLANK_AUTO_STOP
-    if ([string]::IsNullOrWhiteSpace($flag)) { $flag = [string]$env:KEYSTONE_AUTO_STOP }
     if ($flag) {
         if ($flag.Trim() -in @('0','false','off','no')) { return $false }
         if ($flag.Trim() -in @('1','true','on','yes')) { return $true }

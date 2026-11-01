@@ -33,7 +33,7 @@ All original launchers, PowerShell modules, GitHub/GitLab providers, ARC integra
 3. Review diffs for `Core/Workspace.ps1`, `Core/Sentinel.ps1`, `Core/RepositoryInsights.ps1`, `Start-KeystoneWeb.ps1`, `web/index.html`.
 4. Run locally on your personal test workstation: `Launch-LocalDev.bat` for no-ARC development, or `Launch-Keystone.bat` with approved credentials.
 5. Connect an authorized **test** repository, inspect Branches/Compare/History/Reviews, create a work branch, and publish only synthetic test content.
-6. Expect public publishing to be disabled unless the administrator has deliberately configured `KEYSTONE_ALLOW_PUBLIC_PUBLISH=1`; still require authorization and explicit user confirmation.
+6. Expect public publishing to be disabled unless the administrator has deliberately configured `GANGPLANK_ALLOW_PUBLIC_PUBLISH=1`; still require authorization and explicit user confirmation.
 
 ## Future prevention
 Protect `main` with mandatory status checks, PR review, and restrictions on force pushes/deletions. The repository integrity test prevents regressions when CI is running, but repository protections must enforce required checks even if a branch removes its own workflow definition.
