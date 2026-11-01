@@ -22,6 +22,7 @@ if (-not $script:GangplankRoot) {
 . (Join-Path $script:GangplankRoot "Core\Diff.ps1")
 . (Join-Path $script:GangplankRoot "Core\SmartSave.ps1")
 . (Join-Path $script:GangplankRoot "Core\Workspace.ps1")
+. (Join-Path $script:GangplankRoot "Core\Revert.ps1")
 . (Join-Path $script:GangplankRoot "Core\Sentinel.ps1")
 . (Join-Path $script:GangplankRoot "Core\RepositoryInsights.ps1")
 . (Join-Path $script:GangplankRoot "Core\Reviews.ps1")
@@ -247,6 +248,7 @@ Export-ModuleMember -Function @(
     "Get-GangplankWorkspacePreview",
     "Add-GangplankExistingFolder",
     "Invoke-GangplankWorkspaceSave",
+    "Restore-GangplankWorkspaceFile",
     "New-GangplankSmartMessage",
     "Get-GangplankSmartSavePrompt",
     "Get-GangplankLocalFileMap",
