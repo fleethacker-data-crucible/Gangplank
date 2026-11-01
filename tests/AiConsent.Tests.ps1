@@ -19,6 +19,7 @@ try {
         function Get-Code([scriptblock]$Block) { try { $null = & $Block; return '' } catch { return ([string]$_.Exception.Message -split '\|')[0] } }
         Initialize-GangplankLogging -LogDir (Join-Path $Temp 'Logs') -Level ERROR
         Initialize-GangplankConfig -ConfigPath (Join-Path $Temp 'config/gangplank-config.json')
+        Set-GangplankFairleadKeyReader -Reader { param($Target) 'fl-test-key-1' }
         $script:GangplankAuditPath = Join-Path $Temp 'Logs/audit.jsonl'
 
         Invoke-Expression @'
