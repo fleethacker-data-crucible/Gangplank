@@ -57,7 +57,7 @@ jobs:
         run: |
           $failed = $false
           # Each suite in its own process: Lazarette's engine and the module load once per process.
-          foreach ($t in @('SmartSave','Workspace','Paging','Adopt','Revert','GetLatest','LegacyRetired','IntelligenceContract','LazaretteVaultFlow','FileDiff','GitLabProvider','ProviderSafety','Credentials','Intelligence','Sentinel','RepositoryInsights','RepositoryIntegrity','LazaretteIntegration','LazaretteCoreOnly','LazaretteContract','LazaretteReal','LazaretteNames','WebHost')) {
+          foreach ($t in @('SmartSave','Workspace','Paging','Adopt','Revert','GetLatest','LegacyRetired','AiConsent','IntelligenceContract','LazaretteVaultFlow','FileDiff','GitLabProvider','ProviderSafety','Credentials','Intelligence','Sentinel','RepositoryInsights','RepositoryIntegrity','LazaretteIntegration','LazaretteCoreOnly','LazaretteContract','LazaretteReal','LazaretteNames','WebHost')) {
             Write-Host "== $t"
             .\.github\ci-run.ps1 -Title "$t tests" -Command "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\$t.Tests.ps1"
             if ($LASTEXITCODE -ne 0) { $failed = $true }

@@ -559,6 +559,31 @@ function Invoke-GangplankRouteCore {
         return
     }
 
+    if ($m -eq 'GET' -and $p -eq '/api/ai/explain-preview') {
+        # Read-only: exactly what "Explain this file" would send, and a consent token for it. Nothing is sent.
+        $session = Get-GangplankLiveSession -Required
+        $x = Get-GangplankAiExplainPreview -Session $session -Path ([string](Get-GangplankQueryValue $Req.Query 'path'))
+        Send-GangplankJson -Object ([ordered]@{
+            path = $x.Path; kind = $x.Kind; destination = $x.Destination; loopback = $x.Loopback; model = $x.Model
+            system = $x.System; user = $x.User; truncated = $x.Truncated; characters = $x.Characters; consent = $x.Consent
+        })
+        return
+    }
+    if ($m -eq 'POST' -and $p -eq '/api/ai/explain') {
+        $session = Get-GangplankLiveSession -Required
+        $path = [string](Get-GangplankBodyValue $Req 'path')
+        $consent = [string](Get-GangplankBodyValue $Req 'consent')
+        if (-not $path -or -not $consent -or $consent.Length -gt 100) { throw 'BAD_REQUEST|Review what will be sent first.' }
+        $ai = Get-GangplankAiRequestToken -Config (Get-GangplankAiConfiguration)
+        $args2 = Get-GangplankJobArguments $session
+        $args2.Path = $path
+        $args2.Consent = $consent
+        $args2.AiToken = $ai
+        $id = Start-GangplankJob -Kind 'ai-explain' -Group 'ai' -Function 'Invoke-GangplankJobAiExplain' -Arguments $args2
+        Send-GangplankJobStarted $id
+        return
+    }
+
     # ---- AI (advisory only) ----------------------------------------------------
     if ($m -eq 'POST' -and $p -eq '/api/commit-message') {
         $session = Get-GangplankLiveSession -Required
