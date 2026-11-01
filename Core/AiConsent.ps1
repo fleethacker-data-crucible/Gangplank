@@ -43,7 +43,7 @@ function Get-GangplankAiExplainPreview {
         $consent = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes(($config.Url + "`n" + $config.Model + "`n" + $system + "`n---`n" + $user)))) -replace '-','')
     } finally { $sha.Dispose() }
     return [pscustomobject]@{
-        Path = $Path; Kind = [string]$change.Kind; Destination = $destination; Loopback = [bool]$config.Loopback; Model = [string]$config.Model
+        Path = $Path; Kind = [string]$change.Kind; Destination = $destination; Loopback = $true; Model = [string]$config.Model
         System = $system; User = $user; Truncated = $truncated; Characters = ($system.Length + $user.Length); Consent = $consent
     }
 }
