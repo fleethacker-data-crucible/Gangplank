@@ -403,7 +403,7 @@ test('AI: test and chat go to Fairlead with the key from Credential Manager', { 
   assert.equal(view.json.intelligence.model, 'auto', 'The default route is auto');
   assert.equal(view.json.intelligence.endpoint, fakeAi.url);
   assert.equal(view.json.intelligence.keyReady, true, 'The key saved for the test target is found');
-  assert.equal(view.json.intelligence.keyTarget, fairleadTarget);
+  assert.equal(view.json.intelligence.credentialName, fairleadTarget);
   assert.ok(!view.text.includes(fakeAi.token), 'The key must never reach the browser');
   const status = await call(h, 'GET', '/api/status');
   assert.equal(status.json.ai, true, 'Status reports AI ready when the key exists');

@@ -123,7 +123,7 @@ async function api(method, p, query, body) {
   };
   if (p === '/api/settings') return {
     workspaces: { root: workRoot, default: workRoot, fixed: false },
-    intelligence: { endpoint: 'http://127.0.0.1:8776', model: 'auto', keyReady: false, keyTarget: 'Fairlead/Gangplank', problem: '' },
+    intelligence: { endpoint: 'http://127.0.0.1:8776', model: 'auto', keyReady: false, credentialName: 'Fairlead/Gangplank', problem: '' },
   };
   if (p === '/api/audit') return { entries: S.audit.slice(0, 30) };
   if (p === '/api/insights') {

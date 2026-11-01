@@ -280,7 +280,7 @@ el('endSession').addEventListener('click',async()=>{
 // ---- Settings: workspace folder and the Fairlead connection --------------------------------
 async function loadSettings(){
  try{const x=await api('/api/settings');const w=x.workspaces||{};el('wsRoot').textContent=w.root||'';el('wsRootInput').disabled=!!w.fixed;el('wsSave').disabled=!!w.fixed;el('wsDefault').disabled=!!w.fixed;if(w.fixed)note('wsNotice','This folder is set when Gangplank starts (-WorkRoot or GANGPLANK_WORK_ROOT).','');
-  const a=x.intelligence||{};el('aiCurrent').textContent='Fairlead route: '+(a.model||'?')+' at '+(a.endpoint||'?')+'. Key for Gangplank ('+(a.keyTarget||'Fairlead/Gangplank')+'): '+(a.keyReady?'installed':'not installed - open Fairlead, Clients, install a key for Gangplank')+'.'+(a.problem?' Problem: '+a.problem:'');
+  const a=x.intelligence||{};el('aiCurrent').textContent='Fairlead route: '+(a.model||'?')+' at '+(a.endpoint||'?')+'. Key for Gangplank ('+(a.credentialName||'Fairlead/Gangplank')+'): '+(a.keyReady?'installed':'not installed - open Fairlead, Clients, install a key for Gangplank')+'.'+(a.problem?' Problem: '+a.problem:'');
  }catch(e){el('aiCurrent').textContent='Settings unavailable: '+e.message}
 }
 el('wsSave').addEventListener('click',async()=>{try{const x=await api('/api/settings/workspace','POST',{root:el('wsRootInput').value.trim()});el('wsRootInput').value='';note('wsNotice','New workspaces will go to '+x.workspaces.root+'.','ok');await loadSettings()}catch(e){note('wsNotice',e.message,'error')}});

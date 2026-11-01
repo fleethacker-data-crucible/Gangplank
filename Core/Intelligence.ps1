@@ -10,12 +10,10 @@
 #  Every request carries Authorization: Bearer <key>, X-Fairlead-Label: Gangplank and
 #  X-Fairlead-Privacy: local, so prompts stay on this PC.
 # ============================================================
-# Shared module. Gangplank Intelligence, version 1.0.0 (docs/SHARED-AI-MODULE.md).
+# Shared module. Gangplank Intelligence, version 2.0.0 (docs/SHARED-AI-MODULE.md).
 # Copied, not forked, into sibling products: change it here, bump the version, copy it back.
 # Host functions it needs, and nothing else of Gangplank: ConvertFrom-GangplankApiResponse,
-# Get-GangplankAiToken, Get-GangplankCredentialStatus, Get-GangplankEnv, Get-GangplankEnvironmentCredential,
-# Get-GangplankLocalSettings, Get-GangplankProviderErrorCode, Get-GangplankSafeUrl, Get-GangplankStoredCredential,
-# Invoke-GangplankHttpRequest, Save-GangplankLocalSettings, Write-GangplankAudit.
+# Get-GangplankSafeUrl, Invoke-GangplankHttpRequest.
 
 $script:GangplankFairleadDefaultUrl = 'http://127.0.0.1:8776/v1/chat/completions'
 $script:GangplankFairleadDefaultModel = 'auto'
@@ -194,7 +192,7 @@ function Get-GangplankAiSettingsView {
         endpoint = $(if ($cfg) { $cfg.Endpoint } else { '' })
         model = $(if ($cfg) { $cfg.Model } else { '' })
         keyReady = $key
-        keyTarget = (Get-GangplankFairleadTarget)
+        credentialName = (Get-GangplankFairleadTarget)
         problem = $problem
     }
 }
