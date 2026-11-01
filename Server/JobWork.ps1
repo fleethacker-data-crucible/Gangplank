@@ -79,6 +79,14 @@ function Invoke-GangplankJobSave {
     return @{ Session = (ConvertTo-GangplankSessionSnapshot $session); Saved = $saved }
 }
 
+function Invoke-GangplankJobRevert {
+    param($Shared,[hashtable]$Arguments)
+    $session = New-GangplankSessionFromSnapshot -Snapshot $Arguments.Session -Token $Arguments.Token
+    Set-GangplankJobProgress $Shared 'Getting the earlier version of the file'
+    $r = Restore-GangplankWorkspaceFile -Session $session -Path ([string]$Arguments.Path)
+    return @{ Path = $r.Path; Kind = $r.Kind; BackupPath = $r.BackupPath }
+}
+
 function Invoke-GangplankJobReview {
     param($Shared,[hashtable]$Arguments)
     $session = New-GangplankSessionFromSnapshot -Snapshot $Arguments.Session -Token $Arguments.Token
