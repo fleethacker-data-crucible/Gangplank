@@ -23,6 +23,8 @@ if (-not $script:GangplankRoot) {
 . (Join-Path $script:GangplankRoot "Core\Diff.ps1")
 . (Join-Path $script:GangplankRoot "Core\SmartSave.ps1")
 . (Join-Path $script:GangplankRoot "Core\Workspace.ps1")
+. (Join-Path $script:GangplankRoot "Core\GetLatest.ps1")
+. (Join-Path $script:GangplankRoot "Core\Revert.ps1")
 . (Join-Path $script:GangplankRoot "Core\Sentinel.ps1")
 . (Join-Path $script:GangplankRoot "Core\RepositoryInsights.ps1")
 . (Join-Path $script:GangplankRoot "Core\Reviews.ps1")
@@ -166,51 +168,6 @@ function Invoke-GangplankPull {
     }
 }
 
-function Invoke-GangplankPush {
-    param(
-        $Session,
-        [Parameter(Mandatory)][string]$LocalPath,
-        [string]$Branch,
-        [string]$Message,
-        [ValidateSet("Omit","Include")]
-        [string]$DeletePolicy = "Omit"
-    )
-    if ((Get-GangplankEnv ALLOW_LEGACY_BULK_UPLOAD) -ne '1') {
-        throw 'Legacy full-folder upload is disabled by default. Use verified Smart Save, or require explicit administrative opt-in.'
-    }
-    if (-not $Session) { throw "Open a repository first." }
-    if (-not $Branch) {
-        $Branch = if ($Session.DefaultBranch) { $Session.DefaultBranch } else { "main" }
-    }
-    if (-not $Message) {
-        $Message = "Commit from Gangplank ({0})" -f (Get-Date -Format "yyyy-MM-dd HH:mm")
-    }
-    if (-not (Test-Path -LiteralPath $LocalPath)) {
-        throw "Local path not found: $LocalPath"
-    }
-
-    Write-GangplankLog -Level INFO -Message "Push $LocalPath -> $($Session.Provider) $($Session.ProjectPath)@$Branch"
-
-    if ($Session.Provider -eq "GitLab") {
-        $result = $Session.ProviderObj.PushFolder(
-            $Session.ProjectPath, $Branch, $LocalPath, $Message, $DeletePolicy
-        )
-        Write-GangplankLog -Level INFO -Message "GitLab push actions=$($result.FileCount) commits=$($result.Commits -join ',')"
-        return $result
-    }
-
-    if ($Session.Provider -eq "GitHub") {
-        $result = $Session.ProviderObj.PushFolder(
-            $Session.ProjectPath, $Branch, $LocalPath, $Message,
-            @("Logs", "work", ".git", ".vs", "node_modules")
-        )
-        Write-GangplankLog -Level INFO -Message "GitHub push files=$($result.FileCount) commit=$($result.CommitSha)"
-        return $result
-    }
-
-    throw "Unknown provider $($Session.Provider)"
-}
-
 function New-GangplankMergeRequest {
     [CmdletBinding()]
     param(
@@ -245,7 +202,6 @@ Export-ModuleMember -Function @(
     "Get-GangplankToken",
     "Open-GangplankRepository",
     "Invoke-GangplankPull",
-    "Invoke-GangplankPush",
     "New-GangplankMergeRequest",
     "Show-GangplankMenu",
     "Show-GangplankBanner",
@@ -296,6 +252,8 @@ Export-ModuleMember -Function @(
     "Get-GangplankWorkspacePreview",
     "Add-GangplankExistingFolder",
     "Invoke-GangplankWorkspaceSave",
+    "Update-GangplankWorkspaceFromRemote",
+    "Restore-GangplankWorkspaceFile",
     "New-GangplankSmartMessage",
     "Get-GangplankSmartSavePrompt",
     "Get-GangplankLocalFileMap",

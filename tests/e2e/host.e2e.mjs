@@ -180,6 +180,17 @@ test('connect, start, edit, Smart Save, review', async () => {
   assert.equal(changes['notes.md'].Kind, 'New');
   assert.equal(changes['.env'].Blocked, true, '.env must be blocked');
 
+  // Revert: the edited script goes back to the downloaded text, the edited copy is saved aside,
+  // and a new file (nothing to go back to) is refused.
+  const editedBuild = fs.readFileSync(path.join(folder, 'scripts', 'build.sh'), 'utf8');
+  r = await job(h, '/api/revert', { path: 'notes.md' });
+  assert.equal(r.status, 500, 'A new file has no earlier version');
+  r = await job(h, '/api/revert', { path: 'scripts/build.sh' });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  assert.ok(!fs.readFileSync(path.join(folder, 'scripts', 'build.sh'), 'utf8').includes('echo extra'), 'Revert must restore the downloaded text');
+  assert.equal(fs.readFileSync(r.json.BackupPath, 'utf8'), editedBuild, 'The edited copy must be saved aside');
+  fs.writeFileSync(path.join(folder, 'scripts', 'build.sh'), editedBuild);   // edit it again for the save below
+
   r = await job(h, '/api/save', { paths: ['.env'] });
   assert.equal(r.status, 500, '.env must not be publishable');
   r = await job(h, '/api/save', { paths: ['scripts/build.sh', 'notes.md'], message: 'Update build script and add notes' });
@@ -224,6 +235,17 @@ test('connect, start, edit, Smart Save, review', async () => {
   assert.equal(r.json.remoteChanged, true, 'Remote change must be detected');
   r = await job(h, '/api/save', { paths: ['notes.md'] });
   assert.equal(r.status, 500, 'Save over a moved branch must be refused');
+
+  // Get latest: the teammate's file arrives, my edit to notes.md stays, and the workspace is current again.
+  r = await job(h, '/api/latest', {});
+  assert.equal(r.status, 200, JSON.stringify(r));
+  assert.equal(r.json.needsChoice, false, 'No overlap: nothing to choose');
+  assert.equal(fs.readFileSync(path.join(folder, 'teammate.txt'), 'utf8'), 'hi', 'The online file must arrive');
+  assert.match(fs.readFileSync(path.join(folder, 'notes.md'), 'utf8'), /More\./, 'My edit must be kept');
+  r = await call(h, 'GET', '/api/preview');
+  assert.equal(r.json.remoteChanged, false, 'After Get latest the workspace is current');
+  r = await job(h, '/api/latest', {});
+  assert.equal(r.json.upToDate, true, 'A second Get latest finds nothing new');
 });
 
 test('session survives a restart', async () => {

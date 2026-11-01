@@ -209,7 +209,7 @@ while ($true) {
             Write-Host ""
             Write-Host "Nothing to download yet." -ForegroundColor Yellow
             Write-Host $em -ForegroundColor Gray
-            Write-Host "Use: Share my folder (push) to create the first commit." -ForegroundColor Cyan
+            Write-Host "Create the first commit on GitHub or GitLab (for example by adding a README there), then open the project again." -ForegroundColor Cyan
         }
         else {
             Write-Host "ERROR: $em" -ForegroundColor Red
