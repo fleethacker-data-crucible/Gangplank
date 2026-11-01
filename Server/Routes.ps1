@@ -18,21 +18,13 @@ $script:GangplankApp = @{
 
 function Initialize-GangplankApp {
     # WorkRoot: where workspaces go. StateRoot: Gangplank's own data (saved session).
-    # LegacyStateRoot: the old <tool>\work\.keystone, read once if nothing newer exists.
-    param([Parameter(Mandatory)][string]$WorkRoot,[Parameter(Mandatory)][string]$StateRoot,[string]$LegacyStateRoot,[switch]$WorkRootFixed,[switch]$LocalDev)
+    param([Parameter(Mandatory)][string]$WorkRoot,[Parameter(Mandatory)][string]$StateRoot,[switch]$WorkRootFixed,[switch]$LocalDev)
     $script:GangplankApp.WorkRoot = $WorkRoot
     $script:GangplankApp.WorkRootFixed = [bool]$WorkRootFixed
     $script:GangplankApp.StateRoot = $StateRoot
     $script:GangplankApp.LocalDev = [bool]$LocalDev
     $script:GangplankApp.Session = $null
     $script:GangplankApp.Restored = Read-GangplankSessionState -StateRoot $StateRoot
-    if (-not $script:GangplankApp.Restored -and $LegacyStateRoot -and (Test-Path -LiteralPath (Get-GangplankSessionStatePath -StateRoot $LegacyStateRoot))) {
-        $script:GangplankApp.Restored = Read-GangplankSessionState -StateRoot $LegacyStateRoot
-        if ($script:GangplankApp.Restored) {
-            Write-GangplankLog -Level INFO -Message 'Picked up the session saved by an earlier Keystone (work\.keystone). New workspaces now go to the workspace folder.'
-            try { Save-GangplankSessionState -StateRoot $StateRoot -Session ([pscustomobject]$script:GangplankApp.Restored) } catch { }
-        }
-    }
     if ($script:GangplankApp.Restored) {
         Write-GangplankLog -Level INFO -Message "Restored session for $($script:GangplankApp.Restored.ProjectPath) (branch $($script:GangplankApp.Restored.LastBranch))."
     }

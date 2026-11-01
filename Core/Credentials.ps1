@@ -16,6 +16,7 @@ $script:GangplankCredentialEnv = @{
     GitHub = @('GITHUB_TOKEN')
     GitLab = @('GITLAB_TOKEN')
 }
+# On-disk format label: it keys the DPAPI seal on saved tokens, so it keeps its original spelling on purpose.
 $script:GangplankCredentialEntropy = [Text.Encoding]::UTF8.GetBytes('Keystone credential store v1')
 $script:GangplankCredentialStorePath = $null
 # @{ Protect = { param([byte[]]$b) ... }; Unprotect = { ... }; Name = '...' } or $null.
@@ -171,7 +172,6 @@ function Get-GangplankEnvironmentCredential {
 # ---------------------------------------------------------------------------
 function Get-GangplankLocalSettingsPath {
     if (-not $script:GangplankConfigPath) { Initialize-GangplankConfig }
-    # Copied forward once from keystone.local.json by Initialize-GangplankConfig.
     return (Join-Path (Split-Path $script:GangplankConfigPath -Parent) 'gangplank.local.json')
 }
 
@@ -221,14 +221,8 @@ function Assert-GangplankLocalFolderPath {
 
 function Get-GangplankDefaultWorkspaceRoot {
     # Like a normal clone location: a "Gangplank" folder in the user's home, outside the tool.
-    # A user who already has workspaces in the Keystone-era default (<home>\Keystone) and no
-    # Gangplank folder keeps using it: workspaces hold unsaved edits and the saved session
-    # points into them, so they are never moved or copied.
     $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } elseif ($env:HOME) { $env:HOME } else { [IO.Path]::GetTempPath() }
-    $current = Join-Path $homeDir 'Gangplank'
-    $legacy = Join-Path $homeDir 'Keystone'
-    if (-not (Test-Path -LiteralPath $current) -and (Test-Path -LiteralPath $legacy -PathType Container)) { return $legacy }
-    return $current
+    return (Join-Path $homeDir 'Gangplank')
 }
 
 function Get-GangplankWorkspaceRoot {

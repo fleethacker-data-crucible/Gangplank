@@ -7,8 +7,7 @@
   End session in the browser. This is the fallback, for example when the host
   runs in a hidden window. It reads the runtime files the host writes under
   Logs\ (gangplank-server-<pid>.json), then looks for any PowerShell still running
-  Start-Gangplank.ps1 (from any folder), and stops them. Hosts started before the
-  rename (Start-KeystoneWeb.ps1, Logs\keystone-server-<pid>.json) are found too. Each host is asked to
+  Start-Gangplank.ps1 (from any folder), and stops them. Each host is asked to
   stop cleanly first, so a save in progress finishes; after 30 seconds it is
   killed. Stale runtime files are removed. No PIDs needed.
 .PARAMETER Quiet

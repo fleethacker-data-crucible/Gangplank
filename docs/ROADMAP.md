@@ -19,7 +19,7 @@ needs a smart card, the organization's real GitLab host or workstation applicati
 | Host routes | Branches, history, compare, reviews, insights and Sentinel routes work (their functions were never exported); a test now fails if the host calls an unexported function |
 | Credentials | Lazarette is opt-in (Credentials setting or `GANGPLANK_LAZARETTE_PATH`), never auto-detected. Tokens can be entered once in the UI and are sealed with Windows DPAPI; environment variables still work |
 | Host (roadmap 1) | TcpListener on 127.0.0.1, one-time launch link to an `HttpOnly; SameSite=Strict` cookie, client header, loopback Host/Origin, same-user peer check, limits, manifest-only static files, CSP without inline code |
-| Sessions (2) | Project, work branch and download baseline saved under `work\.keystone` (now `%LOCALAPPDATA%\Gangplank`) and restored on restart |
+| Sessions (2) | Project, work branch and download baseline saved under `%LOCALAPPDATA%\Gangplank` and restored on restart |
 | Jobs (3) | Connect, start, download, save, review and AI run in background runspaces; one workspace job at a time; the UI polls progress |
 | Providers (4) | One transport for GitHub, GitLab and AI: coded errors, GET-only retry with `Retry-After`, no token on cross-host redirects, UTF-8 bodies, GitHub empty-repo 409 handled |
 | LocalDev and e2e (5) | Synthetic GitHub (`dev/fake-github.mjs`), `Launch-LocalDev.bat`, and an end-to-end test that drives the real host through connect, start, Smart Save, review, stale branch and restart |

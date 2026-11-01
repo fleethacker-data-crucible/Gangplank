@@ -276,27 +276,6 @@ test('session survives a restart', async () => {
   assert.ok(p.json.changes.some((c) => c.Path === 'notes.md'), 'Pending edit should still be visible after restart: ' + JSON.stringify(p.json));
 });
 
-test('a session saved by Keystone (before the rename) is picked up', async () => {
-  // Simulate an upgrade: the saved state lives in Keystone's folder, Gangplank's does not exist yet.
-  const before = (await call(host, 'GET', '/api/status')).json;
-  await stopHost(host);
-  const current = path.join(workRoot, '.gangplank'), legacy = path.join(workRoot, '.keystone');
-  fs.rmSync(legacy, { recursive: true, force: true });
-  fs.renameSync(current, legacy);
-  host = await startHost();
-  assert.match(host.log(), /Copied your Keystone data/, 'The host should say it carried the Keystone data forward');
-  assert.ok(fs.existsSync(path.join(legacy, 'session.json')), 'The Keystone folder must be left in place');
-  assert.ok(fs.existsSync(path.join(current, 'session.json')), 'The session must be copied to the Gangplank folder');
-  cookie = '';
-  const r1 = await call(host, 'POST', '/api/session', { nonce: host.nonce });
-  cookie = r1.headers.get('set-cookie').split(';')[0];
-  client = r1.json.client;
-  const after = (await call(host, 'GET', '/api/status')).json;
-  assert.equal(after.project, before.project, 'Project restored from the Keystone session');
-  assert.equal(after.branch, before.branch);
-  assert.equal(after.hasBaseline, true);
-});
-
 test('Sentinel review: a possible personal identifier needs a reason that is audited', async () => {
   const h = host;
   let r = await job(h, '/api/connect', { url: fake.url + '/gangplank-demo/sample' });

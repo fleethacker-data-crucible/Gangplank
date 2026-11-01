@@ -103,8 +103,7 @@ try {
 
         # --- workspace folder ----------------------------------------------------------
         $default = Get-GangplankDefaultWorkspaceRoot
-        # <home>\Keystone only while it exists and <home>\Gangplank does not (pre-rename workspaces).
-        Assert ($default -match '(Gangplank|Keystone)$') ('Default workspace folder should be <home>\Gangplank, got ' + $default)
+        Assert ($default -match 'Gangplank$') ('Default workspace folder should be <home>\Gangplank, got ' + $default)
         Assert ((Get-GangplankWorkspaceRoot) -eq $default) 'Default in use when nothing is set'
         $toolInside = Join-Path (Split-Path $PSScriptRoot -Parent) 'work'
         Assert ((Get-Code { Set-GangplankWorkspaceRoot -Path $toolInside }) -eq 'BAD_REQUEST') 'Workspaces inside the program folder must be refused'

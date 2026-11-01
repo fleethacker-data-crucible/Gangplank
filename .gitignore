@@ -12,7 +12,6 @@ config/*local*.json
 # Per-workstation settings, current and pre-rename names (never commit either):
 config/gangplank.local.json
 config/lazarette-items.local.json
-config/keystone.local.json
 config/arc-items.local.json
 .DS_Store
 Thumbs.db

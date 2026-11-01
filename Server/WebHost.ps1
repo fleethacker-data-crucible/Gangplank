@@ -12,7 +12,6 @@ function Start-GangplankWebHost {
         [string]$DevGitLabUrl,
         [Parameter(Mandatory)][string]$WorkRoot,
         [Parameter(Mandatory)][string]$StateRoot,
-        [string]$LegacyStateRoot,
         [switch]$WorkRootFixed,
         [Parameter(Mandatory)][string]$UiRoot,
         # Stop by itself once its last tab is gone (Test-GangplankAutoStopEnabled).
@@ -25,7 +24,7 @@ function Start-GangplankWebHost {
         if ($DevGitHubUrl) { Set-GangplankDevProvider -GitHubUrl $DevGitHubUrl }
         if ($DevGitLabUrl) { Set-GangplankDevProvider -GitLabUrl $DevGitLabUrl }
     }
-    Initialize-GangplankApp -WorkRoot $WorkRoot -StateRoot $StateRoot -LegacyStateRoot $LegacyStateRoot -WorkRootFixed:$WorkRootFixed -LocalDev:$LocalDev
+    Initialize-GangplankApp -WorkRoot $WorkRoot -StateRoot $StateRoot -WorkRootFixed:$WorkRootFixed -LocalDev:$LocalDev
     Reset-GangplankPresence -AutoStop $AutoStop
     $script:GangplankHostLife = @{ AutoStop = $AutoStop; RuntimeFile = $null; StopEvent = $null; StopReason = $null; Pending = $null; WaitLogged = $false }
     $onReady = {

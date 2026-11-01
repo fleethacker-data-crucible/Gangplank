@@ -20,7 +20,7 @@ Requirement words: **MUST** is required to call an app aligned. **SHOULD** is ex
 | Halyard Ballast | Halyard-Ballast | previous name | Halyard's write-only sandbox repo | No UI | — |
 | Shellback | Shellback | Synapse | Workforce capability discovery | React 19 + Tailwind 4 | 8771 |
 | SnapShackle | SnapShackle | CutterMk, Lasso, SnipHero | Screenshot and annotation studio | Plain HTML/JS | 8768 |
-| Gangplank | Gangplank | Keystone | Git-free development workspace | Plain HTML/JS | 8769 |
+| Gangplank | Gangplank | - | Git-free development workspace | Plain HTML/JS | 8769 |
 | PacketRat | PacketRat | MailHawk | Outlook triage queue | Plain HTML/JS | 8766 |
 | Eight Bells | Eight-Bells | LogHawk | Watchstanding log intelligence | Plain JS | 8774 |
 | Capstan | Capstan | — | Screen recorder and video editor | React | 8772 |
@@ -186,7 +186,7 @@ Plain-HTML apps use these classes directly. Tailwind and component-framework app
   - `mark.svg` (icon only, simplified to read at 32 px)
   - `favicon.ico` (16, 32, 48)
   - `tray.ico` (16, 20, 24, 32) for apps with a tray icon
-- **README. MUST** open with the emblem, the name, a one-line description, and a short "The name" note giving the double meaning and the former names.
+- **README. MUST** open with the emblem, the name, a one-line description, and a short "The name" note giving the double meaning.
 
 ---
 
@@ -196,7 +196,7 @@ Plain-HTML apps use these classes directly. Tailwind and component-framework app
 - **MUST** try the app's registry port first (section 1). If it is taken, bind a free loopback port, open the browser at the address actually bound, and show it in the status bar. Never stop or take over another app's server.
 - **SHOULD** stop the engine shortly after the last browser tab closes, with a `--stay` switch to keep it running. Lazarette and SnapShackle already do this.
 - **MUST** name per-user data folders `%LOCALAPPDATA%\<App>` and prefix browser storage keys with the lower-case app name (`snapshackle-settings`).
-- **MUST** migrate data from a former name's folder or keys on first launch, copying forward and leaving the original untouched.
+- **MUST NOT** copy data forward from a former name's folder or keys; when a tool is renamed the old name is removed and a user moves their data by hand once.
 - **Dev servers** (Vite and similar) MAY use any port. The registry applies to the shipped engine.
 
 ---
@@ -244,7 +244,7 @@ Copy into the repo's tracking issue.
 - [ ] Components match section 6; Lucide icons vendored
 - [ ] Focus rings, keyboard use and contrast pass section 7
 - [ ] Brand assets in `assets/brand/`; README header updated
-- [ ] Launcher, port, data folder and storage keys follow section 9, with migration from former names
+- [ ] Launcher, port, data folder and storage keys follow section 9
 - [ ] Screenshot of both themes added to `docs/`
 
 ---

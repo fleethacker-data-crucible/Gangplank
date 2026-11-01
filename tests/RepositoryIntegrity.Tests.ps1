@@ -21,7 +21,6 @@ $required=@(
  'dev/fake-github.mjs','dev/fake-github.test.mjs','dev/Start-LocalDev.ps1','tests/e2e/host.e2e.mjs','tests/e2e/browser.e2e.mjs','tests/Intelligence.Tests.ps1','Core/Intelligence.ps1','dev/fake-ai.mjs','tests/Credentials.Tests.ps1',
  'docs/ROADMAP.md','TechStack',
  'Core/Lifecycle.ps1','Stop-Gangplank.ps1','web/heartbeat-worker.js',
- 'Launch-Keystone.bat','Stop-Keystone.ps1',
  'assets/brand/emblem-dark.png','assets/brand/emblem-light.png','assets/brand/mark.svg','assets/brand/mark-256.png','assets/brand/favicon.ico','assets/brand/tray.ico'
 )
 $missing=@($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_) -PathType Leaf) })
