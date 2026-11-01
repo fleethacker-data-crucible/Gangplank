@@ -4,13 +4,10 @@
 # ============================================================
 
 function Get-GangplankEnv {
-    # GANGPLANK_<Name> first, then the pre-rename KEYSTONE_<Name> (Gangplank was Keystone).
-    # Returns $null when neither is set (or both are blank).
+    # Reads GANGPLANK_<Name>. Returns $null when it is unset or blank.
     param([Parameter(Mandatory)][string]$Name)
-    foreach ($n in @("GANGPLANK_$Name", "KEYSTONE_$Name")) {
-        $v = [Environment]::GetEnvironmentVariable($n)
-        if (-not [string]::IsNullOrWhiteSpace($v)) { return $v }
-    }
+    $v = [Environment]::GetEnvironmentVariable("GANGPLANK_$Name")
+    if (-not [string]::IsNullOrWhiteSpace($v)) { return $v }
     return $null
 }
 
