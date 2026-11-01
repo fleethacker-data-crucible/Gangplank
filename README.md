@@ -19,8 +19,7 @@ A gangplank is how people who aren't sailors get aboard a ship without falling i
 - `Launch-Keystone.bat` and `Stop-Keystone.ps1` remain as small stubs that forward to `Launch-Gangplank.bat` and `Stop-Gangplank.ps1`. `Stop-Gangplank.ps1` and the launcher's one-instance check also find a Keystone host that is still running.
 - On first launch, `%LOCALAPPDATA%\Keystone` (saved session, sealed tokens) is copied once to `%LOCALAPPDATA%\Gangplank`; the original stays as it was. Saved tokens remain readable (same Windows account, same DPAPI seal).
 - Workspaces are never moved: if you have `%USERPROFILE%\Keystone` and no `%USERPROFILE%\Gangplank`, Gangplank keeps using the Keystone folder (a folder chosen in Settings is kept as is).
-- `KEYSTONE_*` environment variables still work; `GANGPLANK_*` wins when both are set. `KEYSTONE_ARC_PATH` becomes `GANGPLANK_LAZARETTE_PATH` and `KEYSTONE_ARC_ITEM_*` becomes `GANGPLANK_LAZARETTE_ITEM_*`.
-- Config files are copied forward once, the originals left as they were: `config\keystone-config.json` → `config\gangplank-config.json` (if you edited it), `config\keystone.local.json` → `config\gangplank.local.json` (workspace folder, AI model and the Lazarette, formerly ARC, setting) and `config\arc-items.local.json` → `config\lazarette-items.local.json`. The old `ArcItems` / `Arc` keys inside them are still read.
+- Environment variables that start with the former product name still work; `GANGPLANK_*` wins when both are set.
 - New work branches are named `gangplank/work-…`; existing `keystone/work-…` branches open, download and save like any other branch.
 
 | Night watch (dark) | Chart room (light) |
@@ -61,35 +60,27 @@ Your project, work branch and download baseline are saved in `%LOCALAPPDATA%\Gan
 
 ## Credentials
 Gangplank looks for a token in this order:
-1. **Environment:** `GITHUB_TOKEN`, `GITLAB_TOKEN` or `GANGPLANK_AI_TOKEN`.
+1. **Environment:** `GITHUB_TOKEN` or `GITLAB_TOKEN`.
 2. **Saved in Gangplank:** paste a token once in **Credentials**. It is sealed with Windows DPAPI for your Windows account in `%LOCALAPPDATA%\Gangplank\credentials.json`, never shown again and never sent back to the browser. Remove it there at any time.
 3. **Lazarette**, only if you turn it on (below).
 
 Only HTTPS github.com, your organization's GitLab host (`GANGPLANK_GITLAB_HOST`, or `GitLabHost` in `config\gangplank-config.json`; none by default) and administrator-approved `GANGPLANK_GITLAB_ALLOWED_HOSTS` are accepted for repositories. Provider errors are reported as codes (`AUTH_REJECTED`, `FORBIDDEN`, `NOT_FOUND`, `RATE_LIMITED`...); response bodies stay in the local log.
 
-Names from earlier releases still work as legacy aliases: the former AI token variable and credential name, the former default Lazarette item names (used only when the current default item is missing), and the GitLab host that used to be built in. They are listed in one place, `Core/Configuration.ps1`.
 
 ## Lazarette (optional, opt-in)
 Reference for the bridge, what it reads and what it never does: [docs/LAZARETTE-BRIDGE.md](docs/LAZARETTE-BRIDGE.md).
 
-Lazarette is still in development, so Gangplank never looks for it on its own. To use it, open **Credentials → Lazarette vault**, tick **Use Lazarette**, enter the Lazarette folder (the one containing its engine loader: `lib\Arc.ps1` in current Lazarette, or `lib\Lazarette.ps1` once Lazarette ships it; Gangplank accepts either) and restart Gangplank; or set `GANGPLANK_LAZARETTE_PATH` (the former `KEYSTONE_ARC_PATH` still works). Like before the rename, the generic `LAZARETTE_PATH` / `ARC_PATH` variables and sibling folders are not searched: Lazarette stays opt-in. Settings are stored in `config\gangplank.local.json` (not committed).
+Lazarette is still in development, so Gangplank never looks for it on its own. To use it, open **Credentials → Lazarette vault**, tick **Use Lazarette**, enter the Lazarette folder (the one containing its engine loader, `lib\Lazarette.ps1`) and restart Gangplank; or set `GANGPLANK_LAZARETTE_PATH`. The generic `LAZARETTE_PATH` variable and sibling folders are not searched: Lazarette stays opt-in. Settings are stored in `config\gangplank.local.json` (not committed).
 
-When Lazarette is on, Gangplank loads it once at startup and runs Lazarette's own unlock (`Unlock-LazaretteVaultInteractive`, or the matching command on an older Lazarette that still uses its earlier command names: passphrase or smart card PIN, then authenticator) in the Gangplank PowerShell window, before the server starts. It then reads items with `Get-LazaretteSecret` (or its earlier-named equivalent). By default it reads one item each for GitHub, GitLab and the AI model; Credentials shows the item names and lets you change the mapping. Gangplank has no unlock code of its own and never unlocks from a browser request. Older vault installs that use `pm.ps1` (versions 3 and 4) are still supported.
+When Lazarette is on, Gangplank loads it once at startup and runs Lazarette's own unlock (`Unlock-LazaretteVaultInteractive`: passphrase or smart card PIN, then authenticator) in the Gangplank PowerShell window, before the server starts. It then reads items with `Get-LazaretteSecret`. By default it reads one item each for GitHub, GitLab and the AI model; Credentials shows the item names and lets you change the mapping. Gangplank has no unlock code of its own and never unlocks from a browser request.
 
-## AI model
+## AI through Fairlead
 
-> **Intelligence router:** AI defaults to the Fleet router (Fairlead) at http://127.0.0.1:8776/v1, which picks the engine and keeps Gangplank's requests on this PC; explicit endpoint overrides still work. GitHub uses its public API; GitLab requires a configured and allowlisted host. See [TechStack](TechStack) for the current routing contract.
+Every AI request goes to [Fairlead](https://github.com/fleethacker-data-crucible/Fairlead), the Fleet model router on this PC, at `http://127.0.0.1:8776/v1/chat/completions`, asking for the route `auto`. Gangplank holds no gateway address, provider token or model id of its own, and it only talks to a loopback address.
 
-Open **Settings → AI model**, enter your organisation's endpoint and select **Detect models**. Gangplank asks the endpoint what it is and which chat models it offers, filters out embedding, speech and image models, and preselects the best match; **Test** sends one short message to prove it works. Supported:
-
-| Kind | Recognised by | Notes |
-|---|---|---|
-| OpenAI-compatible (your organization's AI endpoint, OpenAI, LiteLLM, LM Studio, vLLM) | `/v1/models` answers | Bearer token, streaming |
-| Azure OpenAI | `*.openai.azure.com` | `api-key` header; models are your deployments |
-| Databricks model serving | `/serving-endpoints` or a Databricks host | Chat endpoints only; answers arrive in one piece |
-| Ollama on this PC | `/api/tags` (port 11434) | No token needed; plain http allowed for this PC only |
-
-The token is the **AI** credential (Settings, or `GANGPLANK_AI_TOKEN`). The environment names Halyard uses also work, so one setup serves both apps: `LLM_URL` or `OPENAI_BASE_URL`, `LLM_MODEL` or `OPENAI_MODEL`, `LLM_TOKEN` or `OPENAI_API_KEY`. By default Gangplank uses the Fleet router, Fairlead, on this PC (`http://127.0.0.1:8776/v1/chat/completions`, model `auto`) and sends `X-Fairlead-Privacy: local` with every request so it stays on local models; `GANGPLANK_AI_URL` / `LLM_URL` or a saved setting overrides it. On a loopback endpoint the token is optional (no `Authorization` header is sent without one): if Fairlead asks for a client key, create it with `fairlead clients add` and save it as the AI token. When no model variable is set, the model is `auto` for the router and `phoenixlai` for any other loopback server (phoenix-lai called directly). Any other endpoint must use HTTPS, needs a token and a configured model; if `GANGPLANK_AI_ALLOWED_HOSTS` is set, only those hosts (and this PC) are allowed.
+- **Key:** Fairlead gives Gangplank its own client key. In Fairlead open **Clients** and install a key for **Gangplank**; Fairlead saves it in Windows Credential Manager as the generic credential `Fairlead/Gangplank` for your Windows account. Gangplank reads it from there when it needs it, sends it as a bearer token with `X-Fairlead-Label: Gangplank`, and never shows it or sends it to the browser. There is no environment variable or vault item for it. Without the key, AI features say "Open Fairlead and install a key for Gangplank".
+- **Privacy:** every request carries `X-Fairlead-Privacy: local`, so Fairlead keeps it on local models.
+- **Settings:** **Settings → AI through Fairlead** shows the route, the address, and whether the key is installed; **Test** sends one short message through Fairlead. `GANGPLANK_FAIRLEAD_URL` (loopback only) and `GANGPLANK_FAIRLEAD_MODEL` change the address and route name.
 
 The assistant is advisory only: it cannot change files, run tools or publish. Chat sends your typed text and the project/branch name; commit-title help sends file names and statuses only. Source code is never sent automatically.
 

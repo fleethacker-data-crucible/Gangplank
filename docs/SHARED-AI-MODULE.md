@@ -1,11 +1,11 @@
 # Shared AI module
 
-`Core/Intelligence.ps1` gives a product one AI setting for any gateway: the user gives an
-endpoint, and the module works out what it is (OpenAI-compatible, Azure OpenAI, Databricks, Ollama)
-and which chat models it offers. Halyard and Shellback can use the same file, so one setup serves
-all three apps (roadmap 16c).
+`Core/Intelligence.ps1` sends a product's AI requests to Fairlead, the local model router. The product
+holds no gateway address, provider token or model id: it calls one loopback address with a route name
+(`auto` by default) and its own Fairlead client key, read from Windows Credential Manager
+(`Fairlead/<AppName>`). Halyard and Shellback can use the same file.
 
-This is **version 1.0.0** of the module. It is copied into each product, not forked: change it here,
+This is **version 2.0.0** of the module. It is copied into each product, not forked: change it here,
 bump the version, and copy it back. The version is the line `# Shared module. Gangplank Intelligence,
 version X.Y.Z` at the top of the file; `tests/IntelligenceContract.Tests.ps1` checks that it matches
 this guide.
@@ -17,27 +17,21 @@ provides them (Gangplank's own are in `Core/`):
 
 | Function | What it must do |
 |---|---|
-| `Get-GangplankEnv` | Read `GANGPLANK_<NAME>` from the environment (Gangplank also reads the pre-rename `KEYSTONE_<NAME>`); `$null` when unset or blank |
-| `Get-GangplankLocalSettings` / `Save-GangplankLocalSettings` | Load and save the per-user settings object that holds the `Intelligence` section (non-secret) |
 | `Invoke-GangplankHttpRequest` | One HTTP call returning `{ Status; Headers; Text }`, no redirects across hosts, bounded retry for GET |
 | `ConvertFrom-GangplankApiResponse` | Turn a response into data, or throw a coded `CODE|message` error without the body |
-| `Get-GangplankProviderErrorCode` | Map an HTTP status to a code such as `AUTH_REJECTED` or `NOT_FOUND` |
 | `Get-GangplankSafeUrl` | A URL without its query string, safe for logs |
-| `Get-GangplankAiToken` | The AI credential: environment, the product's store, or the vault |
-| `Get-GangplankEnvironmentCredential` / `Get-GangplankStoredCredential` | The AI token from the environment, and from the product's own store |
-| `Get-GangplankCredentialStatus` | Whether an AI credential is configured (never the value) |
-| `Write-GangplankAudit` | Record a settings change (never a token) |
 
 In another product the `Gangplank` in the names stays, so the file is the same everywhere; the
 product supplies thin functions with those names.
 
 ## What the module decides
 
-- The endpoint comes from the environment (`GANGPLANK_AI_URL`, `LLM_URL`, `OPENAI_BASE_URL`), then
-  the saved setting, then the built-in default. Every address passes the same checks: HTTPS (plain
-  http only for this PC), no embedded credentials, and the administrator allowlist when set.
-- A loopback endpoint needs no token; any other endpoint does.
-- Models that are not for chat (embedding, speech, image) are never offered.
+- The address is `http://127.0.0.1:8776/v1/chat/completions`, or `GANGPLANK_FAIRLEAD_URL` when it
+  is a loopback address. Anything else is refused.
+- The route is `GANGPLANK_FAIRLEAD_MODEL`, default `auto`.
+- The key is only ever read from Credential Manager. With no key the module says
+  "Open Fairlead and install a key for Gangplank."
+- Every request carries `X-Fairlead-Label: Gangplank` and `X-Fairlead-Privacy: local`.
 
 ## What it does not know
 

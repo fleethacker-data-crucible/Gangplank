@@ -50,7 +50,7 @@ class GangplankFakeGitHub : GitHubProvider {
     $safe = Get-GangplankSafeErrorMessage -Message ("GitHub API POST repos/x failed (HTTP 422) | {`"message`":`"secret detail`"}" + [char]10 + 'second line')
     Assert ($safe -notmatch 'secret detail') 'Provider response body leaked into browser error'
     Assert ($safe -notmatch "`n") 'Browser error must be a single line'
-    Assert ((Get-GangplankSafeErrorMessage -Message 'ARC_LOCKED|Lazarette was found but the vault is locked.') -match '^ARC_LOCKED\|') 'Coded errors must keep their code'
+    Assert ((Get-GangplankSafeErrorMessage -Message 'LAZARETTE_LOCKED|Lazarette was found but the vault is locked.') -match '^LAZARETTE_LOCKED\|') 'Coded errors must keep their code'
 
     # --- Transport: retries, writes, redirects, coded errors -----------------
     $script:GangplankHttpSleep = { param($ms) $script:Slept += $ms }

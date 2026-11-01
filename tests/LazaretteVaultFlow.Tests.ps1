@@ -7,9 +7,9 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-vault-flow-' + [guid]::NewGuid().ToString('N'))
-$names = @('ARC_PATH','ARC_ROOT','ARC_HOME','LAZARETTE_PATH','KEYSTONE_ARC_PATH','GANGPLANK_LAZARETTE_PATH','GITHUB_TOKEN','GH_TOKEN','GITLAB_TOKEN',
-    'GANGPLANK_AI_TOKEN','GANGPLANK_AI_URL','LLM_URL','LLM_TOKEN','OPENAI_BASE_URL','OPENAI_API_KEY','GENAI_TOKEN',
-    'GANGPLANK_LAZARETTE_ITEM_GitHub','GANGPLANK_LAZARETTE_ITEM_AI')
+$names = @('LAZARETTE_PATH','GANGPLANK_LAZARETTE_PATH','GITHUB_TOKEN','GH_TOKEN','GITLAB_TOKEN',
+    'GANGPLANK_FAIRLEAD_URL','GANGPLANK_FAIRLEAD_TARGET','LLM_URL','LLM_TOKEN','OPENAI_BASE_URL','OPENAI_API_KEY',
+    'GANGPLANK_LAZARETTE_ITEM_GitHub')
 $saved = @{}
 foreach ($n in $names) { $saved[$n] = [Environment]::GetEnvironmentVariable($n); [Environment]::SetEnvironmentVariable($n,$null) }
 function Assert([bool]$Condition,[string]$Message) { if (-not $Condition) { throw "FAILED: $Message" } }
@@ -50,21 +50,23 @@ function Get-LazaretteSecret {
     $state = Initialize-GangplankLazaretteAuthentication -Quiet
     Assert ($state.Unlocked -and $global:VaultUnlockCalls -eq 1) 'The vault is unlocked exactly once at startup'
 
-    # Tokens are read by item name: github for GitHub, ai-api-key for a remote AI endpoint.
+    # Tokens are read by item name: github for GitHub. AI keys are never read from the vault.
     Assert ((Get-GangplankToken -Provider GitHub) -eq 'fake-vault-github-token') 'The GitHub token comes from the github item'
-    Assert ((Get-GangplankAiAuthToken -Url 'https://gateway.example.com/v1') -eq 'fake-vault-ai-key') 'A remote AI endpoint uses the ai-api-key item'
-    Assert (@($global:VaultReads | Where-Object { $_ -eq 'github' }).Count -ge 1 -and @($global:VaultReads | Where-Object { $_ -eq 'ai-api-key' }).Count -ge 1) 'Both items were read by name'
+    Assert (@($global:VaultReads | Where-Object { $_ -eq 'github' }).Count -ge 1) 'The github item was read by name'
+    Assert (@($global:VaultReads | Where-Object { $_ -eq 'ai-api-key' }).Count -eq 0) 'The ai-api-key item is never read'
     Assert ($global:VaultUnlockCalls -eq 1) 'Reading tokens never unlocks the vault again'
 
-    # The Fleet router is on this PC: the vault is not opened for it and no header is invented.
+    # The Fairlead key comes from Credential Manager only: the vault is not opened for it.
     $before = @($global:VaultReads).Count
-    Assert ($null -eq (Get-GangplankAiAuthToken -Url 'http://127.0.0.1:8776/v1')) 'No saved client key: the router gets no Authorization header'
-    Assert (@($global:VaultReads).Count -eq $before) 'A loopback AI endpoint must not read the vault'
+    Set-GangplankFairleadKeyReader -Reader { param($Target) $null }
+    Assert ($null -eq (Get-GangplankFairleadKey)) 'No Credential Manager key: no key'
+    Set-GangplankFairleadKeyReader -Reader $null
+    Assert (@($global:VaultReads).Count -eq $before) 'Looking for the Fairlead key must not read the vault'
 
     # The browser-facing status lists item names, never values.
     $json = (Get-GangplankLazaretteConnectionStatus | ConvertTo-Json -Depth 6 -Compress)
     Assert ($json -notmatch 'fake-vault-') 'The connection status must not carry a secret'
-    Assert ($json -match 'ai-api-key') 'The connection status lists the item names'
+    Assert ($json -match 'github') 'The connection status lists the item names'
 
     # Nothing is persisted: credential store, settings file and saved session state hold no token.
     & (Get-Module Gangplank) {

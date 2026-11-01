@@ -1,10 +1,10 @@
 #Requires -Version 5.1
-# AI endpoint discovery, model choice and settings; branch naming; workspace folder.
-# Offline: HTTP answers are scripted through the transport seam.
+# The Fairlead client (address, route, key from Credential Manager); branch naming; workspace folder.
+# Offline: HTTP answers are scripted through the transport seam, and the key reader is replaced.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-intel-' + [guid]::NewGuid().ToString('N'))
-$names = @('GANGPLANK_AI_URL','LLM_URL','OPENAI_BASE_URL','GANGPLANK_AI_MODEL','LLM_MODEL','OPENAI_MODEL','GANGPLANK_AI_ALLOWED_HOSTS','GANGPLANK_WORK_ROOT','GANGPLANK_AI_TOKEN','GENAI_TOKEN','LLM_TOKEN','OPENAI_API_KEY')
+$names = @('GANGPLANK_FAIRLEAD_URL','GANGPLANK_FAIRLEAD_MODEL','GANGPLANK_FAIRLEAD_TARGET','GANGPLANK_WORK_ROOT','LLM_TOKEN','OPENAI_API_KEY')
 $saved = @{}
 foreach ($n in $names) { $saved[$n] = [Environment]::GetEnvironmentVariable($n); [Environment]::SetEnvironmentVariable($n,$null) }
 try {
@@ -15,73 +15,60 @@ try {
         param($Temp)
         function Assert([bool]$Condition,[string]$Message) { if (-not $Condition) { throw "FAILED: $Message" } }
         function Get-Code([scriptblock]$Block) { try { $null = & $Block; return '' } catch { return ([string]$_.Exception.Message -split '\|')[0] } }
+        function Reply([int]$Status,$Obj) { [pscustomobject]@{ Status = $Status; Headers = @{}; Text = ($Obj | ConvertTo-Json -Depth 6 -Compress); File = $null; NetworkError = '' } }
         Initialize-GangplankLogging -LogDir (Join-Path $Temp 'Logs') -Level ERROR
         Initialize-GangplankConfig -ConfigPath (Join-Path $Temp 'config/gangplank-config.json')
         $script:GangplankAuditPath = Join-Path $Temp 'Logs/audit.jsonl'
 
-        # --- endpoint policy ---------------------------------------------------
-        Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'http://gateway.example.com/v1' }) -eq 'BAD_REQUEST') 'Plain http to another host must be refused'
-        Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'https://user:pw@gateway.example.com/v1' }) -eq 'BAD_REQUEST') 'Embedded credentials must be refused'
-        Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'http://127.0.0.1:11434' }) -eq '') 'Local model over http should be allowed'
-        Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'https://gateway.example.com/v1' }) -eq '') 'Any HTTPS gateway allowed without an administrator list'
-        $env:GANGPLANK_AI_ALLOWED_HOSTS = 'ai.example.com'
-        Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'https://gateway.example.com/v1' }) -eq 'FORBIDDEN') 'The administrator list must be strict'
-        Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'https://ai.example.com/v1' }) -eq '') 'Listed host allowed'
-        Assert ((Get-Code { Assert-GangplankAiEndpoint -Url 'https://api.example.net/v1' }) -eq 'FORBIDDEN') 'No built-in host bypasses the administrator list'
-        $env:GANGPLANK_AI_ALLOWED_HOSTS = $null
+        # --- address: this PC only -----------------------------------------------
+        Assert ((Resolve-GangplankFairleadUrl -Url 'http://127.0.0.1:8776') -eq 'http://127.0.0.1:8776/v1/chat/completions') 'A bare address should get the chat path'
+        Assert ((Resolve-GangplankFairleadUrl -Url 'http://127.0.0.1:8776/v1') -eq 'http://127.0.0.1:8776/v1/chat/completions') '/v1 should get the chat path'
+        Assert ((Resolve-GangplankFairleadUrl -Url 'http://localhost:9000/v1/chat/completions/') -eq 'http://localhost:9000/v1/chat/completions') 'A full chat address should be kept'
+        Assert ((Get-Code { Resolve-GangplankFairleadUrl -Url 'https://gateway.example.com/v1' }) -eq 'FORBIDDEN') 'A remote host must be refused'
+        Assert ((Get-Code { Resolve-GangplankFairleadUrl -Url 'http://user:pw@127.0.0.1:8776' }) -eq 'BAD_REQUEST') 'Embedded credentials must be refused'
+        Assert ((Get-Code { Resolve-GangplankFairleadUrl -Url 'ftp://127.0.0.1/x' }) -eq 'BAD_REQUEST') 'Only http and https'
+        Assert ((Get-Code { Resolve-GangplankFairleadUrl -Url 'not a url' }) -eq 'BAD_REQUEST') 'Not an address'
 
-        # --- model filtering and ranking --------------------------------------
-        $ranked = @(Select-GangplankAiChatModels -Ids @('text-embedding-3-small','whisper-1','gpt-4o-mini','gpt-4.1','llama-3.1-8b','tts-1','dall-e-3') -Current '')
-        Assert ($ranked -notcontains 'text-embedding-3-small' -and $ranked -notcontains 'whisper-1' -and $ranked -notcontains 'tts-1' -and $ranked -notcontains 'dall-e-3') ('Non-chat models must be dropped: ' + ($ranked -join ','))
-        Assert ($ranked[0] -eq 'gpt-4.1') ('Best general chat model should come first, got ' + $ranked[0])
-        Assert ((@(Select-GangplankAiChatModels -Ids @('gpt-4.1','llama-3.1-8b') -Current 'llama-3.1-8b'))[0] -eq 'llama-3.1-8b') 'The current choice should stay first'
-
-        # --- discovery through scripted HTTP ------------------------------------
-        $script:Seen = New-Object System.Collections.Generic.List[object]
-        $script:Routes = @{}
-        $script:GangplankHttpTransport = {
-            param($Request)
-            $script:Seen.Add($Request)
-            foreach ($k in $script:Routes.Keys) { if ($Request.Uri -like $k) { return $script:Routes[$k] } }
-            return [pscustomobject]@{ Status = 404; Headers = @{}; Text = '{}'; File = $null; NetworkError = '' }
-        }
-        function Reply([int]$Status,$Obj) { [pscustomobject]@{ Status = $Status; Headers = @{}; Text = ($Obj | ConvertTo-Json -Depth 6 -Compress); File = $null; NetworkError = '' } }
-
-        $script:Routes = @{ 'https://gateway.example.com/v1/models' = (Reply 200 @{ data = @(@{ id = 'text-embedding-3-small' }, @{ id = 'gpt-4o-mini' }, @{ id = 'gpt-4.1' }) }) }
-        $r = Find-GangplankAiModels -Endpoint 'https://gateway.example.com/v1/chat/completions' -Token 't'
-        Assert ($r.profile -eq 'openai' -and $r.recommended -eq 'gpt-4.1') ("OpenAI-compatible detection wrong: $($r.profile) $($r.recommended)")
-        Assert ($r.chatUrl -eq 'https://gateway.example.com/v1/chat/completions') ('Chat URL wrong: ' + $r.chatUrl)
-        Assert ($script:Seen[0].Headers['Authorization'] -eq 'Bearer t') 'OpenAI-style gateways use a bearer token'
-
-        $script:Seen.Clear()
-        $script:Routes = @{ 'https://team.openai.azure.com/openai/deployments*' = (Reply 200 @{ data = @(@{ id = 'chat-4o' }, @{ id = 'embed-small' }) }) }
-        $r = Find-GangplankAiModels -Endpoint 'https://team.openai.azure.com' -Token 'az'
-        Assert ($r.profile -eq 'azure' -and $r.auth -eq 'api-key') 'Azure should be detected with api-key auth'
-        Assert ($script:Seen[0].Headers['api-key'] -eq 'az' -and -not $script:Seen[0].Headers.ContainsKey('Authorization')) 'Azure must send api-key, not a bearer header'
-        Assert ($r.chatUrl -like 'https://team.openai.azure.com/openai/deployments/chat-4o/chat/completions?api-version=*') ('Azure chat URL wrong: ' + $r.chatUrl)
-
-        $script:Routes = @{ 'https://adb-1.azuredatabricks.net/api/2.0/serving-endpoints' = (Reply 200 @{ endpoints = @(@{ name = 'claude-sonnet'; task = 'llm/v1/chat' }, @{ name = 'bge-embed'; task = 'llm/v1/embeddings' }) }) }
-        $r = Find-GangplankAiModels -Endpoint 'https://adb-1.azuredatabricks.net/serving-endpoints' -Token 'd'
-        Assert ($r.profile -eq 'databricks' -and @($r.models).Count -eq 1 -and $r.models[0] -eq 'claude-sonnet') 'Databricks should list chat endpoints only'
-        Assert ($r.chatUrl -eq 'https://adb-1.azuredatabricks.net/serving-endpoints/claude-sonnet/invocations') ('Databricks chat URL wrong: ' + $r.chatUrl)
-
-        $script:Routes = @{ 'http://127.0.0.1:11434/api/tags' = (Reply 200 @{ models = @(@{ name = 'llama3.1:8b' }, @{ name = 'nomic-embed-text' }) }) }
-        $r = Find-GangplankAiModels -Endpoint 'http://127.0.0.1:11434' -Token ''
-        Assert ($r.profile -eq 'ollama' -and $r.recommended -eq 'llama3.1:8b') ("Ollama fallback wrong: $($r.profile) $($r.recommended)")
-        Assert ($r.chatUrl -eq 'http://127.0.0.1:11434/v1/chat/completions') ('Ollama chat URL wrong: ' + $r.chatUrl)
-
-        $script:Routes = @{ 'https://gateway.example.com/v1/models' = [pscustomobject]@{ Status = 401; Headers = @{}; Text = '{}'; File = $null; NetworkError = '' } }
-        Assert ((Get-Code { Find-GangplankAiModels -Endpoint 'https://gateway.example.com/v1' -Token 'bad' }) -eq 'AUTH_REJECTED') 'A refused token must be reported clearly'
-        $script:GangplankHttpTransport = $null
-
-        # --- settings and precedence ---------------------------------------------
-        # Default: the Fleet router (Fairlead) on this PC, no token required, model auto.
+        # --- defaults and overrides ---------------------------------------------
         $cfg = Get-GangplankAiConfiguration
-        Assert ($cfg.Url -eq 'http://127.0.0.1:8776/v1/chat/completions') ('Default AI endpoint should be the Fleet router, got ' + $cfg.Url)
-        Assert ($cfg.Model -eq 'auto' -and $cfg.Loopback -and $cfg.Router -and $cfg.Profile -eq 'openai') ('Default model should be auto on the router, got ' + $cfg.Model)
-        Assert ((Get-GangplankAiSettingsView).source -eq 'default') 'Settings view should report the built-in default'
-        Assert (-not (Get-GangplankAiSettingsView).tokenRequired) 'No token is required for the local default'
-        Assert ($null -eq (Get-GangplankAiRequestToken -Config $cfg)) 'Loopback without a token: no token, no error'
+        Assert ($cfg.Url -eq 'http://127.0.0.1:8776/v1/chat/completions') ('Default address should be Fairlead on this PC, got ' + $cfg.Url)
+        Assert ($cfg.Model -eq 'auto') ('Default route should be auto, got ' + $cfg.Model)
+        $env:GANGPLANK_FAIRLEAD_URL = 'http://127.0.0.1:9100'; $env:GANGPLANK_FAIRLEAD_MODEL = 'smart'
+        $cfg = Get-GangplankAiConfiguration
+        Assert ($cfg.Url -eq 'http://127.0.0.1:9100/v1/chat/completions' -and $cfg.Model -eq 'smart') 'GANGPLANK_FAIRLEAD_URL and _MODEL should override'
+        $env:GANGPLANK_FAIRLEAD_URL = 'https://gateway.example.com'
+        Assert ((Get-Code { Get-GangplankAiConfiguration }) -eq 'FORBIDDEN') 'A remote address in the variable must be refused'
+        Assert ([bool](Get-GangplankAiSettingsView).problem) 'The settings view should say what is wrong'
+        $env:GANGPLANK_FAIRLEAD_URL = $null; $env:GANGPLANK_FAIRLEAD_MODEL = $null
+
+        # --- the client key: Credential Manager only -------------------------------
+        Assert ((Get-GangplankFairleadTarget) -eq 'Fairlead/Gangplank') 'Default credential target'
+        $env:GANGPLANK_FAIRLEAD_TARGET = 'Fairlead/Gangplank-test'
+        Assert ((Get-GangplankFairleadTarget) -eq 'Fairlead/Gangplank-test') 'A Fairlead/<App> target may be named (tests)'
+        foreach ($bad in @('Other/Thing','Fairlead/','Fairlead/../x','Fairlead/a b','gitlab')) {
+            $env:GANGPLANK_FAIRLEAD_TARGET = $bad
+            Assert ((Get-Code { Get-GangplankFairleadTarget }) -eq 'AI_TOKEN_MISSING') "Target outside Fairlead/ accepted: $bad"
+        }
+        $env:GANGPLANK_FAIRLEAD_TARGET = $null
+        $blob = [Text.Encoding]::Unicode.GetBytes('fl-abc123DEF')
+        Assert ((ConvertFrom-GangplankCredentialBlob -Blob $blob) -eq 'fl-abc123DEF') 'UTF-16 blob should decode'
+        Assert ((ConvertFrom-GangplankCredentialBlob -Blob ([Text.Encoding]::UTF8.GetBytes('fl-abc123DEF'))) -eq 'fl-abc123DEF') 'UTF-8 blob should decode'
+        Assert ($null -eq (ConvertFrom-GangplankCredentialBlob -Blob ([byte[]]@(0xff,0xfe,0x01,0x00)))) 'Binary data is not a key'
+        Assert ($null -eq (ConvertFrom-GangplankCredentialBlob -Blob $null)) 'No blob, no key'
+        # Environment variables and vault items are never keys for Fairlead.
+        $env:LLM_TOKEN = 'not-a-fairlead-key'; $env:OPENAI_API_KEY = 'not-a-fairlead-key'
+        Set-GangplankFairleadKeyReader -Reader { param($Target) $null }
+        Assert ($null -eq (Get-GangplankFairleadKey)) 'Environment variables must not be used as the key'
+        Assert ((Get-Code { Get-GangplankAiRequestToken -Config (Get-GangplankAiConfiguration) }) -eq 'AI_TOKEN_MISSING') 'A missing key should say so'
+        Assert (-not (Get-GangplankAiSettingsView).keyReady) 'Settings view: key not ready'
+        $env:LLM_TOKEN = $null; $env:OPENAI_API_KEY = $null
+        $script:ReadTargets = New-Object System.Collections.Generic.List[string]
+        Set-GangplankFairleadKeyReader -Reader { param($Target) $script:ReadTargets.Add($Target); 'fl-test-key-1' }
+        Assert ((Get-GangplankAiRequestToken -Config (Get-GangplankAiConfiguration)) -eq 'fl-test-key-1') 'The key should come from the reader'
+        Assert ((Get-GangplankAiSettingsView).keyReady) 'Settings view: key ready'
+        Assert ($script:ReadTargets[0] -eq 'Fairlead/Gangplank') 'The key is read from Fairlead/Gangplank'
+
+        # --- a chat request through scripted HTTP ----------------------------------
         $script:Seen = New-Object System.Collections.Generic.List[object]
         $script:Routes = @{ 'http://127.0.0.1:8776/v1/chat/completions' = (Reply 200 @{ choices = @(@{ message = @{ content = 'local answer' } }) }) }
         $script:GangplankHttpTransport = {
@@ -90,70 +77,21 @@ try {
             foreach ($k in $script:Routes.Keys) { if ($Request.Uri -like $k) { return $script:Routes[$k] } }
             return [pscustomobject]@{ Status = 404; Headers = @{}; Text = '{}'; File = $null; NetworkError = '' }
         }
-        Assert ((Invoke-GangplankAI -Question 'hi') -eq 'local answer') 'Chat should reach the local default endpoint'
-        Assert ($script:Seen.Count -eq 1 -and [string]$script:Seen[0].Uri -eq 'http://127.0.0.1:8776/v1/chat/completions') 'Chat went to the wrong endpoint'
-        Assert (-not $script:Seen[0].Headers.ContainsKey('Authorization')) 'No Authorization header may be sent to loopback without a token'
-        Assert ([string]$script:Seen[0].Headers['X-Fairlead-Privacy'] -eq 'local') 'The router default must ask Fairlead to keep the request on this PC'
-        Assert ((($script:Seen[0].Body | ConvertFrom-Json).model) -eq 'auto') 'The default request should ask the router for model auto'
-        $env:GANGPLANK_AI_TOKEN = 'local-opt-token'
+        Assert ((Invoke-GangplankAI -Question 'hi') -eq 'local answer') 'Chat should reach Fairlead'
+        Assert ($script:Seen.Count -eq 1 -and [string]$script:Seen[0].Uri -eq 'http://127.0.0.1:8776/v1/chat/completions') 'Chat went to the wrong address'
+        $h = $script:Seen[0].Headers
+        Assert ([string]$h['Authorization'] -eq 'Bearer fl-test-key-1') 'The key is sent as a bearer token'
+        Assert ([string]$h['X-Fairlead-Label'] -eq 'Gangplank') 'The app label is sent'
+        Assert ([string]$h['X-Fairlead-Privacy'] -eq 'local') 'Requests ask Fairlead to keep them on this PC'
+        Assert (-not $h.ContainsKey('api-key')) 'No provider-style key header'
+        Assert ((($script:Seen[0].Body | ConvertFrom-Json).model) -eq 'auto') 'The request asks for route auto'
+        Set-GangplankFairleadKeyReader -Reader { param($Target) $null }
         $script:Seen.Clear()
-        [void](Invoke-GangplankAI -Question 'hi')
-        Assert ([string]$script:Seen[0].Headers['Authorization'] -eq 'Bearer local-opt-token') 'An optional loopback token is sent when set'
-        $env:GANGPLANK_AI_TOKEN = $null
-        $script:GangplankHttpTransport = $null
-        # The administrator list never blocks this PC, and still blocks other hosts.
-        $env:GANGPLANK_AI_ALLOWED_HOSTS = 'ai.example.com'
-        Assert ((Get-GangplankAiConfiguration).Url -eq 'http://127.0.0.1:8776/v1/chat/completions') 'The local default must pass an administrator list'
-        $env:LLM_URL = 'https://gateway.example.com/v1'; $env:LLM_MODEL = 'm'
-        Assert ((Get-Code { Get-GangplankAiConfiguration }) -eq 'FORBIDDEN') 'An override outside the administrator list must be refused'
-        $env:LLM_URL = $null; $env:LLM_MODEL = $null; $env:GANGPLANK_AI_ALLOWED_HOSTS = $null
-        # The router is loopback on port 8776; other loopback servers (phoenix-lai called directly) are not.
-        Assert (Test-GangplankAiRouterUrl -Url 'http://127.0.0.1:8776/v1') 'The router address is recognised'
-        Assert (-not (Test-GangplankAiRouterUrl -Url 'http://127.0.0.1:1234/v1')) 'phoenix-lai called directly is not the router'
-        Assert (-not (Test-GangplankAiRouterUrl -Url 'https://gateway.example.com:8776/v1')) 'A remote host on port 8776 is not the router'
-        Assert ((Get-GangplankAiAuthHeaders -Auth 'bearer' -Token '' -Url 'http://127.0.0.1:8776/v1/chat/completions')['X-Fairlead-Privacy'] -eq 'local') 'Router requests carry the privacy header'
-        Assert (-not (Get-GangplankAiAuthHeaders -Auth 'bearer' -Token '' -Url 'http://127.0.0.1:1234/v1/chat/completions').ContainsKey('X-Fairlead-Privacy')) 'Other servers never get the Fairlead header'
-        $env:LLM_URL = 'http://127.0.0.1:8776/v1'
-        $cfg = Get-GangplankAiConfiguration
-        Assert ($cfg.Router -and $cfg.Model -eq 'auto') ('The router set by hand uses model auto, got ' + $cfg.Model)
-        $env:LLM_URL = 'http://127.0.0.1:1234/v1'
-        $cfg = Get-GangplankAiConfiguration
-        Assert (-not $cfg.Router -and $cfg.Model -eq 'phoenixlai') 'phoenix-lai called directly keeps its own model name'
-        $env:LLM_URL = $null
-        # Any loopback override without a model variable uses phoenixlai.
-        $env:LLM_URL = 'http://localhost:8080/v1'
-        $cfg = Get-GangplankAiConfiguration
-        Assert ($cfg.Url -eq 'http://localhost:8080/v1/chat/completions' -and $cfg.Model -eq 'phoenixlai' -and $cfg.Loopback) ('Loopback override wrong: ' + $cfg.Url + ' ' + $cfg.Model)
-        $env:LLM_MODEL = 'local-other'
-        Assert ((Get-GangplankAiConfiguration).Model -eq 'local-other') 'LLM_MODEL overrides the loopback model'
-        # A remote override needs its own model and a token; no external model name is built in.
-        $env:LLM_URL = 'https://gateway.example.com/v1'; $env:LLM_MODEL = $null
-        Assert ((Get-Code { Get-GangplankAiConfiguration }) -eq 'AI_MODEL_MISSING') 'A remote endpoint without a model must not fall back to a built-in model'
-        $env:LLM_MODEL = 'gw-model'
-        $cfg = Get-GangplankAiConfiguration
-        Assert ($cfg.Url -eq 'https://gateway.example.com/v1/chat/completions' -and $cfg.Model -eq 'gw-model' -and -not $cfg.Loopback) 'Remote override not used'
-        Assert ((Get-Code { Get-GangplankAiRequestToken -Config $cfg }) -eq 'AI_TOKEN_MISSING') 'A remote endpoint without a token must be refused'
-        Assert ((Get-Code { Invoke-GangplankAI -Question 'hi' }) -eq 'AI_TOKEN_MISSING') 'Chat to a remote endpoint without a token must be refused before any request'
-        $env:LLM_TOKEN = 'remote-token'
-        Assert ((Get-GangplankAiRequestToken -Config $cfg) -eq 'remote-token') 'A remote endpoint uses the AI token'
-        $env:LLM_TOKEN = $null; $env:LLM_URL = $null; $env:LLM_MODEL = $null
-        Assert (Test-GangplankAiLoopbackUrl -Url 'http://127.0.0.5:1234/v1') '127.0.0.0/8 is loopback'
-        Assert (-not (Test-GangplankAiLoopbackUrl -Url 'https://127.0.0.1.example.com/v1')) 'A look-alike host is not loopback'
-        [void](Set-GangplankAiSettings -Endpoint 'https://gateway.example.com/v1' -Flavor 'openai' -Model 'gpt-4.1')
-        $cfg = Get-GangplankAiConfiguration
-        Assert ($cfg.Model -eq 'gpt-4.1' -and $cfg.Url -eq 'https://gateway.example.com/v1/chat/completions') 'Saved setting not used'
-        [void](Set-GangplankAiSettings -Endpoint 'https://adb-1.azuredatabricks.net' -Flavor 'databricks' -Model 'claude-sonnet')
-        Assert (-not (Get-GangplankAiConfiguration).Streams) 'Databricks answers in one piece (no streaming)'
-        $env:LLM_URL = 'https://halyard-gw.example.com/v1'; $env:LLM_MODEL = 'shared-model'
-        $cfg = Get-GangplankAiConfiguration
-        Assert ($cfg.Endpoint -eq 'https://halyard-gw.example.com/v1' -and $cfg.Model -eq 'shared-model') 'Halyard variables (LLM_URL/LLM_MODEL) should be honoured'
-        $env:LLM_URL = $null; $env:LLM_MODEL = $null
-        $env:LLM_TOKEN = 'shared-token-123'
-        Assert ((Get-GangplankAiToken) -eq 'shared-token-123') 'LLM_TOKEN (Halyard) should be accepted as the AI token'
-        $env:LLM_TOKEN = $null
-        [void](Set-GangplankAiSettings -Endpoint '')
-        Assert ((Get-GangplankAiConfiguration).Url -eq 'http://127.0.0.1:8776/v1/chat/completions') 'Reset should return to the Fleet router default'
-        Assert ((Get-Code { Set-GangplankAiSettings -Endpoint 'https://gateway.example.com/v1' -Model '' }) -eq 'BAD_REQUEST') 'A model is required'
+        Assert ((Get-Code { Invoke-GangplankAI -Question 'hi' }) -eq 'AI_TOKEN_MISSING') 'No key: refuse before any request leaves'
+        Assert ($script:Seen.Count -eq 0) 'Nothing may be sent without a key'
+        $t = Test-GangplankAiConnection -Token 'fl-test-key-1'
+        Assert ($t.ok -and $t.model -eq 'auto') 'The connection test should go through Fairlead'
+        Set-GangplankFairleadKeyReader -Reader $null
 
         # --- branch names -----------------------------------------------------------
         Assert ((ConvertTo-GangplankBranchName -Name 'dummy-dev') -eq 'dummy-dev') 'Plain name kept'
@@ -182,7 +120,7 @@ try {
         $p = Get-GangplankSafeWorkspacePath -Base $mine -Project 'fleethacker-data-crucible/dumping-grounds' -Branch 'dummy-dev'
         Assert ($p -eq (Join-Path (Join-Path $mine 'dumping-grounds') 'dummy-dev')) ('Workspace layout should be <root>\<repo>\<branch>, got ' + $p)
     } $temp
-    Write-Host 'AI discovery, settings, branch naming and workspace folder checks passed.' -ForegroundColor Green
+    Write-Host 'Fairlead client, branch naming and workspace folder checks passed.' -ForegroundColor Green
 } finally {
     foreach ($n in $saved.Keys) { [Environment]::SetEnvironmentVariable($n,$saved[$n]) }
     Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue

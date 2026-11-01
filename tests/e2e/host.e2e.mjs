@@ -3,7 +3,7 @@
 // Run: node --test tests/e2e/host.e2e.mjs   (GANGPLANK_PWSH overrides the shell)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -18,6 +18,14 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'gangplank-e2e-'));
 const workRoot = path.join(temp, 'work');
 const fake = await startFakeGitHub({ port: 0 });
 const fakeAi = await startFakeAi({ port: 0, mode: 'openai' });
+// Gangplank reads its Fairlead key from Windows Credential Manager only. The test saves one under its own
+// Fairlead/<App> name (GANGPLANK_FAIRLEAD_TARGET) and removes it afterwards; it never touches Fairlead/Gangplank.
+const fairleadTarget = 'Fairlead/Gangplank-e2e-' + Math.random().toString(36).slice(2, 10);
+const haveCredentialManager = process.platform === 'win32';
+if (haveCredentialManager) {
+  const r = spawnSync('cmdkey', ['/generic:' + fairleadTarget, '/user:fairlead', '/pass:' + fakeAi.token], { encoding: 'utf8' });
+  assert.equal(r.status, 0, 'cmdkey could not save the test key: ' + r.stdout + r.stderr);
+}
 let host = null;
 
 function startHost() {
@@ -26,7 +34,7 @@ function startHost() {
     '-LocalDev', '-NoBrowser', '-Port', String(port), '-DevGitHubUrl', fake.url + '/', '-WorkRoot', workRoot];
   if (shell.toLowerCase().includes('powershell')) args.unshift('-STA');
   const env = { ...process.env, GITHUB_TOKEN: fake.token, LOCALAPPDATA: path.join(temp, 'appdata'), HOME: temp,
-    GANGPLANK_LAZARETTE_PATH: '', GITLAB_TOKEN: '', GANGPLANK_AI_TOKEN: fakeAi.token, GENAI_TOKEN: '', LLM_TOKEN: '', OPENAI_API_KEY: '', LLM_URL: '', GANGPLANK_AI_URL: '', GANGPLANK_WORK_ROOT: '' };
+    GANGPLANK_LAZARETTE_PATH: '', GITLAB_TOKEN: '', GANGPLANK_FAIRLEAD_URL: fakeAi.url, GANGPLANK_FAIRLEAD_TARGET: fairleadTarget, LLM_TOKEN: '', OPENAI_API_KEY: '', GANGPLANK_WORK_ROOT: '' };
   const child = spawn(shell, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   return new Promise((resolve, reject) => {
@@ -54,6 +62,7 @@ after(async () => {
   await stopHost(host);
   await fake.close();
   await fakeAi.close();
+  if (haveCredentialManager) spawnSync('cmdkey', ['/delete:' + fairleadTarget], { encoding: 'utf8' });
   fs.rmSync(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
 });
 
@@ -387,16 +396,17 @@ test('publish a folder: a work branch from a plain folder, then Smart Save', asy
   assert.ok(names.includes('scripts/build.sh'), 'The project files that were already there stay (nothing is deleted)');
 });
 
-test('AI: detect models, save, test and chat through a synthetic gateway', async () => {
+test('AI: test and chat go to Fairlead with the key from Credential Manager', { skip: !haveCredentialManager && 'needs Windows Credential Manager' }, async () => {
   const h = host;
-  let r = await job(h, '/api/ai/detect', { endpoint: fakeAi.url + '/v1' });
-  assert.equal(r.status, 200, JSON.stringify(r));
-  assert.equal(r.json.profile, 'openai');
-  assert.ok(!r.json.models.includes('text-embedding-3-small') && !r.json.models.includes('whisper-1'), 'Non-chat models must be filtered out');
-  assert.equal(r.json.recommended, 'gpt-4.1', 'The best chat model should be preselected');
-  const s = await call(h, 'POST', '/api/settings/intelligence', { endpoint: fakeAi.url + '/v1', model: r.json.recommended, profile: r.json.profile, base: r.json.base, auth: r.json.auth });
-  assert.equal(s.status, 200, s.text);
-  assert.equal(s.json.intelligence.model, 'gpt-4.1');
+  const view = await call(h, 'GET', '/api/settings');
+  assert.equal(view.status, 200, view.text);
+  assert.equal(view.json.intelligence.model, 'auto', 'The default route is auto');
+  assert.equal(view.json.intelligence.endpoint, fakeAi.url);
+  assert.equal(view.json.intelligence.keyReady, true, 'The key saved for the test target is found');
+  assert.equal(view.json.intelligence.credentialName, fairleadTarget);
+  assert.ok(!view.text.includes(fakeAi.token), 'The key must never reach the browser');
+  const status = await call(h, 'GET', '/api/status');
+  assert.equal(status.json.ai, true, 'Status reports AI ready when the key exists');
   const t = await job(h, '/api/ai/test', {});
   assert.equal(t.status, 200, JSON.stringify(t));
   assert.equal(t.json.reply, 'OK');
@@ -409,12 +419,8 @@ test('AI: detect models, save, test and chat through a synthetic gateway', async
     text += j.json.chunks.join(''); after = j.json.next; state = j.json.state;
   }
   assert.equal(state, 'succeeded');
-  assert.match(text, /^Echo from gpt-4\.1: What is a branch\?/, 'Streamed answer should arrive in order: ' + text);
-  const bad = await call(h, 'POST', '/api/ai/detect', { endpoint: 'http://gateway.example.com/v1' });
-  assert.equal(bad.status, 400, 'Plain http to another host must be refused before any request');
-  const reset = await call(h, 'POST', '/api/settings/intelligence', { endpoint: '' });
-  assert.equal(reset.json.intelligence.endpoint, 'http://127.0.0.1:8776/v1', 'Reset returns to the Fleet router default');
-  assert.equal(reset.json.intelligence.source, 'default');
-  assert.equal(reset.json.intelligence.model, 'auto', 'The router default model is auto');
-  assert.equal(reset.json.intelligence.tokenRequired, false, 'No token is required on this PC');
+  assert.match(text, /^Echo from auto: What is a branch\?/, 'Streamed answer should arrive in order, asked of route auto: ' + text);
+  // The endpoint-discovery and endpoint-settings routes are gone.
+  assert.equal((await call(h, 'POST', '/api/ai/detect', { endpoint: fakeAi.url + '/v1' })).status, 404);
+  assert.equal((await call(h, 'POST', '/api/settings/intelligence', { endpoint: 'https://gateway.example.com/v1' })).status, 404);
 });

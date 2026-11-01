@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-# Offline Lazarette bridge contract test. Uses a fake pm.ps1: no secrets, smart card, network, or real vault.
+# Offline Lazarette bridge test. Uses a fake lib\Lazarette.ps1: no secrets, smart card, network, or real vault.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-lazarette-contract-' + [guid]::NewGuid().ToString('N'))
@@ -10,58 +10,44 @@ $oldMapping = $null
 if (Test-Path -LiteralPath $mapping) { $oldMapping = Get-Content -LiteralPath $mapping -Raw }
 function Assert([bool]$condition,[string]$message) { if (-not $condition) { throw "FAILED: $message" } }
 try {
-    [void](New-Item -ItemType Directory -Path $temp -Force)
-    $pm = @'
-$script:PmState = @{ VaultUnlocked = $false }
-# Mimic the real Lazarette dependency manifest; test missing library diagnosis.
-$libOrder = @(
-    '00-logging.ps1','00-core.ps1','01-storage.ps1','02-cac.ps1',
-    '03-totp-core.ps1','03-totp-recovery.ps1','03-totp-setup.ps1',
-    '04-wincred.ps1','05-update.ps1','06-ui.ps1','07-cli.ps1',
-    '08-gui.ps1','09-integrity.ps1','10-stark.ps1'
-)
-function Ensure-VaultUnlocked {
-    $global:FakeLazaretteUnlockCalls += 1
-    $script:PmState.VaultUnlocked = $true
-    return $true
-}
-function Get-PmStarkApiKey {
-    param([string]$VaultName)
-    if (-not $script:PmState.VaultUnlocked) { throw 'Vault locked' }
-    switch ($VaultName) {
-        'github' { return 'fake-github-test-token' }
-        'github-alt' { return 'fake-alternate-test-token' }
-        'gitlab' { return 'fake-gitlab-test-token' }
-        'ai-api-key' { return 'fake-ai-test-token' }
-        default { throw 'Missing test item' }
-    }
-}
-function Get-PmVaultNameCatalog {
-    if (-not $script:PmState.VaultUnlocked) { throw 'Vault locked' }
-    $rows = New-Object System.Collections.ArrayList
-    foreach ($name in @('github','github-alt','gitlab','ai-api-key')) {
-        [void]$rows.Add([pscustomobject]@{ Service = $name; HasSecret = $true })
-    }
-    return ,$rows
-}
-'@
-    [IO.File]::WriteAllText((Join-Path $temp 'pm.ps1'),$pm)
-    # Lazarette's actual pm.ps1 requires a complete lib/ directory. Verify that
-    # Gangplank reports incomplete installations instead of a vague status.
+    [void](New-Item -ItemType Directory -Path (Join-Path $temp 'lib') -Force)
+    $loader = Join-Path (Join-Path $temp 'lib') 'Lazarette.ps1'
     $env:GANGPLANK_LAZARETTE_PATH = $temp
     Import-Module (Join-Path $root 'Gangplank.psm1') -Force -WarningAction SilentlyContinue
     . (Join-Path $PSScriptRoot 'TestIsolation.ps1')
     Initialize-Gangplank
-    Assert (-not (Import-GangplankLazaretteSession -Quiet)) 'Incomplete Lazarette installation must be rejected'
-    $incomplete = Get-GangplankLazaretteConnectionStatus
-    Assert ($incomplete.code -eq 'ARC_MISSING_MODULES') 'Missing libs must be diagnosed'
-    Assert ($incomplete.message -match 'Missing libraries') 'Missing libs message should be actionable'
-    foreach ($name in (Get-GangplankLazaretteRequiredFiles)) {
-        $full = Join-Path $temp $name
-        $parent = Split-Path $full -Parent
-        if (-not (Test-Path -LiteralPath $parent)) { [void](New-Item -ItemType Directory -Path $parent -Force) }
-        [IO.File]::WriteAllText($full, '# fake library fixture')
+
+    # A configured folder without lib\Lazarette.ps1 is reported, not guessed at.
+    Assert (-not (Find-GangplankLazaretteRoot)) 'A folder without lib\Lazarette.ps1 must not be found'
+    Assert (-not (Import-GangplankLazaretteSession -Quiet)) 'Import must fail without lib\Lazarette.ps1'
+    Assert ((Get-GangplankLazaretteConnectionStatus).code -eq 'LAZARETTE_NOT_FOUND') 'Missing loader must be diagnosed as LAZARETTE_NOT_FOUND'
+
+    # A loader that throws is reported as an initialization failure.
+    [IO.File]::WriteAllText($loader,"throw 'boom'")
+    Assert (-not (Import-GangplankLazaretteSession -Quiet)) 'A loader that throws must be rejected'
+    Assert ((Get-GangplankLazaretteConnectionStatus).code -eq 'LAZARETTE_LIBRARY_INITIALIZATION_FAILED') 'Failed load must be diagnosed'
+    Remove-Module GangplankLazarette -Force -ErrorAction SilentlyContinue
+
+    [IO.File]::WriteAllText($loader,@'
+$script:StubUnlocked = $false
+$script:Names = @('github','github-alt','gitlab')
+function Test-LazaretteVaultUnlocked { return $script:StubUnlocked }
+function Unlock-LazaretteVaultInteractive { $global:FakeLazaretteUnlockCalls += 1; $script:StubUnlocked = $true; return $true }
+function Get-LazaretteItemNames {
+    if (-not $script:StubUnlocked) { throw 'Vault locked' }
+    return @($script:Names | ForEach-Object { [pscustomobject]@{ Service = $_; User = 'me'; Type = 'api'; Tags = '' } })
+}
+function Get-LazaretteSecret {
+    param([Parameter(Mandatory)][string]$Service, [string]$User = '', [string]$Field = '')
+    if (-not $script:StubUnlocked) { throw 'Vault locked' }
+    switch ($Service) {
+        'github' { return 'fake-github-test-token' }
+        'github-alt' { return 'fake-alternate-test-token' }
+        'gitlab' { return 'fake-gitlab-test-token' }
+        default { throw 'Missing test item' }
     }
+}
+'@)
     Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
     $global:FakeLazaretteUnlockCalls = 0
     Assert ((Find-GangplankLazaretteRoot) -eq $temp) 'GANGPLANK_LAZARETTE_PATH discovery'
@@ -72,7 +58,7 @@ function Get-PmVaultNameCatalog {
     Assert ($global:FakeLazaretteUnlockCalls -eq 0) 'HTTP-safe lookup may not trigger unlock'
     $wasRejected = $false
     try { $null = Get-GangplankToken -Provider GitHub } catch {
-        $wasRejected = $_.Exception.Message -like 'ARC_LOCKED*'
+        $wasRejected = $_.Exception.Message -like 'LAZARETTE_LOCKED*'
     }
     Assert $wasRejected 'Locked vault must produce a useful diagnostic'
     Assert ($global:FakeLazaretteUnlockCalls -eq 0) 'Get-GangplankToken must not unlock implicitly'
@@ -86,7 +72,7 @@ function Get-PmVaultNameCatalog {
     Assert ((Get-GangplankToken -Provider GitLab) -eq 'fake-gitlab-test-token') 'GitLab token retrieval'
     $status = Get-GangplankLazaretteConnectionStatus
     Assert $status.lazaretteUnlocked 'Status must report unlocked'
-    Assert ($status.itemNames -contains 'github') 'Catalog must unwrap Lazarette ArrayList'
+    Assert ($status.itemNames -contains 'github') 'Catalog must list the item names'
     Assert (($status.integrations | Where-Object { $_.provider -eq 'GitHub' }).source -eq 'lazarette') 'GitHub mapped status'
     $serialized = $status | ConvertTo-Json -Depth 8
     Assert ($serialized -notmatch 'fake-github-test-token|fake-gitlab-test-token') 'Never return tokens to browser'
@@ -95,8 +81,9 @@ function Get-PmVaultNameCatalog {
     Assert ((Get-GangplankToken -Provider GitHub) -eq 'fake-alternate-test-token') 'Alternate service mapping'
     $saved = [IO.File]::ReadAllText($mapping)
     Assert ($saved -notmatch 'fake-.*-test-token') 'Local mapping must store names, never secrets'
-    Write-Host 'Gangplank Lazarette import, smart card startup, token lookup, and mapping contract passed.' -ForegroundColor Green
+    Write-Host 'Gangplank Lazarette import, startup unlock, token lookup, and mapping contract passed.' -ForegroundColor Green
 } finally {
+    Remove-Module GangplankLazarette -Force -ErrorAction SilentlyContinue
     if ($null -ne $oldMapping) {
         [IO.File]::WriteAllText($mapping,$oldMapping)
     } elseif (Test-Path -LiteralPath $mapping) {

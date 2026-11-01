@@ -15,7 +15,7 @@ needs a smart card, the organization's real GitLab host or workstation applicati
 |---|---|
 | Safety | Pinned download baseline, remote-HEAD check before save, non-forced GitHub ref updates, GitLab per-file commit guards, deletions unselected, Sentinel pre-publication scan |
 | Review fixes (2026-10-24) | No environment switch can put the production host in LocalDev; CSP nonce independent of the CSRF token; provider response bodies stay in the local log; executable bits preserved on GitHub saves; 401/network errors no longer reported as "remote changed"; branch names encoded in ref paths |
-| Lazarette | Bridge uses Lazarette's `lib\Lazarette.ps1` (or `lib\Arc.ps1`) contract (`Unlock-LazaretteVaultInteractive` / `Get-LazaretteSecret` / `Get-LazaretteItemNames`, falling back to the `*-Arc*` names); ARC 3/4 `pm.ps1` kept as fallback; Lazarette `pm.ps1` stub ignored. Tested against the real Lazarette engine (software profile, temp data folder) |
+| Lazarette | Bridge uses Lazarette's `lib\Lazarette.ps1` contract (`Unlock-LazaretteVaultInteractive` / `Get-LazaretteSecret` / `Get-LazaretteItemNames` / `Test-LazaretteVaultUnlocked`) and nothing else: no other loader, function names or `pm.ps1`. Tested against the real Lazarette engine (software profile, temp data folder) |
 | Host routes | Branches, history, compare, reviews, insights and Sentinel routes work (their functions were never exported); a test now fails if the host calls an unexported function |
 | Credentials | Lazarette is opt-in (Credentials setting or `GANGPLANK_LAZARETTE_PATH`), never auto-detected. Tokens can be entered once in the UI and are sealed with Windows DPAPI; environment variables still work |
 | Host (roadmap 1) | TcpListener on 127.0.0.1, one-time launch link to an `HttpOnly; SameSite=Strict` cookie, client header, loopback Host/Origin, same-user peer check, limits, manifest-only static files, CSP without inline code |
@@ -68,7 +68,7 @@ or a release zip is required.
 
 | # | Item | Notes |
 |---|---|---|
-| W1 | Smart card unlock through Gangplank's console | When Lazarette is ready: turn Lazarette on in Credentials, restart, and unlock with the card (Lazarette `Unlock-ArcVaultInteractive`). Depends on Lazarette's own smart card testing (planned at the end of Lazarette's polish phase). Gangplank adds no smart card code of its own |
+| W1 | Smart card unlock through Gangplank's console | When Lazarette is ready: turn Lazarette on in Credentials, restart, and unlock with the card (Lazarette `Unlock-LazaretteVaultInteractive`). Depends on Lazarette's own smart card testing (planned at the end of Lazarette's polish phase). Gangplank adds no smart card code of its own |
 | W2 | Organization GitLab host end to end | Connect, start a workspace, Smart Save, create a merge request against a sandbox project; confirm GitLab paging and per-file commit guards |
 | W3 | Host under application control | Confirm the launcher and (after item 1) the TcpListener host run on the managed workstation with Edge |
 | W4 | Runner account | The self-hosted runner should run as a dedicated account with no Lazarette vault. Gangplank no longer auto-detects Lazarette, so tests can no longer pick it up, but the account still holds it |

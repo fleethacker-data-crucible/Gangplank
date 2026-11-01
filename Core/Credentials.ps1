@@ -2,7 +2,7 @@
 # ============================================================
 #  Core/Credentials.ps1
 #  Where provider tokens come from, in order:
-#    1. Environment (GITHUB_TOKEN, GITLAB_TOKEN, GANGPLANK_AI_TOKEN; legacy names in Configuration.ps1)
+#    1. Environment (GITHUB_TOKEN, GITLAB_TOKEN)
 #    2. Gangplank's local credential store: entered once in Integrations,
 #       sealed with Windows DPAPI (CurrentUser) under %LOCALAPPDATA%\Gangplank
 #    3. Lazarette, only when explicitly configured (Lazarette.Enabled + .Path in
@@ -11,12 +11,10 @@
 #  Token values never go to the browser, the log or the audit trail.
 # ============================================================
 
-$script:GangplankCredentialProviders = @('GitHub','GitLab','AI')
+$script:GangplankCredentialProviders = @('GitHub','GitLab')
 $script:GangplankCredentialEnv = @{
     GitHub = @('GITHUB_TOKEN')
     GitLab = @('GITLAB_TOKEN')
-    # LLM_TOKEN/OPENAI_API_KEY: shared with Halyard; the legacy variable keeps its former precedence.
-    AI     = @('GANGPLANK_AI_TOKEN') + @($script:GangplankLegacyAliases.TokenEnv['AI']) + @('LLM_TOKEN','OPENAI_API_KEY')
 }
 $script:GangplankCredentialEntropy = [Text.Encoding]::UTF8.GetBytes('Keystone credential store v1')
 $script:GangplankCredentialStorePath = $null
@@ -68,8 +66,8 @@ function Read-GangplankCredentialFile {
         $items = @{}
         if ($raw.Items) {
             foreach ($p in $raw.Items.PSObject.Properties) {
-                $name = Resolve-GangplankPurposeName $p.Name -Strict   # an entry saved under a legacy name is read as the current one
-                if ($name -in $script:GangplankCredentialProviders -and $p.Value.Protected -and -not ($items.ContainsKey($name) -and $p.Name -cne $name)) {
+                $name = Resolve-GangplankPurposeName $p.Name -Strict
+                if ($name -in $script:GangplankCredentialProviders -and $p.Value.Protected) {
                     $items[$name] = @{ Protected = [string]$p.Value.Protected; Saved = [string]$p.Value.Saved }
                 }
             }
@@ -122,8 +120,7 @@ function Set-GangplankStoredCredential {
 
 function Remove-GangplankStoredCredential {
     [CmdletBinding()]
-    # -TargetHost: the host the token will be sent to (GitLab), so a legacy vault item is
-    # only used for the explicitly configured GitLab host.
+    # -TargetHost: the host the token will be sent to; accepted so callers need no change.
     param([Parameter(Mandatory)][string]$Provider,[string]$TargetHost)
     $Provider = Resolve-GangplankPurposeName $Provider -Strict
     Assert-GangplankCredentialProvider $Provider
@@ -141,8 +138,7 @@ function Remove-GangplankStoredCredential {
 
 function Get-GangplankStoredCredential {
     [CmdletBinding()]
-    # -TargetHost: the host the token will be sent to (GitLab), so a legacy vault item is
-    # only used for the explicitly configured GitLab host.
+    # -TargetHost: the host the token will be sent to; accepted so callers need no change.
     param([Parameter(Mandatory)][string]$Provider,[string]$TargetHost)
     $Provider = Resolve-GangplankPurposeName $Provider -Strict
     Assert-GangplankCredentialProvider $Provider
@@ -185,25 +181,17 @@ function Get-GangplankLocalSettings {
     $settings = [ordered]@{
         Lazarette = [ordered]@{ Enabled = $false; Path = '' }
         Workspaces = [ordered]@{ Root = '' }
-        Intelligence = [ordered]@{ Endpoint = ''; Profile = ''; Model = ''; ChatUrl = ''; Auth = '' }
     }
     if (Test-Path -LiteralPath $path -PathType Leaf) {
         try {
             $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
-            # "Arc" is the key a pre-rename keystone.local.json used.
             $laz = $null
-            foreach ($key in @('Lazarette','Arc')) { if ($raw.PSObject.Properties[$key] -and $raw.$key) { $laz = $raw.$key; break } }
+            if ($raw.PSObject.Properties['Lazarette'] -and $raw.Lazarette) { $laz = $raw.Lazarette }
             if ($laz) {
                 $settings.Lazarette.Enabled = ($laz.Enabled -eq $true)
                 if ($laz.Path -is [string]) { $settings.Lazarette.Path = $laz.Path }
             }
             if ($raw.Workspaces -and $raw.Workspaces.Root -is [string]) { $settings.Workspaces.Root = $raw.Workspaces.Root }
-            if ($raw.Intelligence) {
-                foreach ($k in @('Endpoint','Profile','Model','ChatUrl','Auth')) {
-                    $v = $raw.Intelligence.PSObject.Properties[$k]
-                    if ($v -and $v.Value -is [string]) { $settings.Intelligence[$k] = $v.Value }
-                }
-            }
         } catch { Write-GangplankLog -Level WARN -Message 'gangplank.local.json could not be read; using defaults (Lazarette off).' }
     }
     return $settings
@@ -281,20 +269,19 @@ function Set-GangplankLazaretteSettings {
         if (-not [IO.Path]::IsPathRooted($clean)) { throw 'BAD_REQUEST|Enter the full Lazarette folder path, for example C:\Users\you\Projects\Lazarette.' }
         # Local folders only: Lazarette code is loaded at startup, never from a network share.
         if ($clean -match '^(\\\\|//)') { throw 'BAD_REQUEST|Lazarette must be in a local folder, not a network share.' }
-        if (-not (Get-GangplankLazaretteFlavor -LazaretteRoot $clean)) { throw 'BAD_REQUEST|No Lazarette installation found there (expected lib\Lazarette.ps1 or lib\Arc.ps1).' }
+        if (-not (Test-GangplankLazaretteFolder -LazaretteRoot $clean)) { throw 'BAD_REQUEST|No Lazarette installation found there (expected lib\Lazarette.ps1).' }
     }
     $settings = Get-GangplankLocalSettings
     $settings.Lazarette.Enabled = [bool]$Enabled
     $settings.Lazarette.Path = $clean
     Save-GangplankLocalSettings -Settings $settings
-    # Was 'arc.settings' before the rename; older entries in Logs\audit.jsonl keep that name.
     Write-GangplankAudit -Action 'lazarette.settings' -Data @{ enabled = [bool]$Enabled }
     return $settings
 }
 
 function Get-GangplankConfiguredLazarettePath {
-    # The only ways Lazarette gets used: GANGPLANK_LAZARETTE_PATH (formerly
-    # KEYSTONE_ARC_PATH, still read), or Lazarette.Enabled + Lazarette.Path in gangplank.local.json.
+    # The only ways Lazarette gets used: GANGPLANK_LAZARETTE_PATH, or
+    # Lazarette.Enabled + Lazarette.Path in gangplank.local.json.
     $fromEnv = Get-GangplankLazarettePathEnv
     if ($fromEnv) { return $fromEnv }
     $settings = Get-GangplankLocalSettings
@@ -303,10 +290,9 @@ function Get-GangplankConfiguredLazarettePath {
 }
 
 function Get-GangplankLazarettePathEnv {
-    # Explicit environment opt-in: GANGPLANK_LAZARETTE_PATH, then the pre-rename
-    # KEYSTONE_ARC_PATH. Generic LAZARETTE_PATH / ARC_PATH are
+    # Explicit environment opt-in: GANGPLANK_LAZARETTE_PATH. The generic LAZARETTE_PATH is
     # deliberately not read: Lazarette is opt-in per app.
-    foreach ($n in @('GANGPLANK_LAZARETTE_PATH','KEYSTONE_ARC_PATH')) {
+    foreach ($n in @('GANGPLANK_LAZARETTE_PATH')) {
         $v = [Environment]::GetEnvironmentVariable($n)
         if (-not [string]::IsNullOrWhiteSpace($v)) { return $v.Trim().Trim('"') }
     }
@@ -321,8 +307,7 @@ function Test-GangplankLazaretteConfigured { return [bool](Get-GangplankConfigur
 function Resolve-GangplankCredential {
     # Returns @{ Value; Source } or throws a coded error the UI can explain.
     [CmdletBinding()]
-    # -TargetHost: the host the token will be sent to (GitLab), so a legacy vault item is
-    # only used for the explicitly configured GitLab host.
+    # -TargetHost: the host the token will be sent to; accepted so callers need no change.
     param([Parameter(Mandatory)][string]$Provider,[string]$TargetHost)
     $Provider = Resolve-GangplankPurposeName $Provider -Strict
     Assert-GangplankCredentialProvider $Provider
@@ -331,7 +316,7 @@ function Resolve-GangplankCredential {
     $stored = Get-GangplankStoredCredential -Provider $Provider
     if ($stored) { return [pscustomobject]@{ Value = $stored; Source = 'stored' } }
     if (Test-GangplankLazaretteConfigured) {
-        $token = Get-GangplankLazaretteCredential -Provider $Provider -TargetHost $TargetHost
+        $token = Get-GangplankLazaretteCredential -Provider $Provider
         if ($token) { return [pscustomobject]@{ Value = $token; Source = 'lazarette' } }
     }
     $envName = $script:GangplankCredentialEnv[$Provider][0]
@@ -348,7 +333,6 @@ function Get-GangplankCredentialStatus {
         $lazaretteReady = $false
         if ($lazaretteOn) {
             $lazaretteItem = Get-GangplankLazaretteItemName -Provider $p
-            if ($lazaretteStatus.lazaretteUnlocked) { $lazaretteItem = Resolve-GangplankLazaretteItemInCatalog -Provider $p -Name $lazaretteItem -Catalog @($lazaretteStatus.itemNames) }
             $lazaretteReady = [bool]($lazaretteStatus.lazaretteUnlocked -and (@($lazaretteStatus.itemNames) -contains $lazaretteItem))
         }
         # A saved entry that cannot be unsealed (other account, damaged file) is not "ready".

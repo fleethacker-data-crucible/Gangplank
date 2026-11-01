@@ -26,7 +26,7 @@
 param(
     [ValidateRange(1025,65535)][int]$Port = 8769,
     [switch]$NoBrowser,
-    [Alias('SkipArcUnlock')][switch]$SkipLazaretteUnlock,
+    [switch]$SkipLazaretteUnlock,
     # Explicit switch only; nothing in the environment can turn this on.
     [switch]$LocalDev,
     # LocalDev only: a synthetic GitHub server (dev/fake-github.mjs), http://127.0.0.1:<port>/

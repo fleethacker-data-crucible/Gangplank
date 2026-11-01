@@ -1,50 +1,135 @@
 #Requires -Version 5.1
 # ============================================================
-#  Core/Intelligence.ps1 - one AI setting, any gateway
-#  The user gives an endpoint; Gangplank works out what it is and which chat
-#  models it offers:
-#    openai      OpenAI-compatible (/v1/models + /v1/chat/completions): your
-#                organization's AI endpoint, OpenAI, LiteLLM, LM Studio, vLLM, most gateways
-#    azure       Azure OpenAI (*.openai.azure.com): deployments, api-key header
-#    databricks  Databricks model serving (/serving-endpoints/<name>/invocations)
-#    ollama      local Ollama (/api/tags; chat through its /v1 endpoint)
-#  Settings (non-secret) live in config\gangplank.local.json Intelligence; the token
-#  is the AI credential (environment, Gangplank's store, or Lazarette).
-#  Environment names shared with Halyard are honoured: LLM_URL / OPENAI_BASE_URL,
-#  LLM_MODEL / OPENAI_MODEL, LLM_TOKEN / OPENAI_API_KEY.
+#  Core/Intelligence.ps1 - every AI call goes to Fairlead
+#  Gangplank calls one address, the Fleet router (Fairlead) on this PC, with a route name.
+#  It holds no gateway address, no provider token and no model id of its own.
+#    Address   GANGPLANK_FAIRLEAD_URL (loopback only), default http://127.0.0.1:8776/v1/chat/completions
+#    Route     GANGPLANK_FAIRLEAD_MODEL, default 'auto'
+#    Key       Windows Credential Manager, generic credential Fairlead/Gangplank (Fairlead writes it:
+#              Fairlead, Clients, install a key for Gangplank). Never an environment variable or a vault item.
+#  Every request carries Authorization: Bearer <key>, X-Fairlead-Label: Gangplank and
+#  X-Fairlead-Privacy: local, so prompts stay on this PC.
 # ============================================================
-# Shared module. Gangplank Intelligence, version 1.0.0 (docs/SHARED-AI-MODULE.md).
+# Shared module. Gangplank Intelligence, version 2.0.0 (docs/SHARED-AI-MODULE.md).
 # Copied, not forked, into sibling products: change it here, bump the version, copy it back.
 # Host functions it needs, and nothing else of Gangplank: ConvertFrom-GangplankApiResponse,
-# Get-GangplankAiToken, Get-GangplankCredentialStatus, Get-GangplankEnv, Get-GangplankEnvironmentCredential,
-# Get-GangplankLocalSettings, Get-GangplankProviderErrorCode, Get-GangplankSafeUrl, Get-GangplankStoredCredential,
-# Invoke-GangplankHttpRequest, Save-GangplankLocalSettings, Write-GangplankAudit.
+# Get-GangplankSafeUrl, Invoke-GangplankHttpRequest.
 
-# Built-in default: the Fleet router (Fairlead) on this PC, http://127.0.0.1:8776/v1/chat/completions.
-# Fairlead picks the engine (phoenix-lai, Windlass, or a provider where the team allows it). Every
-# request to it carries X-Fairlead-Privacy: local, so Gangplank's prompts stay on this PC. GANGPLANK_AI_URL /
-# LLM_URL / OPENAI_BASE_URL or a saved setting overrides it. A loopback endpoint needs no token (Fairlead
-# only asks for its client key when requireClientKey is on: save it as the AI token); any other endpoint does.
-$script:GangplankAiDefaultEndpoint = 'http://127.0.0.1:8776/v1'
-$script:GangplankAiRouterPort = 8776
-# Model name Fairlead understands as "pick a route". Fairlead's default.
-$script:GangplankAiRouterModel = 'auto'
-# Model for any loopback endpoint when no model variable is set (phoenix-lai's model id).
-# Remote endpoints never get a built-in model name: the model must be configured.
-$script:GangplankAiLoopbackModel = 'phoenixlai'
-$script:GangplankAiAzureApiVersion = '2024-10-21'
-# Not chat models: never offered, never auto-picked.
-$script:GangplankAiNotChat = '(?i)(embed|whisper|tts|speech|audio|transcri|dall-?e|image-gen|moderation|rerank|davinci-00|babbage|ada-00|text-similarity|search-)'
-# Preference when nothing is chosen yet: broadly capable chat families first.
-$script:GangplankAiPreferred = @('(?i)gpt-4\.1(?!-nano)','(?i)gpt-4o(?!-mini-audio)','(?i)claude','(?i)gemini.*(pro|flash)','(?i)llama-?3','(?i)mistral-(large|medium)','(?i)qwen','(?i)gpt-4o-mini','(?i)gpt')
+$script:GangplankFairleadDefaultUrl = 'http://127.0.0.1:8776/v1/chat/completions'
+$script:GangplankFairleadDefaultModel = 'auto'
+$script:GangplankFairleadApp = 'Gangplank'
+$script:GangplankFairleadTargetPattern = '^Fairlead/[A-Za-z][A-Za-z0-9-]{0,39}$'
+# Replaceable for tests: { param([string]$Target) -> key text or $null }.
+$script:GangplankFairleadKeyReader = $null
 
-function Get-GangplankAiEnvironment {
-    # @{ Endpoint; Model } from the environment, or empty strings.
-    $endpoint = ''
-    foreach ($n in @('GANGPLANK_AI_URL','LLM_URL','OPENAI_BASE_URL')) { $v = [Environment]::GetEnvironmentVariable($n); if ($v) { $endpoint = $v.Trim(); break } }
-    $model = ''
-    foreach ($n in @('GANGPLANK_AI_MODEL','LLM_MODEL','OPENAI_MODEL')) { $v = [Environment]::GetEnvironmentVariable($n); if ($v) { $model = $v.Trim(); break } }
-    return @{ Endpoint = $endpoint; Model = $model }
+function Initialize-GangplankCredentialReader {
+    if ('Gangplank.FairleadCredential' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace Gangplank
+{
+    public static class FairleadCredential
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct CREDENTIAL
+        {
+            public int Flags;
+            public int Type;
+            public string TargetName;
+            public string Comment;
+            public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
+            public int CredentialBlobSize;
+            public IntPtr CredentialBlob;
+            public int Persist;
+            public int AttributeCount;
+            public IntPtr Attributes;
+            public string TargetAlias;
+            public string UserName;
+        }
+
+        [DllImport("advapi32.dll", EntryPoint = "CredReadW", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool CredRead(string target, int type, int flags, out IntPtr credential);
+
+        [DllImport("advapi32.dll", EntryPoint = "CredFree")]
+        private static extern void CredFree(IntPtr buffer);
+
+        // The raw blob of a generic credential, or null when there is none.
+        public static byte[] ReadBlob(string target)
+        {
+            IntPtr p;
+            if (!CredRead(target, 1, 0, out p)) return null;
+            try
+            {
+                CREDENTIAL c = (CREDENTIAL)Marshal.PtrToStructure(p, typeof(CREDENTIAL));
+                if (c.CredentialBlobSize <= 0 || c.CredentialBlob == IntPtr.Zero) return null;
+                byte[] blob = new byte[c.CredentialBlobSize];
+                Marshal.Copy(c.CredentialBlob, blob, 0, blob.Length);
+                return blob;
+            }
+            finally { CredFree(p); }
+        }
+    }
+}
+'@
+}
+
+function ConvertFrom-GangplankCredentialBlob {
+    # Credential Manager keeps the key as UTF-16 text (what Fairlead and cmdkey write); UTF-8 is accepted too.
+    param([byte[]]$Blob)
+    if ($null -eq $Blob -or $Blob.Length -eq 0) { return $null }
+    foreach ($enc in @([Text.Encoding]::Unicode, [Text.Encoding]::UTF8)) {
+        $text = ($enc.GetString($Blob)).Trim([char]0, ' ', "`r", "`n")
+        if (-not [string]::IsNullOrEmpty($text) -and $text -cmatch '^[\x21-\x7e]+$') { return $text }
+    }
+    return $null
+}
+
+function Get-GangplankFairleadTarget {
+    # Fairlead/Gangplank. GANGPLANK_FAIRLEAD_TARGET may name another Fairlead/<App> credential (tests); it can never
+    # point at anything outside the Fairlead/ names.
+    $t = [Environment]::GetEnvironmentVariable('GANGPLANK_FAIRLEAD_TARGET')
+    if ($t) {
+        $t = $t.Trim()
+        if ($t -cnotmatch $script:GangplankFairleadTargetPattern) { throw 'AI_TOKEN_MISSING|GANGPLANK_FAIRLEAD_TARGET must look like Fairlead/AppName.' }
+        return $t
+    }
+    return ('Fairlead/' + $script:GangplankFairleadApp)
+}
+
+function Set-GangplankFairleadKeyReader {
+    # Tests only. Pass $null to go back to Windows Credential Manager.
+    param([scriptblock]$Reader)
+    $script:GangplankFairleadKeyReader = $Reader
+}
+
+function Get-GangplankFairleadKey {
+    # The client key Fairlead saved for Gangplank, or $null.
+    $target = Get-GangplankFairleadTarget
+    if ($script:GangplankFairleadKeyReader) {
+        $v = & $script:GangplankFairleadKeyReader $target
+        if ($v) { return ([string]$v).Trim() }
+        return $null
+    }
+    if ($env:OS -ne 'Windows_NT') { return $null }
+    try {
+        Initialize-GangplankCredentialReader
+        return (ConvertFrom-GangplankCredentialBlob -Blob ([Gangplank.FairleadCredential]::ReadBlob($target)))
+    } catch { return $null }
+}
+
+function Get-GangplankAiToken {
+    # The Fairlead client key for this app, or $null.
+    return (Get-GangplankFairleadKey)
+}
+
+function Get-GangplankAiRequestToken {
+    # The key for a chat request. Without one Fairlead would refuse the call, so say what to do.
+    param($Config)
+    $key = Get-GangplankFairleadKey
+    if (-not $key) { throw 'AI_TOKEN_MISSING|Open Fairlead and install a key for Gangplank (Fairlead, Clients).' }
+    return $key
 }
 
 function Test-GangplankAiLoopbackUrl {
@@ -55,254 +140,65 @@ function Test-GangplankAiLoopbackUrl {
     return [bool]$u.IsLoopback
 }
 
-function Test-GangplankAiRouterUrl {
-    # True when the URL is the Fleet router (Fairlead) on this PC: loopback, port 8776.
-    param([AllowEmptyString()][AllowNull()][string]$Url)
-    $u = $null
-    if ([string]::IsNullOrWhiteSpace($Url) -or -not [uri]::TryCreate($Url.Trim(),[UriKind]::Absolute,[ref]$u)) { return $false }
-    return ([bool]$u.IsLoopback -and $u.Port -eq $script:GangplankAiRouterPort)
-}
-
-function Get-GangplankAiAuthToken {
-    # The token to send to an AI endpoint, or $null when none is available. A loopback endpoint
-    # (such as the local phoenix-lai server, API key off by default) only uses a token from the
-    # environment or Gangplank's store: the vault is not opened, and no header is sent without one.
-    # Any other endpoint uses the AI credential (environment, store, or Lazarette).
-    param([AllowEmptyString()][AllowNull()][string]$Url)
-    if (Test-GangplankAiLoopbackUrl -Url $Url) {
-        $fromEnv = Get-GangplankEnvironmentCredential -Provider AI
-        if ($fromEnv) { return [string]$fromEnv.Value }
-        $stored = $null
-        try { $stored = Get-GangplankStoredCredential -Provider AI } catch { $stored = $null }
-        if ($stored) { return [string]$stored }
-        return $null
-    }
-    return (Get-GangplankAiToken)
-}
-
-function Get-GangplankAiRequestToken {
-    # Token for a chat request to the resolved configuration. Remote endpoints need one.
-    param([Parameter(Mandatory)]$Config)
-    $token = Get-GangplankAiAuthToken -Url ([string]$Config.Url)
-    if (-not $token -and -not $Config.Loopback -and $Config.Profile -ne 'ollama') {
-        throw 'AI_TOKEN_MISSING|This AI endpoint needs a token. Add the AI token in Settings, or set GANGPLANK_AI_TOKEN.'
-    }
-    return $token
-}
-
-function Get-GangplankAiAllowedHosts {
-    # Administrator allowlist (GANGPLANK_AI_ALLOWED_HOSTS). When set it is strict.
-    $list = @()
-    if ((Get-GangplankEnv AI_ALLOWED_HOSTS)) {
-        $list = @((Get-GangplankEnv AI_ALLOWED_HOSTS) -split ',' | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
-    }
-    return $list
-}
-
-function Assert-GangplankAiEndpoint {
-    # HTTPS (http only for this PC: local Ollama or LM Studio), no embedded
-    # credentials, and inside the administrator allowlist when one is set.
-    [CmdletBinding()]
+function Resolve-GangplankFairleadUrl {
+    # Accepts http://127.0.0.1:8776, .../v1 or .../v1/chat/completions and returns the chat address.
+    # Anything that is not this PC is refused: Gangplank talks to the router on this machine only.
     param([Parameter(Mandatory)][string]$Url)
     $u = $null
-    if (-not [uri]::TryCreate($Url.Trim(),[UriKind]::Absolute,[ref]$u) -or $u.UserInfo) { throw 'BAD_REQUEST|Enter the AI endpoint as a full address, for example https://ai.example.com/v1.' }
-    $hostName = $u.Host.ToLowerInvariant()
-    $loopback = $hostName -in @('127.0.0.1','localhost','[::1]','::1')
-    if ($u.Scheme -ne 'https' -and -not ($u.Scheme -eq 'http' -and $loopback)) { throw 'BAD_REQUEST|The AI endpoint must use HTTPS (plain http only for a model running on this PC).' }
-    $allowed = @(Get-GangplankAiAllowedHosts)
-    if ($allowed.Count -gt 0 -and -not $loopback -and $hostName -notin $allowed) {
-        throw "FORBIDDEN|Your administrator limits AI to: $($allowed -join ', '). $hostName is not on that list."
+    if (-not [uri]::TryCreate($Url.Trim(),[UriKind]::Absolute,[ref]$u) -or $u.UserInfo -or $u.Query -or $u.Fragment) {
+        throw 'BAD_REQUEST|GANGPLANK_FAIRLEAD_URL must be a plain address such as http://127.0.0.1:8776.'
     }
-    return $u
+    if ($u.Scheme -notin @('http','https')) { throw 'BAD_REQUEST|GANGPLANK_FAIRLEAD_URL must start with http:// or https://.' }
+    if (-not $u.IsLoopback) { throw 'FORBIDDEN|Gangplank only talks to Fairlead on this PC. GANGPLANK_FAIRLEAD_URL must be a loopback address.' }
+    $path = $u.AbsolutePath.TrimEnd('/')
+    if ($path -match '(?i)/chat/completions$') { $chat = $path }
+    elseif ($path -match '(?i)/v1$') { $chat = $path + '/chat/completions' }
+    elseif (-not $path) { $chat = '/v1/chat/completions' }
+    else { $chat = $path + '/v1/chat/completions' }
+    return ($u.GetLeftPart([UriPartial]::Authority) + $chat)
 }
 
-function Get-GangplankAiFlavor {
-    # Best guess from the address alone; discovery confirms it.
-    param([Parameter(Mandatory)][uri]$Uri)
-    if ($Uri.Host -match '(?i)\.(openai\.azure\.com|cognitiveservices\.azure\.com)$') { return 'azure' }
-    if ($Uri.AbsolutePath -match '(?i)/serving-endpoints(/|$)' -or $Uri.Host -match '(?i)\.(cloud\.databricks\.com|azuredatabricks\.net|gcp\.databricks\.com)$') { return 'databricks' }
-    if ($Uri.Port -eq 11434) { return 'ollama' }
-    return 'openai'
-}
-
-function Get-GangplankAiOrigin { param([uri]$Uri) return $Uri.GetLeftPart([UriPartial]::Authority) }
-
-function Get-GangplankAiOpenAiBase {
-    # Accepts .../v1, .../v1/chat/completions, or a bare host; returns the /v1-style base.
-    param([Parameter(Mandatory)][uri]$Uri)
-    $path = $Uri.AbsolutePath.TrimEnd('/')
-    $path = $path -replace '(?i)/chat/completions$',''
-    if (-not $path) { $path = '/v1' }
-    return (Get-GangplankAiOrigin $Uri) + $path
+function Get-GangplankAiConfiguration {
+    $raw = [Environment]::GetEnvironmentVariable('GANGPLANK_FAIRLEAD_URL')
+    $chat = Resolve-GangplankFairleadUrl -Url $(if ($raw) { $raw } else { $script:GangplankFairleadDefaultUrl })
+    $model = [Environment]::GetEnvironmentVariable('GANGPLANK_FAIRLEAD_MODEL')
+    if ($model) { $model = $model.Trim() } else { $model = $script:GangplankFairleadDefaultModel }
+    if (-not $model -or $model.Length -gt 200 -or $model -match '[\x00-\x1f]') { throw 'AI_MODEL_MISSING|GANGPLANK_FAIRLEAD_MODEL must be a route name such as auto.' }
+    return [pscustomobject]@{
+        Endpoint = ([uri]$chat).GetLeftPart([UriPartial]::Authority)
+        Model = $model
+        Url = $chat
+    }
 }
 
 function Get-GangplankAiAuthHeaders {
-    param([string]$Auth,[string]$Token,[string]$Url)
-    $h = @{ 'Content-Type' = 'application/json'; Accept = 'application/json' }
-    # Keep the request on local models when it goes through the Fleet router.
-    if (Test-GangplankAiRouterUrl -Url $Url) { $h['X-Fairlead-Privacy'] = 'local' }
-    if ($Token) {
-        if ($Auth -eq 'api-key') { $h['api-key'] = $Token } else { $h['Authorization'] = "Bearer $Token" }
+    param([string]$Token)
+    $h = @{
+        'Content-Type' = 'application/json'
+        Accept = 'application/json'
+        'X-Fairlead-Label' = $script:GangplankFairleadApp
+        'X-Fairlead-Privacy' = 'local'
     }
+    if ($Token) { $h['Authorization'] = "Bearer $Token" }
     return $h
 }
 
-function Get-GangplankAiChatUrl {
-    param([Parameter(Mandatory)][string]$Flavor,[Parameter(Mandatory)][string]$Base,[string]$Model)
-    switch ($Flavor) {
-        'azure' { return ('{0}/openai/deployments/{1}/chat/completions?api-version={2}' -f $Base, [uri]::EscapeDataString($Model), $script:GangplankAiAzureApiVersion) }
-        'databricks' { return ('{0}/serving-endpoints/{1}/invocations' -f $Base, [uri]::EscapeDataString($Model)) }
-        'ollama' { return ($Base + '/v1/chat/completions') }
-        default { return ($Base + '/chat/completions') }
-    }
-}
-
-function Select-GangplankAiChatModels {
-    # Chat-capable ids, best first: the current choice, then preferred families, then the rest.
-    param([string[]]$Ids,[string]$Current)
-    $chat = @($Ids | Where-Object { $_ -and $_ -notmatch $script:GangplankAiNotChat } | Sort-Object -Unique)
-    $rank = {
-        param($id)
-        if ($Current -and $id -eq $Current) { return -1 }
-        for ($i = 0; $i -lt $script:GangplankAiPreferred.Count; $i++) { if ($id -match $script:GangplankAiPreferred[$i]) { return $i } }
-        return 99
-    }
-    return @($chat | Sort-Object @{ Expression = { & $rank $_ } }, @{ Expression = { $_ } })
-}
-
-function Find-GangplankAiModels {
-    # Ask the endpoint what it is and which chat models it offers. Returns
-    # @{ profile; base; auth; models[]; recommended; chatUrl; note }.
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Endpoint,[string]$Token,[string]$Current)
-    $uri = Assert-GangplankAiEndpoint -Url $Endpoint
-    $flavor = Get-GangplankAiFlavor -Uri $uri
-    $origin = Get-GangplankAiOrigin $uri
-    $ids = @(); $note = ''; $auth = 'bearer'; $base = $origin
-    $get = {
-        param($Url,$AuthStyle)
-        $r = Invoke-GangplankHttpRequest -Method GET -Uri $Url -Headers (Get-GangplankAiAuthHeaders -Auth $AuthStyle -Token $Token -Url $Url) -TimeoutSec 20 -MaxAttempts 1
-        if ($r.Status -ge 200 -and $r.Status -lt 300 -and $r.Text) { return ($r.Text | ConvertFrom-Json) }
-        if ($r.Status -in @(401,403)) { throw ("{0}|The endpoint refused the AI token (HTTP {1}). Check the token in Credentials." -f (Get-GangplankProviderErrorCode -Status $r.Status -Headers $r.Headers), $r.Status) }
-        return $null
-    }
-    if ($flavor -eq 'azure') {
-        $auth = 'api-key'
-        $doc = & $get ("$origin/openai/deployments?api-version=2022-12-01") 'api-key'
-        if ($doc -and $doc.data) { $ids = @($doc.data | ForEach-Object { [string]$_.id }) }
-        else { $note = 'Azure did not list deployments; type your deployment name as the model.' }
-    } elseif ($flavor -eq 'databricks') {
-        $doc = & $get ("$origin/api/2.0/serving-endpoints") 'bearer'
-        if ($doc -and $doc.endpoints) {
-            $ids = @($doc.endpoints | Where-Object { -not $_.task -or [string]$_.task -match 'chat|completions' } | ForEach-Object { [string]$_.name })
-        } else { $note = 'Databricks did not list serving endpoints; type the endpoint name as the model.' }
-    } else {
-        $openAiBase = Get-GangplankAiOpenAiBase -Uri $uri
-        $doc = $null
-        foreach ($candidate in @($openAiBase, ($origin + '/v1')) | Select-Object -Unique) {
-            $doc = & $get ($candidate + '/models') 'bearer'
-            if ($doc -and ($doc.data -or $doc.models)) { $base = $candidate; break }
-        }
-        if ($doc -and $doc.data) { $ids = @($doc.data | ForEach-Object { [string]$_.id }); $flavor = 'openai' }
-        elseif ($doc -and $doc.models) { $ids = @($doc.models | ForEach-Object { if ($_.id) { [string]$_.id } else { [string]$_.name } }); $flavor = 'openai' }
-        else {
-            # Not OpenAI-shaped: maybe a local Ollama.
-            $tags = & $get ($origin + '/api/tags') 'bearer'
-            if ($tags -and $tags.models) { $flavor = 'ollama'; $base = $origin; $ids = @($tags.models | ForEach-Object { [string]$_.name }) }
-            else { $base = $openAiBase; $note = 'The endpoint did not list its models; type the model name.' }
-        }
-    }
-    if ($flavor -in @('azure','databricks')) { $base = $origin }
-    $models = @(Select-GangplankAiChatModels -Ids $ids -Current $Current)
-    $recommended = if ($models.Count -gt 0) { $models[0] } else { $Current }
-    return [ordered]@{
-        profile = $flavor; base = $base; auth = $auth
-        models = $models; recommended = $recommended
-        chatUrl = $(if ($recommended) { Get-GangplankAiChatUrl -Flavor $flavor -Base $base -Model $recommended } else { '' })
-        note = $note
-    }
-}
-
 function Get-GangplankAiSettingsView {
-    $s = (Get-GangplankLocalSettings).Intelligence
-    $envAi = Get-GangplankAiEnvironment
-    $cred = @((Get-GangplankCredentialStatus).credentials | Where-Object { $_.provider -eq 'AI' })[0]
     $cfg = $null; $problem = ''
     try { $cfg = Get-GangplankAiConfiguration } catch { $problem = ([string]$_.Exception.Message -split '\|',2)[-1] }
+    $key = $false
+    try { $key = [bool](Get-GangplankFairleadKey) } catch { $key = $false }
     return [ordered]@{
-        endpoint = $(if ($cfg) { $cfg.Endpoint } else { [string]$s.Endpoint })
-        profile = $(if ($cfg) { $cfg.Profile } else { [string]$s.Profile })
-        model = $(if ($cfg) { $cfg.Model } else { [string]$s.Model })
-        source = $(if ($envAi.Endpoint -or $envAi.Model) { 'environment' } elseif ($s.Endpoint) { 'settings' } else { 'default' })
-        tokenReady = [bool]$cred.configured
-        tokenRequired = $(if ($cfg) { -not $cfg.Loopback } else { $true })
-        allowedHosts = @(Get-GangplankAiAllowedHosts)
+        endpoint = $(if ($cfg) { $cfg.Endpoint } else { '' })
+        model = $(if ($cfg) { $cfg.Model } else { '' })
+        keyReady = $key
+        credentialName = (Get-GangplankFairleadTarget)
         problem = $problem
     }
 }
 
-function Set-GangplankAiSettings {
-    [CmdletBinding()]
-    param([string]$Endpoint,[string]$Flavor,[string]$Model,[string]$Base,[string]$Auth)
-    $settings = Get-GangplankLocalSettings
-    if ([string]::IsNullOrWhiteSpace($Endpoint)) {
-        foreach ($k in @('Endpoint','Profile','Model','ChatUrl','Auth')) { $settings.Intelligence[$k] = '' }
-    } else {
-        $uri = Assert-GangplankAiEndpoint -Url $Endpoint
-        if ($Flavor -notin @('openai','azure','databricks','ollama')) { $Flavor = Get-GangplankAiFlavor -Uri $uri }
-        $m = ([string]$Model).Trim()
-        if (-not $m -or $m.Length -gt 200 -or $m -match '[\x00-\x1f]') { throw 'BAD_REQUEST|Choose or type a model name.' }
-        if (-not $Base) { $Base = $(if ($Flavor -eq 'openai') { Get-GangplankAiOpenAiBase -Uri $uri } else { Get-GangplankAiOrigin $uri }) }
-        [void](Assert-GangplankAiEndpoint -Url $Base)
-        $settings.Intelligence.Endpoint = $uri.AbsoluteUri.TrimEnd('/')
-        $settings.Intelligence.Profile = $Flavor
-        $settings.Intelligence.Model = $m
-        $settings.Intelligence.ChatUrl = Get-GangplankAiChatUrl -Flavor $Flavor -Base $Base.TrimEnd('/') -Model $m
-        $settings.Intelligence.Auth = $(if ($Auth -eq 'api-key' -or $Flavor -eq 'azure') { 'api-key' } else { 'bearer' })
-    }
-    Save-GangplankLocalSettings -Settings $settings
-    Write-GangplankAudit -Action 'ai.settings' -Data @{ endpoint = [string]$settings.Intelligence.Endpoint; model = [string]$settings.Intelligence.Model; profile = [string]$settings.Intelligence.Profile }
-    return (Get-GangplankAiSettingsView)
-}
-
-function Get-GangplankAiConfiguration {
-    # The chat call to make: environment first (shared with Halyard), then saved
-    # settings, then the built-in default if one is set. Every address passes the same checks.
-    $envAi = Get-GangplankAiEnvironment
-    $saved = (Get-GangplankLocalSettings).Intelligence
-    if ($envAi.Endpoint) {
-        $uri = Assert-GangplankAiEndpoint -Url $envAi.Endpoint
-        $flavorName = Get-GangplankAiFlavor -Uri $uri
-        $model = if ($envAi.Model) { $envAi.Model } elseif (Test-GangplankAiRouterUrl -Url $envAi.Endpoint) { $script:GangplankAiRouterModel } elseif ($uri.IsLoopback) { $script:GangplankAiLoopbackModel } elseif ($saved.Model) { [string]$saved.Model } else { '' }
-        if (-not $model) { throw 'AI_MODEL_MISSING|No AI model is set for this endpoint. Set LLM_MODEL (or GANGPLANK_AI_MODEL), or choose a model in Settings.' }
-        $base = if ($flavorName -eq 'openai') { Get-GangplankAiOpenAiBase -Uri $uri } else { Get-GangplankAiOrigin $uri }
-        $chat = if ($uri.AbsolutePath -match '(?i)/(chat/completions|invocations)$') { $uri.AbsoluteUri } else { Get-GangplankAiChatUrl -Flavor $flavorName -Base $base -Model $model }
-        $auth = if ($flavorName -eq 'azure') { 'api-key' } else { 'bearer' }
-        $endpoint = $envAi.Endpoint
-    } elseif ($saved.Endpoint -and $saved.ChatUrl) {
-        [void](Assert-GangplankAiEndpoint -Url ([string]$saved.ChatUrl))
-        $flavorName = [string]$saved.Profile; $model = [string]$saved.Model; $chat = [string]$saved.ChatUrl
-        $auth = if ($saved.Auth -eq 'api-key') { 'api-key' } else { 'bearer' }
-        $endpoint = [string]$saved.Endpoint
-    } else {
-        # Built-in default: the Fleet router (Fairlead) on this PC.
-        $flavorName = 'openai'
-        $model = if ($envAi.Model) { $envAi.Model } else { $script:GangplankAiRouterModel }
-        $chat = $script:GangplankAiDefaultEndpoint + '/chat/completions'
-        [void](Assert-GangplankAiEndpoint -Url $chat)
-        $auth = 'bearer'; $endpoint = $script:GangplankAiDefaultEndpoint
-    }
-    return [pscustomobject]@{
-        Endpoint = $endpoint; Profile = $flavorName; Model = $model; Url = $chat; Auth = $auth
-        Loopback = (Test-GangplankAiLoopbackUrl -Url $chat)
-        Router = (Test-GangplankAiRouterUrl -Url $chat)
-        # Databricks serving and some gateways do not stream: ask once, show the whole answer.
-        Streams = ($flavorName -ne 'databricks')
-    }
-}
-
 function Get-GangplankAiAnswerText {
-    # The assistant text from the response shapes gateways return.
+    # The assistant text from an OpenAI-style answer.
     param($Response)
     if ($null -eq $Response) { return '' }
     $choices = $Response.PSObject.Properties['choices']
@@ -316,23 +212,18 @@ function Get-GangplankAiAnswerText {
         }
         if ($first.PSObject.Properties['text']) { return [string]$first.text }
     }
-    foreach ($k in @('output_text','text','content','result')) {
-        $p = $Response.PSObject.Properties[$k]
-        if ($p -and $p.Value -is [string]) { return [string]$p.Value }
-    }
     return ''
 }
 
 function Test-GangplankAiConnection {
-    # A tiny real request, so "configured" means "works".
+    # A tiny real request through Fairlead, so "ready" means "works".
     [CmdletBinding()]
     param([string]$Token)
     $config = Get-GangplankAiConfiguration
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $payload = @{ model = $config.Model; messages = @(@{ role = 'user'; content = 'Reply with the single word OK.' }); max_tokens = 5; temperature = 0 }
-    if ($config.Profile -eq 'databricks') { $payload.Remove('model') }
-    $r = Invoke-GangplankHttpRequest -Method POST -Uri $config.Url -Headers (Get-GangplankAiAuthHeaders -Auth $config.Auth -Token $Token -Url $config.Url) -Body ($payload | ConvertTo-Json -Depth 6 -Compress) -TimeoutSec 30
+    $r = Invoke-GangplankHttpRequest -Method POST -Uri $config.Url -Headers (Get-GangplankAiAuthHeaders -Token $Token) -Body ($payload | ConvertTo-Json -Depth 6 -Compress) -TimeoutSec 30
     $doc = ConvertFrom-GangplankApiResponse -Provider 'AI' -Method POST -Endpoint (Get-GangplankSafeUrl $config.Url) -Response $r
     $text = Get-GangplankAiAnswerText -Response $doc
-    return [ordered]@{ ok = $true; model = $config.Model; profile = $config.Profile; milliseconds = [int]$clock.ElapsedMilliseconds; reply = $(if ($text.Length -gt 40) { $text.Substring(0,40) } else { $text }) }
+    return [ordered]@{ ok = $true; model = $config.Model; milliseconds = [int]$clock.ElapsedMilliseconds; reply = $(if ($text.Length -gt 40) { $text.Substring(0,40) } else { $text }) }
 }

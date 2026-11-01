@@ -118,13 +118,12 @@ async function api(method, p, query, body) {
       // TEST MODE: the saved GitHub token is simulated (LocalDev gives the host a fake token).
       { provider: 'GitHub', configured: true, source: 'stored', environmentVariable: 'GITHUB_TOKEN', storedAt: '2026-10-25T14:00:00Z', storedUnreadable: false, lazaretteItem: '', lazaretteItemFound: false },
       { provider: 'GitLab', configured: false, source: 'none', environmentVariable: 'GITLAB_TOKEN', storedAt: '', storedUnreadable: false, lazaretteItem: '', lazaretteItemFound: false },
-      { provider: 'GenAi', configured: false, source: 'none', environmentVariable: 'GANGPLANK_AI_TOKEN', storedAt: '', storedUnreadable: false, lazaretteItem: '', lazaretteItemFound: false },
     ],
     lazarette: { enabled: false, configuredPath: '', fromEnvironment: false, status: null },
   };
   if (p === '/api/settings') return {
     workspaces: { root: workRoot, default: workRoot, fixed: false },
-    intelligence: { endpoint: 'http://127.0.0.1:1234/v1', model: 'phoenixlai', profile: 'openai', source: 'default', tokenReady: false, allowedHosts: [], problem: '' },
+    intelligence: { endpoint: 'http://127.0.0.1:8776', model: 'auto', keyReady: false, credentialName: 'Fairlead/Gangplank', problem: '' },
   };
   if (p === '/api/audit') return { entries: S.audit.slice(0, 30) };
   if (p === '/api/insights') {

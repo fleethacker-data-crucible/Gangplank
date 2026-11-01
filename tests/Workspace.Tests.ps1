@@ -20,7 +20,7 @@ try {
     $env:GANGPLANK_GITLAB_ALLOWED_HOSTS = $null
     Assert ((& (Get-Module Gangplank) { Get-GangplankGitLabHost }) -eq '') 'No GitLab host should be configured by default'
     Assert (@(& (Get-Module Gangplank) { Get-GangplankTrustedGitLabHosts }).Count -eq 0) 'No GitLab host may be trusted by default'
-    Assert (-not (& (Get-Module Gangplank) { $script:GangplankLegacyAliases.ContainsKey('GitLabHost') })) 'No legacy GitLab host may be trusted'
+    Assert (-not (& (Get-Module Gangplank) { [bool](Get-Variable -Name GangplankLegacyAliases -Scope Script -ErrorAction SilentlyContinue) })) 'No legacy GitLab host may be trusted'
     $rejected = $false
     try { Assert-GangplankTrustedRepositoryUrl -Url 'https://gitlab.example.org/group/project' } catch { $rejected = $true }
     Assert $rejected 'An unconfigured GitLab host must be refused'

@@ -1,13 +1,18 @@
 #Requires -Version 5.1
 # Lazarette names: a folder with lib\Lazarette.ps1 exposing Unlock-LazaretteVaultInteractive /
-# Get-LazaretteSecret / Get-LazaretteItemNames / Test-LazaretteVaultUnlocked, plus the old
-# ARC names that must NOT be used when the Lazarette ones exist. Also the pre-rename
-# KEYSTONE_ARC_PATH / KEYSTONE_ARC_ITEM_* opt-ins. Separate process (CI runs each suite in its own).
+# Get-LazaretteSecret / Get-LazaretteItemNames / Test-LazaretteVaultUnlocked. Only these names
+# are used; retired names and variables are not read. Separate process (CI runs each suite in its own).
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-lazarette-names-' + [guid]::NewGuid().ToString('N'))
+# Retired names are built from parts so this file carries none of them as text.
+$retiredPrefix = ('KEY' + 'STONE_' + 'A' + 'RC_')
+$retiredPath = $retiredPrefix + 'PATH'
+$retiredItem = $retiredPrefix + 'ITEM_GitHub'
+$retiredGenericPath = 'A' + 'RC_PATH'
+$retiredFn = @('Unlock-A' + 'rcVaultInteractive', 'Get-A' + 'rcSecret', 'Get-A' + 'rcItemNames', 'Test-A' + 'rcVaultUnlocked')
 $saved = @{}
-foreach ($n in @('ARC_PATH','ARC_ROOT','ARC_HOME','LAZARETTE_PATH','GANGPLANK_LAZARETTE_PATH','KEYSTONE_ARC_PATH','GITHUB_TOKEN','GITLAB_TOKEN','GANGPLANK_LAZARETTE_ITEM_GitHub','KEYSTONE_ARC_ITEM_GitHub','ARC_ITEM_GitHub','CASCADE_ARC_ITEM_GitHub')) {
+foreach ($n in @($retiredGenericPath,'LAZARETTE_PATH','GANGPLANK_LAZARETTE_PATH',$retiredPath,'GITHUB_TOKEN','GITLAB_TOKEN','GANGPLANK_LAZARETTE_ITEM_GitHub','LAZARETTE_ITEM_GitHub',$retiredItem)) {
     $saved[$n] = [Environment]::GetEnvironmentVariable($n)
     [Environment]::SetEnvironmentVariable($n,$null)
 }
@@ -15,7 +20,6 @@ function Assert([bool]$Condition,[string]$Message) { if (-not $Condition) { thro
 try {
     $laz = Join-Path $temp 'lazarette'
     [void](New-Item -ItemType Directory -Path (Join-Path $laz 'lib') -Force)
-    [IO.File]::WriteAllText((Join-Path $laz 'pm.ps1'),"throw ('Lazarette no longer provides pm.ps1. Load lib\Lazarette.ps1')")
     [IO.File]::WriteAllText((Join-Path (Join-Path $laz 'lib') 'Lazarette.ps1'),@'
 $script:StubUnlocked = $false
 $script:StubRecords = @(
@@ -35,74 +39,58 @@ function Get-LazaretteSecret {
     if ($hits.Count -ne 1) { throw "Lazarette has no single item '$Service'." }
     return [string]$hits[0].Secret
 }
-# Former names, kept by Lazarette as aliases. Gangplank must prefer the Lazarette names.
-function Unlock-ArcVaultInteractive { $global:ArcNameCalls += 1; $script:StubUnlocked = $true; return $true }
-function Get-ArcSecret { param([string]$Service) $global:ArcNameCalls += 1; return 'from-get-arcsecret' }
-function Get-ArcItemNames { $global:ArcNameCalls += 1; return @() }
-function Test-ArcVaultUnlocked { $global:ArcNameCalls += 1; return $script:StubUnlocked }
 '@)
-    # Pre-rename environment opt-in still works.
-    $env:KEYSTONE_ARC_PATH = $laz
     Import-Module (Join-Path $root 'Gangplank.psm1') -Force -WarningAction SilentlyContinue
     . (Join-Path $PSScriptRoot 'TestIsolation.ps1')
     Initialize-Gangplank -LogLevel ERROR
-    Assert ((Get-GangplankLazaretteFlavor -LazaretteRoot $laz) -eq 'v5') 'lib\Lazarette.ps1 must identify Lazarette'
-    Assert ((Find-GangplankLazaretteRoot) -eq [IO.Path]::GetFullPath($laz)) 'KEYSTONE_ARC_PATH must still enable Lazarette'
-    # The new name wins over the old one.
-    $env:GANGPLANK_LAZARETTE_PATH = Join-Path $temp 'nowhere'
-    Assert ((Get-GangplankConfiguredLazarettePath) -eq $env:GANGPLANK_LAZARETTE_PATH) 'GANGPLANK_LAZARETTE_PATH must win over KEYSTONE_ARC_PATH'
+    Assert (Test-GangplankLazaretteFolder -LazaretteRoot $laz) 'lib\Lazarette.ps1 must identify Lazarette'
+    $bare = Join-Path $temp 'bare'
+    [void](New-Item -ItemType Directory -Path (Join-Path $bare 'lib') -Force)
+    Assert (-not (Test-GangplankLazaretteFolder -LazaretteRoot $bare)) 'A folder without lib\Lazarette.ps1 is not Lazarette'
+    # Only GANGPLANK_LAZARETTE_PATH (or the Integrations setting) enables Lazarette: no other name does.
     $env:GANGPLANK_LAZARETTE_PATH = $laz
-    # Generic names never enable it (opt-in per app).
-    $env:KEYSTONE_ARC_PATH = $null; $env:GANGPLANK_LAZARETTE_PATH = $null
-    $env:LAZARETTE_PATH = $laz; $env:ARC_PATH = $laz
-    Assert (-not (Test-GangplankLazaretteConfigured)) 'LAZARETTE_PATH / ARC_PATH must not enable Lazarette'
-    $env:LAZARETTE_PATH = $null; $env:ARC_PATH = $null
+    Assert ((Find-GangplankLazaretteRoot) -eq [IO.Path]::GetFullPath($laz)) 'GANGPLANK_LAZARETTE_PATH must enable Lazarette'
+    $env:GANGPLANK_LAZARETTE_PATH = $null
+    foreach ($n in @('LAZARETTE_PATH',$retiredGenericPath,$retiredPath)) {
+        [Environment]::SetEnvironmentVariable($n,$laz)
+        Assert (-not (Test-GangplankLazaretteConfigured)) "$n must not enable Lazarette"
+        [Environment]::SetEnvironmentVariable($n,$null)
+    }
     $env:GANGPLANK_LAZARETTE_PATH = $laz
 
-    $global:LazUnlockCalls = 0; $global:ArcNameCalls = 0
+    $global:LazUnlockCalls = 0
     Assert (Import-GangplankLazaretteSession -Quiet) 'Lazarette engine should load from lib\Lazarette.ps1'
+    foreach ($fn in $retiredFn) { Assert (-not (Get-Command $fn -ErrorAction SilentlyContinue)) "$fn must not exist" }
     $state = Initialize-GangplankLazaretteAuthentication -Quiet
     Assert ($state.Unlocked -and $global:LazUnlockCalls -eq 1) 'Unlock must go through Unlock-LazaretteVaultInteractive'
     Assert ((Get-GangplankToken -Provider GitHub) -eq 'fake-lazarette-github-token') 'Token must be read with Get-LazaretteSecret'
     Assert ((@((Get-GangplankLazaretteConnectionStatus).itemNames) -join ',') -eq 'alt-gh,github') 'Names must come from Get-LazaretteItemNames'
-    Assert ($global:ArcNameCalls -eq 0) 'The former ARC names must not be called when the Lazarette names exist'
-    # Item-name overrides: new name first, pre-rename name as fallback.
-    $env:KEYSTONE_ARC_ITEM_GitHub = 'alt-gh'
-    Assert ((Get-GangplankToken -Provider GitHub) -eq 'fake-lazarette-alt-token') 'KEYSTONE_ARC_ITEM_GitHub must still map the item'
-    $env:GANGPLANK_LAZARETTE_ITEM_GitHub = 'github'
-    Assert ((Get-GangplankToken -Provider GitHub) -eq 'fake-lazarette-github-token') 'GANGPLANK_LAZARETTE_ITEM_GitHub must win'
-    $env:GANGPLANK_LAZARETTE_ITEM_GitHub = $null; $env:KEYSTONE_ARC_ITEM_GitHub = $null
-    # Legacy aliases (Core/Configuration.ps1): former purpose names, item-variable suffixes and
-    # default item names are still accepted. Names come from the alias map, not literals here.
+    # Item-name overrides: GANGPLANK_LAZARETTE_ITEM_<Purpose> only.
+    [Environment]::SetEnvironmentVariable($retiredItem,'alt-gh')
+    [Environment]::SetEnvironmentVariable('LAZARETTE_ITEM_GitHub','alt-gh')
+    Assert ((Get-GangplankToken -Provider GitHub) -eq 'fake-lazarette-github-token') 'Only GANGPLANK_LAZARETTE_ITEM_<Purpose> may map the item'
+    [Environment]::SetEnvironmentVariable($retiredItem,$null)
+    [Environment]::SetEnvironmentVariable('LAZARETTE_ITEM_GitHub',$null)
+    $env:GANGPLANK_LAZARETTE_ITEM_GitHub = 'alt-gh'
+    Assert ((Get-GangplankToken -Provider GitHub) -eq 'fake-lazarette-alt-token') 'GANGPLANK_LAZARETTE_ITEM_GitHub must map the item'
+    $env:GANGPLANK_LAZARETTE_ITEM_GitHub = $null
+    # Purpose names and default item names (Core/Configuration.ps1).
     & (Get-Module Gangplank) {
         function Assert([bool]$Condition,[string]$Message) { if (-not $Condition) { throw "FAILED: $Message" } }
-        $legacyAi = @($script:GangplankLegacyAliases.Purpose.Keys | Where-Object { $script:GangplankLegacyAliases.Purpose[$_] -eq 'AI' })[0]
-        Assert ((Resolve-GangplankPurposeName $legacyAi) -eq 'AI') 'Legacy purpose name should resolve to AI'
-        Assert ((Resolve-GangplankPurposeName $legacyAi.ToLowerInvariant()) -eq 'AI') 'Legacy purpose names resolve case-insensitively'
-        Assert ((Resolve-GangplankPurposeName 'gitlab') -eq 'GitLab') 'Current purpose names keep their spelling'
-        Assert ((Get-GangplankLazaretteItemName -Provider AI) -eq 'ai-api-key') 'Default AI item name should be ai-api-key'
-        Assert ((Get-GangplankLazaretteItemName -Provider $legacyAi) -eq 'ai-api-key') 'Legacy purpose name should reach the AI mapping'
-        $legacyVar = 'GANGPLANK_LAZARETTE_ITEM_' + $legacyAi
-        [Environment]::SetEnvironmentVariable($legacyVar,'alt-gh')
-        try { Assert ((Get-GangplankLazaretteItemName -Provider AI) -eq 'alt-gh') 'An item variable with the legacy purpose suffix should still map AI' }
-        finally { [Environment]::SetEnvironmentVariable($legacyVar,$null) }
-        $legacyItem = Get-GangplankLegacyItemName -Purpose GitLab
-        $savedHost = $env:GANGPLANK_GITLAB_HOST
-        try {
-            # A legacy GitLab token is never used unless a GitLab host was explicitly configured.
-            $env:GANGPLANK_GITLAB_HOST = $null
-            Assert ((Resolve-GangplankLazaretteItemInCatalog -Provider GitLab -Name 'gitlab' -Catalog @('github',$legacyItem)) -eq 'gitlab') 'No configured GitLab host: the legacy item must not be used'
-            $env:GANGPLANK_GITLAB_HOST = 'gitlab.example.org'
-            Assert ((Resolve-GangplankLazaretteItemInCatalog -Provider GitLab -Name 'gitlab' -Catalog @('github',$legacyItem) -TargetHost 'other.example.org') -eq 'gitlab') 'The legacy item must not go to a host other than the configured one'
-            Assert ((Resolve-GangplankLazaretteItemInCatalog -Provider GitLab -Name 'gitlab' -Catalog @('github',$legacyItem) -TargetHost 'gitlab.example.org') -eq $legacyItem) 'Configured host: fall back to the legacy default item'
-        } finally { $env:GANGPLANK_GITLAB_HOST = $savedHost }
-        $env:GANGPLANK_GITLAB_HOST = 'gitlab.example.org'
-        Assert ((Resolve-GangplankLazaretteItemInCatalog -Provider GitLab -Name 'gitlab' -Catalog @('github',$legacyItem)) -eq $legacyItem) 'Default item missing: fall back to the legacy default item'
-        Assert ((Resolve-GangplankLazaretteItemInCatalog -Provider GitLab -Name 'gitlab' -Catalog @('gitlab',$legacyItem)) -eq 'gitlab') 'The current default item wins when both exist'
-        Assert ((Resolve-GangplankLazaretteItemInCatalog -Provider GitLab -Name 'my-gitlab' -Catalog @($legacyItem)) -eq 'my-gitlab') 'A custom item name never falls back'
-        $env:GANGPLANK_GITLAB_HOST = $savedHost
+        Assert ((Resolve-GangplankPurposeName 'gitlab') -eq 'GitLab') 'Purpose names resolve case-insensitively to their canonical spelling'
+        Assert ((Resolve-GangplankPurposeName 'ai') -eq 'ai') 'AI is not a purpose: models go through Fairlead'
+        Assert ((Resolve-GangplankPurposeName 'NotAPurpose') -eq 'NotAPurpose') 'Anything else is returned unchanged'
+        $threwAi = $false
+        try { [void](Get-GangplankLazaretteItemName -Provider AI) } catch { $threwAi = $true }
+        Assert $threwAi 'AI is not a Lazarette purpose any more'
+        Assert ((Get-GangplankLazaretteItemName -Provider GitLab) -eq 'gitlab') 'Default GitLab item name should be gitlab'
+        Assert ((Get-GangplankLazaretteItemName -Provider GitHub) -eq 'github') 'Default GitHub item name should be github'
+        Assert ((Get-GangplankLazaretteItemName -Provider DataPlatform) -eq 'data-platform-api') 'Default data platform item name should be data-platform-api'
+        $threw = $false
+        try { [void](Get-GangplankLazaretteItemName -Provider 'Other') } catch { $threw = $true }
+        Assert $threw 'An unknown purpose must be refused'
     }
-    Write-Host 'Gangplank Lazarette names, lib\Lazarette.ps1 and pre-rename opt-ins passed.' -ForegroundColor Green
+    Write-Host 'Gangplank Lazarette names and lib\Lazarette.ps1 passed.' -ForegroundColor Green
 } finally {
     foreach ($n in $saved.Keys) { [Environment]::SetEnvironmentVariable($n,$saved[$n]) }
     Remove-Module GangplankLazarette -Force -ErrorAction SilentlyContinue

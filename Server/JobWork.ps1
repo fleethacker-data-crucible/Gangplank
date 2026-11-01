@@ -130,7 +130,7 @@ function Invoke-GangplankJobReviewMerge {
 
 function Invoke-GangplankJobCommitTitle {
     param($Shared,[hashtable]$Arguments)
-    Set-GangplankJobProgress $Shared 'Asking the AI gateway for a title'
+    Set-GangplankJobProgress $Shared 'Asking Fairlead for a title'
     $diff = [pscustomobject]@{ New = @($Arguments.New); Modified = @($Arguments.Modified); Deleted = @($Arguments.Deleted) }
     $prompt = Get-GangplankSmartSavePrompt -Diff $diff
     $answer = Invoke-GangplankAI -Question $prompt -CommitTitle -Token $Arguments.AiToken
@@ -147,12 +147,6 @@ function Invoke-GangplankJobChat {
     Invoke-GangplankAIStream -Question ([string]$Arguments.Question) -Session $context -Token $Arguments.AiToken -OnChunk { param($t) [void]$chunks.Add($t) }.GetNewClosure()
     Set-GangplankJobProgress $Shared 'Done'
     return [ordered]@{ characters = [int](($chunks | ForEach-Object { $_.Length }) | Measure-Object -Sum).Sum }
-}
-
-function Invoke-GangplankJobAiDetect {
-    param($Shared,[hashtable]$Arguments)
-    Set-GangplankJobProgress $Shared 'Asking the endpoint which models it offers'
-    return (Find-GangplankAiModels -Endpoint ([string]$Arguments.Endpoint) -Token ([string]$Arguments.AiToken) -Current ([string]$Arguments.Current))
 }
 
 function Invoke-GangplankJobAiTest {
