@@ -231,8 +231,7 @@ function Invoke-GangplankRouteCore {
     if ($m -eq 'GET' -and $p -eq '/api/status') {
         $session = Get-GangplankLiveSession
         $snap = Get-GangplankAppSnapshot
-        $creds = Get-GangplankCredentialStatus
-        $ai = @($creds.credentials | Where-Object { $_.provider -eq 'AI' })[0]
+        $aiKey = [bool](Get-GangplankFairleadKey)
         Send-GangplankJson -Object @{
             connected = ($null -ne $session)
             restoredWaiting = ($null -eq $session -and $null -ne $snap)
@@ -242,7 +241,7 @@ function Invoke-GangplankRouteCore {
             defaultBranch = $(if ($snap) { $snap.DefaultBranch } else { $null })
             workspace = $(if ($snap) { $snap.LocalPath } else { $null })
             hasBaseline = [bool]($snap -and $snap.BaselineSha)
-            ai = [bool]$ai.configured
+            ai = $aiKey
             canReview = [bool]($snap -and $snap.LastSaveMessage -and -not $snap.LastReviewUrl -and $snap.LastBranch -and $snap.LastBranch -ne $snap.DefaultBranch)
             autoStop = [bool](Get-GangplankHostLifecycleState).autoStop
             localDev = [bool]$app.LocalDev
@@ -282,22 +281,8 @@ function Invoke-GangplankRouteCore {
         Send-GangplankJson -Object (Get-GangplankAppSettingsView)
         return
     }
-    if ($m -eq 'POST' -and $p -eq '/api/settings/intelligence') {
-        $view = Set-GangplankAiSettings -Endpoint ([string](Get-GangplankBodyValue $Req 'endpoint')) -Flavor ([string](Get-GangplankBodyValue $Req 'profile')) -Model ([string](Get-GangplankBodyValue $Req 'model')) -Base ([string](Get-GangplankBodyValue $Req 'base')) -Auth ([string](Get-GangplankBodyValue $Req 'auth'))
-        Send-GangplankJson -Object (Get-GangplankAppSettingsView)
-        return
-    }
-    if ($m -eq 'POST' -and $p -eq '/api/ai/detect') {
-        $endpoint = [string](Get-GangplankBodyValue $Req 'endpoint')
-        if (-not $endpoint) { $endpoint = (Get-GangplankAiConfiguration).Endpoint }
-        [void](Assert-GangplankAiEndpoint -Url $endpoint)   # refuse before any request leaves
-        $jobArgs = @{ Endpoint = $endpoint; AiToken = (Get-GangplankAiAuthToken -Url $endpoint); Current = [string](Get-GangplankBodyValue $Req 'model') }
-        $id = Start-GangplankJob -Kind 'ai-detect' -Group 'ai' -Function 'Invoke-GangplankJobAiDetect' -Arguments $jobArgs
-        Send-GangplankJobStarted $id
-        return
-    }
     if ($m -eq 'POST' -and $p -eq '/api/ai/test') {
-        $id = Start-GangplankJob -Kind 'ai-test' -Group 'ai' -Function 'Invoke-GangplankJobAiTest' -Arguments @{ AiToken = (Get-GangplankAiAuthToken -Url (Get-GangplankAiConfiguration).Url) }
+        $id = Start-GangplankJob -Kind 'ai-test' -Group 'ai' -Function 'Invoke-GangplankJobAiTest' -Arguments @{ AiToken = (Get-GangplankAiRequestToken -Config (Get-GangplankAiConfiguration)) }
         Send-GangplankJobStarted $id
         return
     }
@@ -335,7 +320,7 @@ function Invoke-GangplankRouteCore {
         $provider = [string](Get-GangplankBodyValue $Req 'provider')
         $item = [string](Get-GangplankBodyValue $Req 'item')
         $provider = Resolve-GangplankPurposeName $provider -Strict
-        if ($provider -notin @('GitHub','GitLab','AI')) { throw 'BAD_REQUEST|Unsupported credential provider.' }
+        if ($provider -notin @('GitHub','GitLab')) { throw 'BAD_REQUEST|Unsupported credential provider.' }
         if (-not (Test-GangplankLazaretteConfigured)) { throw 'LAZARETTE_NOT_CONFIGURED|Enable Lazarette first.' }
         $names = @(Get-GangplankLazaretteServiceNames)
         if ($names.Count -gt 0 -and $item -notin $names) { throw 'BAD_REQUEST|Select an item that exists in the unlocked Lazarette vault.' }

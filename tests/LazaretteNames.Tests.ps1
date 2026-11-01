@@ -78,9 +78,11 @@ function Get-LazaretteSecret {
     & (Get-Module Gangplank) {
         function Assert([bool]$Condition,[string]$Message) { if (-not $Condition) { throw "FAILED: $Message" } }
         Assert ((Resolve-GangplankPurposeName 'gitlab') -eq 'GitLab') 'Purpose names resolve case-insensitively to their canonical spelling'
-        Assert ((Resolve-GangplankPurposeName 'AI') -eq 'AI') 'AI stays AI'
+        Assert ((Resolve-GangplankPurposeName 'ai') -eq 'ai') 'AI is not a purpose: models go through Fairlead'
         Assert ((Resolve-GangplankPurposeName 'NotAPurpose') -eq 'NotAPurpose') 'Anything else is returned unchanged'
-        Assert ((Get-GangplankLazaretteItemName -Provider AI) -eq 'ai-api-key') 'Default AI item name should be ai-api-key'
+        $threwAi = $false
+        try { [void](Get-GangplankLazaretteItemName -Provider AI) } catch { $threwAi = $true }
+        Assert $threwAi 'AI is not a Lazarette purpose any more'
         Assert ((Get-GangplankLazaretteItemName -Provider GitLab) -eq 'gitlab') 'Default GitLab item name should be gitlab'
         Assert ((Get-GangplankLazaretteItemName -Provider GitHub) -eq 'github') 'Default GitHub item name should be github'
         Assert ((Get-GangplankLazaretteItemName -Provider DataPlatform) -eq 'data-platform-api') 'Default data platform item name should be data-platform-api'

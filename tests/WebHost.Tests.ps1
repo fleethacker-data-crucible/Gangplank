@@ -163,7 +163,7 @@ try {
     $status = Invoke-RestMethod -Uri ($base + '/api/status') -Headers @{ 'X-Gangplank-Client' = $client } -WebSession $web -TimeoutSec 5
     Assert ($status.localDev -eq $true -and $status.connected -eq $false) 'Fresh LocalDev status wrong.'
     $integration = Invoke-RestMethod -Uri ($base + '/api/integrations') -Headers @{ 'X-Gangplank-Client' = $client } -WebSession $web -TimeoutSec 5
-    Assert (@($integration.credentials).Count -eq 3) 'Credential status missing providers.'
+    Assert (@($integration.credentials).Count -eq 2) 'Credential status missing providers.'
     Assert (-not $integration.lazarette.enabled) 'Lazarette must be off unless configured.'
 
     $replay = $false

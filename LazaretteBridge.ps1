@@ -206,12 +206,11 @@ function Get-GangplankLazaretteConnectionStatus {
     $names = @()
     if ($unlocked) { $names = @(Get-GangplankLazaretteServiceNames) }
     $bindings = @()
-    foreach ($purpose in @('GitHub','GitLab','AI')) {
+    foreach ($purpose in @('GitHub','GitLab')) {
         $item = Get-GangplankLazaretteItemName -Provider $purpose
         $envNames = switch ($purpose) {
             'GitHub' { @('GITHUB_TOKEN') }
             'GitLab' { @('GITLAB_TOKEN') }
-            'AI' { @('GANGPLANK_AI_TOKEN') }
         }
         $envPresent = $false
         foreach ($envName in $envNames) { if (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($envName))) { $envPresent = $true } }
@@ -272,7 +271,7 @@ function Get-GangplankLazaretteCredential {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Provider)
     $Provider = Resolve-GangplankPurposeName $Provider
-    if ($Provider -notin @('GitHub','GitLab','AI')) { throw "Unsupported credential provider '$Provider'." }
+    if ($Provider -notin @('GitHub','GitLab')) { throw "Unsupported credential provider '$Provider'." }
     $name = Get-GangplankLazaretteItemName -Provider $Provider
     $status = Get-GangplankLazaretteConnectionStatus
     if (-not $status.lazaretteFound) { throw "LAZARETTE_NOT_FOUND|$($status.message)" }

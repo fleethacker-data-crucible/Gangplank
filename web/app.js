@@ -277,20 +277,14 @@ el('endSession').addEventListener('click',async()=>{
 });
 (async()=>{if(await bootstrap()){startHeartbeat();init()}})();
 
-// ---- Settings: workspace folder and AI model --------------------------------
-const AI_KIND={openai:'OpenAI-compatible gateway',azure:'Azure OpenAI',databricks:'Databricks model serving',ollama:'Ollama on this PC'};
-let aiDetected=null;
+// ---- Settings: workspace folder and the Fairlead connection --------------------------------
 async function loadSettings(){
  try{const x=await api('/api/settings');const w=x.workspaces||{};el('wsRoot').textContent=w.root||'';el('wsRootInput').disabled=!!w.fixed;el('wsSave').disabled=!!w.fixed;el('wsDefault').disabled=!!w.fixed;if(w.fixed)note('wsNotice','This folder is set when Gangplank starts (-WorkRoot or GANGPLANK_WORK_ROOT).','');
-  const a=x.intelligence||{};if(!el('aiEndpoint').value)el('aiEndpoint').value=a.endpoint||'';if(!el('aiModel').value)el('aiModel').value=a.model||'';
-  el('aiCurrent').textContent='In use: '+(a.model||'?')+' at '+(a.endpoint||'?')+' ('+(AI_KIND[a.profile]||a.profile||'unknown')+(a.source==='environment'?', set by environment variables':a.source==='default'?', the default':'')+'). AI token: '+(a.tokenReady?'ready':(a.tokenRequired===false?'not needed on this PC':'not set'))+'.'+(a.allowedHosts&&a.allowedHosts.length?' Allowed by your administrator: '+a.allowedHosts.join(', ')+'.':'')+(a.problem?' Problem: '+a.problem:'');
+  const a=x.intelligence||{};el('aiCurrent').textContent='Fairlead route: '+(a.model||'?')+' at '+(a.endpoint||'?')+'. Key for Gangplank ('+(a.keyTarget||'Fairlead/Gangplank')+'): '+(a.keyReady?'installed':'not installed - open Fairlead, Clients, install a key for Gangplank')+'.'+(a.problem?' Problem: '+a.problem:'');
  }catch(e){el('aiCurrent').textContent='Settings unavailable: '+e.message}
 }
 el('wsSave').addEventListener('click',async()=>{try{const x=await api('/api/settings/workspace','POST',{root:el('wsRootInput').value.trim()});el('wsRootInput').value='';note('wsNotice','New workspaces will go to '+x.workspaces.root+'.','ok');await loadSettings()}catch(e){note('wsNotice',e.message,'error')}});
 el('wsDefault').addEventListener('click',async()=>{try{const x=await api('/api/settings/workspace','POST',{root:''});note('wsNotice','Using the default folder: '+x.workspaces.root+'.','ok');await loadSettings()}catch(e){note('wsNotice',e.message,'error')}});
-el('aiDetect').addEventListener('click',async()=>{const b=el('aiDetect');b.disabled=true;el('aiKind').textContent='Detecting...';try{const r=await runJob('/api/ai/detect',{endpoint:el('aiEndpoint').value.trim(),model:el('aiModel').value.trim()});aiDetected=r;const dl=el('aiModels');dl.replaceChildren();for(const m of r.models||[]){const o=document.createElement('option');o.value=m;dl.append(o)}if(r.recommended)el('aiModel').value=r.recommended;el('aiKind').textContent=(AI_KIND[r.profile]||r.profile)+': '+(r.models&&r.models.length?r.models.length+' chat model(s) found; best match selected. Click the Model box to see them all.':'no model list available.')+(r.note?' '+r.note:'');note('aiNotice','Detected. Check the model, then Save.','ok')}catch(e){el('aiKind').textContent='';note('aiNotice',e.message,'error')}finally{b.disabled=false}});
-el('aiSave').addEventListener('click',async()=>{try{const d=aiDetected||{};await api('/api/settings/intelligence','POST',{endpoint:el('aiEndpoint').value.trim(),model:el('aiModel').value.trim(),profile:d.profile||'',base:d.base||'',auth:d.auth||''});note('aiNotice','AI setting saved.','ok');await loadSettings()}catch(e){note('aiNotice',e.message,'error')}});
-el('aiReset').addEventListener('click',async()=>{try{await api('/api/settings/intelligence','POST',{endpoint:''});el('aiEndpoint').value='';el('aiModel').value='';aiDetected=null;note('aiNotice','Back to the default AI endpoint.','ok');await loadSettings()}catch(e){note('aiNotice',e.message,'error')}});
 el('aiTest').addEventListener('click',async()=>{const b=el('aiTest');b.disabled=true;note('aiNotice','Testing...','');try{const r=await runJob('/api/ai/test',{});note('aiNotice','Working: '+r.model+' answered in '+r.milliseconds+' ms.','ok')}catch(e){note('aiNotice','Test failed: '+e.message,'error')}finally{b.disabled=false}});
 // Spoken status (opt-in). Results and errors are read aloud with the voices installed on this PC through
 // the browser; nothing is sent anywhere, and progress messages are never spoken. With no voices the toggle is off and the text stays on screen.

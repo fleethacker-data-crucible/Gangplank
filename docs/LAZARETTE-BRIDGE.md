@@ -22,7 +22,6 @@ vault on the workstation (roadmap W1); that needs the real card and Lazarette's 
 |---|---|---|
 | GitHub | `github` | `GANGPLANK_LAZARETTE_ITEM_GitHub`, or the mapping in Credentials |
 | GitLab | `gitlab` | `GANGPLANK_LAZARETTE_ITEM_GitLab`, or the mapping |
-| AI (remote endpoints) | `ai-api-key` | `GANGPLANK_LAZARETTE_ITEM_AI`, or the mapping |
 
 A token is looked up in this order: the environment variable, Gangplank's own store (sealed with Windows
 DPAPI), then the Lazarette item. Items are read by name with `Get-LazaretteSecret`; the names the vault
@@ -38,11 +37,8 @@ offers come from `Get-LazaretteItemNames`.
 
 ## The Fleet router (Fairlead)
 
-The built-in AI endpoint is the router on this PC, `http://127.0.0.1:8776/v1`. Gangplank does **not** read
-the vault for a loopback AI endpoint, and it sends no `Authorization` header unless a token is saved.
-That is enough while Fairlead has `requireClientKey` off for this machine. If Fairlead requires a client
-key, create one with `fairlead clients add` and save it as the **AI** token in Settings (or set
-`GANGPLANK_AI_TOKEN`). Reading that key from Lazarette is not wired yet.
+Gangplank does **not** read the vault for AI. Every AI request goes to Fairlead on this PC, and the client key for it
+comes from Windows Credential Manager (`Fairlead/Gangplank`), installed by Fairlead. See the README for the setup.
 
 ## Tests
 

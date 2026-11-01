@@ -33,7 +33,7 @@ function startHost(): Promise<{ base: string; nonce: string }> {
     '-LocalDev', '-NoBrowser', '-Port', String(port), '-DevGitHubUrl', fake.url + '/', '-WorkRoot', path.join(temp, 'work')];
   if (shell.toLowerCase().includes('powershell')) args.unshift('-STA');
   const env = { ...process.env, GITHUB_TOKEN: fake.token, LOCALAPPDATA: path.join(temp, 'appdata'), HOME: temp,
-    GANGPLANK_LAZARETTE_PATH: '', GITLAB_TOKEN: '', LLM_TOKEN: '', OPENAI_API_KEY: '', LLM_URL: '', GANGPLANK_AI_URL: '', GANGPLANK_WORK_ROOT: '' };
+    GANGPLANK_LAZARETTE_PATH: '', GITLAB_TOKEN: '', LLM_TOKEN: '', OPENAI_API_KEY: '', LLM_URL: '', GANGPLANK_WORK_ROOT: '' };
   child = spawn(shell, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   return new Promise((resolve, reject) => {

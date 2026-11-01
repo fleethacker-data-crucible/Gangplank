@@ -2,7 +2,7 @@
 # ============================================================
 #  Core/Credentials.ps1
 #  Where provider tokens come from, in order:
-#    1. Environment (GITHUB_TOKEN, GITLAB_TOKEN, GANGPLANK_AI_TOKEN)
+#    1. Environment (GITHUB_TOKEN, GITLAB_TOKEN)
 #    2. Gangplank's local credential store: entered once in Integrations,
 #       sealed with Windows DPAPI (CurrentUser) under %LOCALAPPDATA%\Gangplank
 #    3. Lazarette, only when explicitly configured (Lazarette.Enabled + .Path in
@@ -11,12 +11,10 @@
 #  Token values never go to the browser, the log or the audit trail.
 # ============================================================
 
-$script:GangplankCredentialProviders = @('GitHub','GitLab','AI')
+$script:GangplankCredentialProviders = @('GitHub','GitLab')
 $script:GangplankCredentialEnv = @{
     GitHub = @('GITHUB_TOKEN')
     GitLab = @('GITLAB_TOKEN')
-    # LLM_TOKEN/OPENAI_API_KEY: shared with Halyard.
-    AI     = @('GANGPLANK_AI_TOKEN','LLM_TOKEN','OPENAI_API_KEY')
 }
 $script:GangplankCredentialEntropy = [Text.Encoding]::UTF8.GetBytes('Keystone credential store v1')
 $script:GangplankCredentialStorePath = $null
@@ -183,7 +181,6 @@ function Get-GangplankLocalSettings {
     $settings = [ordered]@{
         Lazarette = [ordered]@{ Enabled = $false; Path = '' }
         Workspaces = [ordered]@{ Root = '' }
-        Intelligence = [ordered]@{ Endpoint = ''; Profile = ''; Model = ''; ChatUrl = ''; Auth = '' }
     }
     if (Test-Path -LiteralPath $path -PathType Leaf) {
         try {
@@ -195,12 +192,6 @@ function Get-GangplankLocalSettings {
                 if ($laz.Path -is [string]) { $settings.Lazarette.Path = $laz.Path }
             }
             if ($raw.Workspaces -and $raw.Workspaces.Root -is [string]) { $settings.Workspaces.Root = $raw.Workspaces.Root }
-            if ($raw.Intelligence) {
-                foreach ($k in @('Endpoint','Profile','Model','ChatUrl','Auth')) {
-                    $v = $raw.Intelligence.PSObject.Properties[$k]
-                    if ($v -and $v.Value -is [string]) { $settings.Intelligence[$k] = $v.Value }
-                }
-            }
         } catch { Write-GangplankLog -Level WARN -Message 'gangplank.local.json could not be read; using defaults (Lazarette off).' }
     }
     return $settings

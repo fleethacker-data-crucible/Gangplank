@@ -30,7 +30,7 @@ try {
 
     [IO.File]::WriteAllText($loader,@'
 $script:StubUnlocked = $false
-$script:Names = @('github','github-alt','gitlab','ai-api-key')
+$script:Names = @('github','github-alt','gitlab')
 function Test-LazaretteVaultUnlocked { return $script:StubUnlocked }
 function Unlock-LazaretteVaultInteractive { $global:FakeLazaretteUnlockCalls += 1; $script:StubUnlocked = $true; return $true }
 function Get-LazaretteItemNames {
@@ -44,7 +44,6 @@ function Get-LazaretteSecret {
         'github' { return 'fake-github-test-token' }
         'github-alt' { return 'fake-alternate-test-token' }
         'gitlab' { return 'fake-gitlab-test-token' }
-        'ai-api-key' { return 'fake-ai-test-token' }
         default { throw 'Missing test item' }
     }
 }

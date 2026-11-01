@@ -5,7 +5,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('gangplank-cred-' + [guid]::NewGuid().ToString('N'))
-$names = @('GITHUB_TOKEN','GITLAB_TOKEN','GANGPLANK_AI_TOKEN','LLM_TOKEN','OPENAI_API_KEY','GANGPLANK_LAZARETTE_PATH','LAZARETTE_PATH')
+$names = @('GITHUB_TOKEN','GITLAB_TOKEN','LLM_TOKEN','OPENAI_API_KEY','GANGPLANK_LAZARETTE_PATH','LAZARETTE_PATH')
 $saved = @{}
 foreach ($n in $names) { $saved[$n] = [Environment]::GetEnvironmentVariable($n); [Environment]::SetEnvironmentVariable($n,$null) }
 try {
@@ -97,15 +97,14 @@ try {
         Assert ((Get-Code { Resolve-GangplankCredential -Provider GitHub }) -eq 'CREDENTIAL_MISSING') 'Removed token still resolved'
         Assert (-not (Test-Path -LiteralPath (Get-GangplankCredentialStorePath))) 'Empty store file should be deleted'
 
-        # AI token uses the same chain.
-        $env:GANGPLANK_AI_TOKEN = 'ai-env-token-1'
-        Assert ((Get-GangplankAiToken) -eq 'ai-env-token-1') 'AI token should come from GANGPLANK_AI_TOKEN'
-        $env:GANGPLANK_AI_TOKEN = $null
+        # AI is not a credential provider here: the Fairlead key comes from Credential Manager only.
+        $env:LLM_TOKEN = 'x-not-a-key'; $env:OPENAI_API_KEY = 'x-not-a-key'
+        Assert ((Get-Code { Set-GangplankStoredCredential -Provider AI -Token 'FakeAiStoredToken1' }) -eq 'BAD_REQUEST') 'AI must not be a stored credential provider'
+        $env:LLM_TOKEN = $null; $env:OPENAI_API_KEY = $null
         Assert ((Resolve-GangplankPurposeName 'github' -Strict) -eq 'github') 'Strict resolution must not fold case of current names'
-        [void](Set-GangplankStoredCredential -Provider AI -Token 'FakeAiStoredToken1')
-        Assert ((Get-GangplankStoredCredential -Provider AI) -eq 'FakeAiStoredToken1') 'A stored AI token should be read back'
-        Assert (Remove-GangplankStoredCredential -Provider AI) 'Remove AI token'
-        Assert ($null -eq (Get-GangplankAiToken)) 'AI token must be null when unconfigured'
+        Set-GangplankFairleadKeyReader -Reader { param($Target) $null }
+        Assert ($null -eq (Get-GangplankAiToken)) 'AI token must be null when Fairlead has no key for this app'
+        Set-GangplankFairleadKeyReader -Reader $null
 
         # Audit: actions recorded, never values.
         $audit = [IO.File]::ReadAllText($script:GangplankAuditPath)

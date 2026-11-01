@@ -7,7 +7,6 @@
 # Canonical Lazarette Service names (hard-coded fallbacks only):
 #   gitlab            - GitLab PAT (your organization's GitLab host)
 #   github            - GitHub token
-#   ai-api-key        - AI endpoint token (purpose AI)
 #   data-platform-api - enterprise data platform token (purpose DataPlatform; reserved)
 #
 # Resolution order for GitLab / GitHub:
@@ -24,10 +23,9 @@ $script:GangplankConfigPath = $null
 $script:GangplankLazaretteCanonical = @{
     GitLab       = "gitlab"
     GitHub       = "github"
-    AI           = "ai-api-key"
     DataPlatform = "data-platform-api"
 }
-$script:GangplankLazarettePurposes = @('GitHub','GitLab','AI','DataPlatform')
+$script:GangplankLazarettePurposes = @('GitHub','GitLab','DataPlatform')
 
 function Resolve-GangplankPurposeName {
     # The purpose name in its canonical spelling; anything else is returned trimmed.
