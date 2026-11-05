@@ -162,3 +162,269 @@ function Invoke-GangplankJobAiTest {
     Set-GangplankJobProgress $Shared 'Sending a short test message'
     return (Test-GangplankAiConnection -Token ([string]$Arguments.AiToken))
 }
+
+function Invoke-GangplankJobPullMany {
+    param($Shared,[hashtable]$Arguments)
+    $workRoot = [string]$Arguments.WorkRoot
+    if ([string]::IsNullOrWhiteSpace($workRoot)) { throw 'BAD_STATE|Workspace root is not set.' }
+    $projects = @($Arguments.Projects)
+    if ($projects.Count -lt 1) { throw 'BAD_REQUEST|Select at least one project to pull.' }
+    if ($projects.Count -gt 50) { throw 'BAD_REQUEST|Pull at most 50 projects at a time.' }
+
+    $results = New-Object System.Collections.Generic.List[object]
+    $lastSession = $null
+    $i = 0
+    foreach ($item in $projects) {
+        $i++
+        $url = [string]$item.Url
+        $branch = [string]$item.Branch
+        $pathHint = [string]$item.Path
+        if ([string]::IsNullOrWhiteSpace($url)) {
+            $results.Add([ordered]@{ ok = $false; path = $pathHint; url = $url; error = 'Missing URL' })
+            continue
+        }
+        Set-GangplankJobProgress $Shared ("Pulling $i of $($projects.Count): " + $(if ($pathHint) { $pathHint } else { $url }))
+        try {
+            Assert-GangplankTrustedRepositoryUrl -Url $url
+            $parsed = Parse-GangplankRepoUrl -Url $url
+            $hostName = ''
+            try { $hostName = ([uri]$parsed.BaseUrl).Host } catch { }
+            $siteKey = if ($parsed.Provider -eq 'GitHub') { 'GitHub' } elseif ($hostName) { $hostName } else { 'GitLab' }
+            $tokens = @(Get-GangplankCredentialsForSite -SiteKey $siteKey -TargetHost $hostName)
+            if ($tokens.Count -eq 0) {
+                $tokens = @((Resolve-GangplankCredential -Provider $siteKey -TargetHost $hostName).Value)
+            }
+            $session = $null
+            $lastErr = $null
+            foreach ($tok in $tokens) {
+                try {
+                    $session = Open-GangplankRepository -Url $url -Token $tok
+                    break
+                } catch {
+                    $lastErr = $_
+                }
+            }
+            if (-not $session) {
+                if ($lastErr) { throw $lastErr }
+                throw 'CREDENTIAL_MISSING|No usable token for this repository.'
+            }
+            if ([string]::IsNullOrWhiteSpace($branch)) { $branch = [string]$session.DefaultBranch }
+            if ([string]::IsNullOrWhiteSpace($branch)) { $branch = 'main' }
+            $siteLabel = if ($session.Provider -eq 'GitHub') { 'github.com' } elseif ($hostName) { $hostName } else { 'gitlab' }
+            $folder = Get-GangplankSafeWorkspacePath -Base $workRoot -Project $session.ProjectPath -Branch $branch -Site $siteLabel
+            $already = $false
+            if (Test-Path -LiteralPath $folder -PathType Container) {
+                if (@(Get-ChildItem -LiteralPath $folder -Force -ErrorAction SilentlyContinue).Count -gt 0) {
+                    $already = $true
+                }
+            }
+            if ($already) {
+                $session.LocalPath = [IO.Path]::GetFullPath($folder)
+                $session.LastBranch = $branch
+                $lastSession = $session
+                $results.Add([ordered]@{
+                    ok           = $true
+                    alreadyLocal = $true
+                    path         = $session.ProjectPath
+                    branch       = $branch
+                    folder       = $session.LocalPath
+                    sha          = $session.BaselineSha
+                    provider     = $session.Provider
+                    url          = $url
+                    note         = 'Already present under the workspace root (not re-downloaded).'
+                })
+            } else {
+                [void](Invoke-GangplankPull -Session $session -Branch $branch -LocalPath $folder)
+                $lastSession = $session
+                $results.Add([ordered]@{
+                    ok           = $true
+                    alreadyLocal = $false
+                    path         = $session.ProjectPath
+                    branch       = $branch
+                    folder       = $session.LocalPath
+                    sha          = $session.BaselineSha
+                    provider     = $session.Provider
+                    url          = $url
+                })
+            }
+        } catch {
+            $msg = Get-GangplankSafeErrorMessage ([string]$_.Exception.Message)
+            $results.Add([ordered]@{ ok = $false; path = $pathHint; url = $url; branch = $branch; error = $msg })
+        }
+    }
+    $ok = @($results | Where-Object { $_.ok })
+    $fail = @($results | Where-Object { -not $_.ok })
+    Set-GangplankJobProgress $Shared ("Pulled $($ok.Count) of $($projects.Count) project(s)")
+    $payload = [ordered]@{
+        results = @($results)
+        pulled  = $ok.Count
+        failed  = $fail.Count
+        folders = @($ok | ForEach-Object { $_.folder })
+    }
+    if ($lastSession) {
+        $payload.Session = (ConvertTo-GangplankSessionSnapshot $lastSession)
+        $payload.Folder  = $lastSession.LocalPath
+        $payload.Branch  = $lastSession.LastBranch
+        $payload.Sha     = $lastSession.BaselineSha
+    }
+    return $payload
+}
+
+function Invoke-GangplankJobListBranchesMany {
+    param($Shared,[hashtable]$Arguments)
+    $kind = [string]$Arguments.Provider
+    if ($kind -ne 'GitHub') { $kind = 'GitLab' }
+    $hostName = [string]$Arguments.HostName
+    $base = [string]$Arguments.BaseUrl
+    if (-not $base) {
+        if ($kind -eq 'GitHub') { $base = 'https://github.com' }
+        else {
+            $h = if ($hostName) { $hostName } else { Get-GangplankGitLabHost }
+            if (-not $h) { throw 'BAD_REQUEST|GitLab host is required.' }
+            $base = "https://$h"
+        }
+    }
+    $tokenList = New-Object System.Collections.Generic.List[string]
+    if ($Arguments.ContainsKey('Tokens') -and $null -ne $Arguments.Tokens) {
+        foreach ($t in @($Arguments.Tokens)) {
+            $s = [string]$t
+            if (-not [string]::IsNullOrWhiteSpace($s) -and $s.Length -ge 8) { [void]$tokenList.Add($s) }
+        }
+    }
+    if ($tokenList.Count -eq 0 -and $Arguments.ContainsKey('Token')) {
+        $s = [string]$Arguments.Token
+        if ($s) { [void]$tokenList.Add($s) }
+    }
+    if ($tokenList.Count -eq 0) { throw 'CREDENTIAL_MISSING|No token available to list branches.' }
+
+    $projects = @($Arguments.Projects)
+    if ($projects.Count -lt 1) { throw 'BAD_REQUEST|No projects provided.' }
+    if ($projects.Count -gt 100) { $projects = $projects[0..99] }
+
+    $map = [ordered]@{}
+    $ok = 0
+    $fail = 0
+    $i = 0
+    foreach ($item in $projects) {
+        $i++
+        $path = ''
+        if ($item -is [string]) { $path = [string]$item }
+        elseif ($item.path) { $path = [string]$item.path }
+        elseif ($item.Path) { $path = [string]$item.Path }
+        if (-not $path) { continue }
+        Set-GangplankJobProgress $Shared ("Branches $i of $($projects.Count): $path")
+        $got = $null
+        $lastErr = $null
+        foreach ($tok in $tokenList) {
+            try {
+                $got = Get-GangplankProjectBranchList -Provider $kind -ProjectPath $path -Token $tok -BaseUrl $base
+                if (@($got.branches).Count -gt 0) { break }
+            } catch {
+                $lastErr = $_
+                $got = $null
+            }
+        }
+        if ($got) {
+            $ok++
+            $map[$path] = [ordered]@{
+                path          = $path
+                branches      = @($got.branches)
+                defaultBranch = [string]$got.defaultBranch
+                ok            = $true
+            }
+        } else {
+            $fail++
+            $msg = if ($lastErr) { Get-GangplankSafeErrorMessage ([string]$lastErr.Exception.Message) } else { 'No branches returned' }
+            $map[$path] = [ordered]@{
+                path          = $path
+                branches      = @()
+                defaultBranch = ''
+                ok            = $false
+                error         = $msg
+            }
+        }
+    }
+    Set-GangplankJobProgress $Shared ("Branches loaded for $ok of $($projects.Count)")
+    return [ordered]@{
+        provider = $kind
+        host     = $hostName
+        count    = $projects.Count
+        ok       = $ok
+        failed   = $fail
+        results  = @($map.Values)
+        byPath   = $map
+    }
+}
+
+function Invoke-GangplankJobListProjects {
+    param($Shared,[hashtable]$Arguments)
+    $site = [string]$Arguments.Provider
+    $hostName = [string]$Arguments.HostName
+    if (-not $hostName -and $site -ne 'GitHub' -and $site -ne 'GitLab') { $hostName = $site }
+    $label = if ($hostName) { $hostName } else { $site }
+    Set-GangplankJobProgress $Shared "Listing writable $label projects"
+    $kind = if ($site -eq 'GitHub') { 'GitHub' } else { 'GitLab' }
+    # Flatten Tokens to a real string[] (never enumerate a single string as chars).
+    $tokenList = New-Object System.Collections.Generic.List[string]
+    if ($Arguments.ContainsKey('Tokens') -and $null -ne $Arguments.Tokens) {
+        foreach ($t in @($Arguments.Tokens)) {
+            $s = [string]$t
+            if (-not [string]::IsNullOrWhiteSpace($s) -and $s.Length -ge 8) { [void]$tokenList.Add($s) }
+        }
+    }
+    if ($tokenList.Count -eq 0 -and $Arguments.ContainsKey('Token') -and $Arguments.Token) {
+        $s = [string]$Arguments.Token
+        if (-not [string]::IsNullOrWhiteSpace($s)) { [void]$tokenList.Add($s) }
+    }
+    if ($tokenList.Count -eq 0) { throw 'CREDENTIAL_MISSING|No token available to list projects.' }
+    $merged = @{}
+    for ($tokenIndex = 0; $tokenIndex -lt $tokenList.Count; $tokenIndex++) {
+        $tok = $tokenList[$tokenIndex]
+        Set-GangplankJobProgress $Shared ("Listing $label with token " + ($tokenIndex + 1) + " of " + $tokenList.Count)
+        try {
+            $batch = @(Get-GangplankWritableProjects -Provider $kind -Token $tok -HostName $hostName)
+        } catch {
+            Write-GangplankLog -Level WARN -Message "List projects with token $($tokenIndex + 1) failed: $($_.Exception.Message)"
+            continue
+        }
+        foreach ($proj in @($batch)) {
+            if ($null -eq $proj) { continue }
+            $path = [string]$proj.path
+            if (-not $path) { continue }
+            if (-not $merged.ContainsKey($path)) {
+                $merged[$path] = $proj
+                continue
+            }
+            $cur = $merged[$path]
+            $curDesc = if ($cur.description) { [string]$cur.description } else { '' }
+            $newDesc = if ($proj.description) { [string]$proj.description } else { '' }
+            if ($newDesc.Length -gt $curDesc.Length) { $cur.description = $proj.description }
+            if ((-not $cur.defaultBranch) -and $proj.defaultBranch) { $cur.defaultBranch = $proj.defaultBranch }
+            if ($proj.visibility -and ((-not $cur.visibility) -or $cur.visibility -eq 'public')) { $cur.visibility = $proj.visibility }
+            $merged[$path] = $cur
+        }
+    }
+    $items = @($merged.Values | Sort-Object { [string]$_.path })
+    Set-GangplankJobProgress $Shared "Found $($items.Count) writable project(s) across $($tokenList.Count) token(s)"
+    return [ordered]@{ provider = $kind; site = $(if ($hostName) { $hostName } else { $site }); projects = $items; count = $items.Count; tokensTried = $tokenList.Count }
+}
+
+function Invoke-GangplankJobSync {
+    param($Shared,[hashtable]$Arguments)
+    $progress = { param($m) Set-GangplankJobProgress $Shared $m }.GetNewClosure()
+    return (Invoke-GangplankSyncTransfer `
+        -SourceProvider ([string]$Arguments.SourceProvider) `
+        -SourceProject ([string]$Arguments.SourceProject) `
+        -SourceBranch ([string]$Arguments.SourceBranch) `
+        -SourceToken ([string]$Arguments.SourceToken) `
+        -SourceBaseUrl ([string]$Arguments.SourceBaseUrl) `
+        -TargetProvider ([string]$Arguments.TargetProvider) `
+        -TargetProject ([string]$Arguments.TargetProject) `
+        -TargetBranch ([string]$Arguments.TargetBranch) `
+        -TargetToken ([string]$Arguments.TargetToken) `
+        -TargetBaseUrl ([string]$Arguments.TargetBaseUrl) `
+        -Message ([string]$Arguments.Message) `
+        -CreateTargetBranch:([bool]$Arguments.CreateTargetBranch) `
+        -TargetBaseBranch ([string]$Arguments.TargetBaseBranch) `
+        -Progress $progress)
+}

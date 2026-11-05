@@ -23,6 +23,7 @@ if (-not $script:GangplankRoot) {
 . (Join-Path $script:GangplankRoot "Core\Diff.ps1")
 . (Join-Path $script:GangplankRoot "Core\SmartSave.ps1")
 . (Join-Path $script:GangplankRoot "Core\Workspace.ps1")
+. (Join-Path $script:GangplankRoot "Core\Projects.ps1")
 . (Join-Path $script:GangplankRoot "Core\GetLatest.ps1")
 . (Join-Path $script:GangplankRoot "Core\Revert.ps1")
 . (Join-Path $script:GangplankRoot "Core\Sentinel.ps1")
@@ -278,6 +279,11 @@ Export-ModuleMember -Function @(
     "Get-GangplankLazaretteCredential",
     "Resolve-GangplankCredential",
     "Get-GangplankCredentialStatus",
+    "Get-GangplankTokenMetadata",
+    "Get-GangplankWritableProjects",
+    "Get-GangplankProjectBranchList",
+    "New-GangplankEphemeralSession",
+    "Invoke-GangplankSyncTransfer",
     "Set-GangplankStoredCredential",
     "Remove-GangplankStoredCredential",
     "Get-GangplankStoredCredential",

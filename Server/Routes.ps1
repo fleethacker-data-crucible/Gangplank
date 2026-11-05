@@ -165,6 +165,24 @@ $script:GangplankOnSessionJob = {
         saved = $(if ($Result.ContainsKey('Saved')) { $Result.Saved } else { $null })
     }
 }
+$script:GangplankOnPullManyJob = {
+    param($Result,$Context)
+    # Apply the last successful session (if any) so Smart Save still has a live project.
+    if ($Result -and $Result.Session -and ($Context.Generation -eq $script:GangplankApp.Generation -or $Context.Kind -eq 'pull-many')) {
+        try { Set-GangplankAppSession -Snapshot $Result.Session -Token $Context.Token } catch { }
+    }
+    return [ordered]@{
+        results = @($Result.results)
+        pulled  = [int]$Result.pulled
+        failed  = [int]$Result.failed
+        folders = @($Result.folders)
+        project = $(if ($script:GangplankApp.Session) { $script:GangplankApp.Session.ProjectPath } else { '' })
+        provider= $(if ($script:GangplankApp.Session) { $script:GangplankApp.Session.Provider } else { '' })
+        branch  = $(if ($script:GangplankApp.Session -and $script:GangplankApp.Session.LastBranch) { $script:GangplankApp.Session.LastBranch } elseif ($script:GangplankApp.Session) { $script:GangplankApp.Session.DefaultBranch } else { '' })
+        workspace = $(if ($script:GangplankApp.Session) { $script:GangplankApp.Session.LocalPath } else { '' })
+        folder  = $(if ($Result.Folder) { $Result.Folder } elseif ($script:GangplankApp.Session) { $script:GangplankApp.Session.LocalPath } else { '' })
+    }
+}
 $script:GangplankOnLatestJob = {
     param($Result,$Context)
     if ($Context.Generation -ne $script:GangplankApp.Generation) {
@@ -266,7 +284,151 @@ function Invoke-GangplankRouteCore {
 
     # ---- credentials and Lazarette -------------------------------------------------
     if ($m -eq 'GET' -and $p -eq '/api/integrations') {
-        Send-GangplankJson -Object (Get-GangplankCredentialStatus)
+        $probe = $false
+        try { $probe = ([string](Get-GangplankQueryValue $Req.Query 'probe') -eq '1') } catch { }
+        Send-GangplankJson -Object (Get-GangplankCredentialStatus -ProbeExpiry:$probe)
+        return
+    }
+    if ($m -eq 'GET' -and $p -eq '/api/projects') {
+        $provider = [string](Get-GangplankQueryValue $Req.Query 'provider')
+        $hostName = [string](Get-GangplankQueryValue $Req.Query 'host')
+        if (-not $provider) { throw 'BAD_REQUEST|provider or site is required.' }
+        $siteKey = if ($provider -eq 'GitHub') { 'GitHub' } elseif ($hostName) { $hostName } elseif ($provider -eq 'GitLab') { 'GitLab' } else { $provider }
+        $tokenArr = [string[]](@(Get-GangplankCredentialsForSite -SiteKey $siteKey -TargetHost $hostName) | ForEach-Object { [string]$_ } | Where-Object { $_ })
+        if (-not $tokenArr -or $tokenArr.Count -eq 0) {
+            $one = [string](Resolve-GangplankCredential -Provider $siteKey -TargetHost $hostName).Value
+            $tokenArr = [string[]]@($one)
+        }
+        $id = Start-GangplankJob -Kind 'list-projects' -Group 'catalog' -Function 'Invoke-GangplankJobListProjects' -Arguments @{
+            Provider = $siteKey
+            HostName = $(if ($hostName) { $hostName } elseif ($siteKey -ne 'GitHub' -and $siteKey -ne 'GitLab') { $siteKey } else { '' })
+            Token    = [string]$tokenArr[0]
+            Tokens   = $tokenArr
+        } -Context (Get-GangplankJobContext -Token ([string]$tokenArr[0]) -Kind 'list-projects')
+        Send-GangplankJobStarted $id
+        return
+    }
+    if ($m -eq 'POST' -and $p -eq '/api/project-branches-batch') {
+        $provider = [string](Get-GangplankBodyValue $Req 'provider')
+        $hostName = [string](Get-GangplankBodyValue $Req 'host')
+        $raw = Get-GangplankBodyValue $Req 'projects'
+        if ([string]::IsNullOrWhiteSpace($provider)) { throw 'BAD_REQUEST|provider is required.' }
+        $list = @()
+        if ($null -ne $raw) {
+            if ($raw -is [System.Collections.IEnumerable] -and -not ($raw -is [string])) { $list = @($raw) }
+            else { $list = @($raw) }
+        }
+        if ($list.Count -lt 1) { throw 'BAD_REQUEST|projects are required.' }
+        $paths = @()
+        foreach ($item in $list) {
+            $path = ''
+            if ($item -is [string]) { $path = [string]$item }
+            elseif ($item.path) { $path = [string]$item.path }
+            elseif ($item.Path) { $path = [string]$item.Path }
+            $path = $path.Trim()
+            if (-not $path -or $path.Length -gt 300) { continue }
+            $paths += $path
+        }
+        if ($paths.Count -lt 1) { throw 'BAD_REQUEST|No valid project paths.' }
+        if ($paths.Count -gt 100) { $paths = $paths[0..99] }
+        $siteKey = if ($provider -eq 'GitHub') { 'GitHub' } elseif ($hostName) { $hostName } elseif ($provider -eq 'GitLab') { 'GitLab' } else { $provider }
+        $kind = if ($siteKey -eq 'GitHub') { 'GitHub' } else { 'GitLab' }
+        $base = ''
+        if ($kind -eq 'GitHub') { $base = 'https://github.com' }
+        else {
+            $h = if ($hostName) { $hostName } elseif ($siteKey -ne 'GitLab') { $siteKey } else { Get-GangplankGitLabHost }
+            if (-not $h) { throw 'BAD_REQUEST|GitLab host is required.' }
+            $base = "https://$h"
+        }
+        $tokenArr = [string[]](@(Get-GangplankCredentialsForSite -SiteKey $siteKey -TargetHost $hostName) | ForEach-Object { [string]$_ } | Where-Object { $_ })
+        if (-not $tokenArr -or $tokenArr.Count -eq 0) {
+            $one = [string](Resolve-GangplankCredential -Provider $siteKey -TargetHost $hostName).Value
+            $tokenArr = [string[]]@($one)
+        }
+        $id = Start-GangplankJob -Kind 'list-branches' -Group 'catalog' -Function 'Invoke-GangplankJobListBranchesMany' -Arguments @{
+            Provider = $kind
+            HostName = $(if ($hostName) { $hostName } else { '' })
+            BaseUrl  = $base
+            Token    = [string]$tokenArr[0]
+            Tokens   = $tokenArr
+            Projects = @($paths)
+        } -Context (Get-GangplankJobContext -Token ([string]$tokenArr[0]) -Kind 'list-branches')
+        Send-GangplankJobStarted $id
+        return
+    }
+    if ($m -eq 'GET' -and $p -eq '/api/project-branches') {
+        $provider = [string](Get-GangplankQueryValue $Req.Query 'provider')
+        $project = [string](Get-GangplankQueryValue $Req.Query 'project')
+        $hostName = [string](Get-GangplankQueryValue $Req.Query 'host')
+        if ([string]::IsNullOrWhiteSpace($provider)) { throw 'BAD_REQUEST|provider is required.' }
+        if ([string]::IsNullOrWhiteSpace($project) -or $project.Length -gt 300) { throw 'BAD_REQUEST|project path is required.' }
+        $siteKey = if ($provider -eq 'GitHub') { 'GitHub' } elseif ($hostName) { $hostName } elseif ($provider -eq 'GitLab') { 'GitLab' } else { $provider }
+        $kind = if ($siteKey -eq 'GitHub') { 'GitHub' } else { 'GitLab' }
+        if ($kind -eq 'GitHub') { $base = 'https://github.com' }
+        else {
+            $h = if ($hostName) { $hostName } elseif ($siteKey -ne 'GitLab') { $siteKey } else { Get-GangplankGitLabHost }
+            if (-not $h) { throw 'BAD_REQUEST|GitLab host is required.' }
+            $base = "https://$h"
+        }
+        $tokens = @(Get-GangplankCredentialsForSite -SiteKey $siteKey -TargetHost $hostName)
+        if ($tokens.Count -eq 0) {
+            $tokens = @((Resolve-GangplankCredential -Provider $siteKey -TargetHost $hostName).Value)
+        }
+        $best = $null
+        $lastErr = $null
+        foreach ($tok in $tokens) {
+            try {
+                $result = Get-GangplankProjectBranchList -Provider $kind -ProjectPath $project -Token $tok -BaseUrl $base
+                $count = @($result.branches).Count
+                if ($count -gt 0) {
+                    # First usable token wins — trying every token multiplies latency for large catalogs.
+                    $best = $result
+                    break
+                }
+                if (-not $best) { $best = $result }
+            } catch {
+                $lastErr = $_
+            }
+        }
+        if (-not $best) {
+            if ($lastErr) { throw $lastErr }
+            throw 'GIT_ERROR|Could not list branches with any configured token for this site.'
+        }
+        Send-GangplankJson -Object $best
+        return
+    }
+    if ($m -eq 'POST' -and $p -eq '/api/sync') {
+        $srcProvider = [string](Get-GangplankBodyValue $Req 'sourceProvider')
+        $srcProject  = [string](Get-GangplankBodyValue $Req 'sourceProject')
+        $srcBranch   = [string](Get-GangplankBodyValue $Req 'sourceBranch')
+        $dstProvider = [string](Get-GangplankBodyValue $Req 'targetProvider')
+        $dstProject  = [string](Get-GangplankBodyValue $Req 'targetProject')
+        $dstBranch   = [string](Get-GangplankBodyValue $Req 'targetBranch')
+        $message     = [string](Get-GangplankBodyValue $Req 'message')
+        $createBranch = ((Get-GangplankBodyValue $Req 'createTargetBranch') -eq $true)
+        $baseBranch  = [string](Get-GangplankBodyValue $Req 'targetBaseBranch')
+        if ($srcProvider -notin @('GitHub','GitLab') -or $dstProvider -notin @('GitHub','GitLab')) {
+            throw 'BAD_REQUEST|sourceProvider and targetProvider must be GitHub or GitLab.'
+        }
+        if ([string]::IsNullOrWhiteSpace($srcProject) -or [string]::IsNullOrWhiteSpace($dstProject)) {
+            throw 'BAD_REQUEST|sourceProject and targetProject are required.'
+        }
+        if ([string]::IsNullOrWhiteSpace($srcBranch) -or [string]::IsNullOrWhiteSpace($dstBranch)) {
+            throw 'BAD_REQUEST|sourceBranch and targetBranch are required.'
+        }
+        # Source may be any readable project (token just needs read). Target needs write.
+        $srcToken = (Resolve-GangplankCredential -Provider $srcProvider).Value
+        $dstToken = (Resolve-GangplankCredential -Provider $dstProvider).Value
+        $srcBase = if ($srcProvider -eq 'GitLab') { "https://$(Get-GangplankGitLabHost)" } else { 'https://github.com' }
+        $dstBase = if ($dstProvider -eq 'GitLab') { "https://$(Get-GangplankGitLabHost)" } else { 'https://github.com' }
+        $id = Start-GangplankJob -Kind 'sync' -Group 'workspace' -Function 'Invoke-GangplankJobSync' -Arguments @{
+            SourceProvider = $srcProvider; SourceProject = $srcProject; SourceBranch = $srcBranch
+            SourceToken = $srcToken; SourceBaseUrl = $srcBase
+            TargetProvider = $dstProvider; TargetProject = $dstProject; TargetBranch = $dstBranch
+            TargetToken = $dstToken; TargetBaseUrl = $dstBase
+            Message = $message; CreateTargetBranch = $createBranch; TargetBaseBranch = $baseBranch
+        } -Context (Get-GangplankJobContext -Token $dstToken -Kind 'sync')
+        Send-GangplankJobStarted $id
         return
     }
     if ($m -eq 'GET' -and $p -eq '/api/settings') {
@@ -287,17 +449,27 @@ function Invoke-GangplankRouteCore {
     }
     if ($m -eq 'POST' -and $p -eq '/api/credentials') {
         $provider = [string](Get-GangplankBodyValue $Req 'provider')
+        $site = [string](Get-GangplankBodyValue $Req 'site')
         $token = [string](Get-GangplankBodyValue $Req 'token')
+        if ($site) {
+            $key = ConvertTo-GangplankCredentialSiteKey $site
+            if (-not $key) { $key = $site.Trim() }
+            $provider = $key
+        }
+        if (-not $provider) { throw 'BAD_REQUEST|provider or site is required.' }
         [void](Set-GangplankStoredCredential -Provider $provider -Token $token)
         $token = $null
-        Update-GangplankSessionCredential -Provider $provider
+        try { Update-GangplankSessionCredential -Provider $(if ($provider -eq 'GitHub') { 'GitHub' } else { 'GitLab' }) } catch { }
         Send-GangplankJson -Object (Get-GangplankCredentialStatus)
         return
     }
     if ($m -eq 'POST' -and $p -eq '/api/credentials/remove') {
         $provider = [string](Get-GangplankBodyValue $Req 'provider')
+        $site = [string](Get-GangplankBodyValue $Req 'site')
+        if ($site) { $provider = (ConvertTo-GangplankCredentialSiteKey $site); if (-not $provider) { $provider = $site.Trim() } }
+        if (-not $provider) { throw 'BAD_REQUEST|provider or site is required.' }
         [void](Remove-GangplankStoredCredential -Provider $provider)
-        Update-GangplankSessionCredential -Provider $provider
+        try { Update-GangplankSessionCredential -Provider $(if ($provider -eq 'GitHub') { 'GitHub' } else { 'GitLab' }) } catch { }
         Send-GangplankJson -Object (Get-GangplankCredentialStatus)
         return
     }
@@ -328,6 +500,46 @@ function Invoke-GangplankRouteCore {
     }
 
     # ---- project and workspace ----------------------------------------------
+    if ($m -eq 'POST' -and $p -eq '/api/pull') {
+        $raw = Get-GangplankBodyValue $Req 'projects'
+        $list = @()
+        if ($null -ne $raw) {
+            if ($raw -is [System.Collections.IEnumerable] -and -not ($raw -is [string])) { $list = @($raw) }
+            else { $list = @($raw) }
+        }
+        if ($list.Count -lt 1) { throw 'BAD_REQUEST|Select one or more projects to pull.' }
+        if ($list.Count -gt 50) { throw 'BAD_REQUEST|Pull at most 50 projects at a time.' }
+        $projects = @()
+        foreach ($item in $list) {
+            $url = ''
+            $branch = ''
+            $path = ''
+            try {
+                if ($item -is [hashtable] -or $item.PSObject) {
+                    $url = [string](Get-GangplankBodyValue @{ url = $item.url; branch = $item.branch; path = $item.path } 'url')
+                    # Body items are objects from JSON
+                    if ($item.url) { $url = [string]$item.url }
+                    if ($item.branch) { $branch = [string]$item.branch }
+                    if ($item.path) { $path = [string]$item.path }
+                }
+            } catch { }
+            if ([string]::IsNullOrWhiteSpace($url)) { continue }
+            if ($url.Length -gt 500) { throw 'BAD_REQUEST|A project URL is too long.' }
+            if ($branch.Length -gt 200 -or $branch -match '[ -]') { throw 'BAD_REQUEST|A branch name is not valid.' }
+            $projects += @{ Url = $url.Trim(); Branch = $branch.Trim(); Path = $path.Trim() }
+        }
+        if ($projects.Count -lt 1) { throw 'BAD_REQUEST|Select one or more projects with a URL to pull.' }
+        $token = ''
+        try { $token = (Resolve-GangplankCredential -Provider 'GitHub').Value } catch {
+            try { $token = (Resolve-GangplankCredential -Provider 'GitLab').Value } catch { $token = 'multi' }
+        }
+        $id = Start-GangplankJob -Kind 'pull-many' -Group 'workspace' -Function 'Invoke-GangplankJobPullMany' -Arguments @{
+            Projects = $projects
+            WorkRoot = $script:GangplankApp.WorkRoot
+        } -OnComplete $script:GangplankOnPullManyJob -Context (Get-GangplankJobContext -Token $token -Kind 'pull-many')
+        Send-GangplankJobStarted $id
+        return
+    }
     if ($m -eq 'POST' -and $p -eq '/api/connect') {
         $url = [string](Get-GangplankBodyValue $Req 'url')
         if (-not $url -or $url.Length -gt 500) { throw 'BAD_REQUEST|Enter a valid GitHub or GitLab project URL.' }
