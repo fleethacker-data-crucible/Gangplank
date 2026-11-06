@@ -52,7 +52,7 @@ while ($true) {
     Show-Session $session
 
     $opts = @(
-        "Open project (paste GitLab or GitHub URL)",
+        "Open project (GitHub repository, organization, or profile, or GitLab URL)",
         "Get latest files (download branch snapshot)",
         "Smart Save (automatic message, safe changed files)",
         "Create review request (GitHub / GitLab)",
@@ -69,11 +69,43 @@ while ($true) {
     try {
         switch ($choice) {
             0 {
-                Write-Host "Paste full browser URL (blank = cancel):" -ForegroundColor Cyan
+                Write-Host "Paste a repository URL, or a GitHub organization or profile URL (blank = cancel):" -ForegroundColor Cyan
                 $url = Read-Host
                 if ([string]::IsNullOrWhiteSpace($url)) { continue }
+                $url = $url.Trim()
+                $target = Resolve-GangplankConnectTarget -Url $url
+                if ($target.Mode -ne 'repository') {
+                    Write-Host "Loading repositories..." -ForegroundColor DarkGray
+                    $catalog = Get-GangplankGitHubRepositoryCatalog -Url $url
+                    $repos = @($catalog.repositories)
+                    if ($repos.Count -eq 0) {
+                        Write-Host "No public repositories were listed." -ForegroundColor Yellow
+                        Wait-GangplankEnter
+                        continue
+                    }
+                    Write-Host ("{0} repositories for {1} ({2})." -f $repos.Count, $catalog.name, $catalog.kind) -ForegroundColor Green
+                    if ($catalog.anonymous) {
+                        Write-Host "No token is configured. Public repositories do not require one. A token is optional and raises GitHub's rate limit." -ForegroundColor DarkGray
+                    }
+                    $n = 0
+                    foreach ($r in $repos) {
+                        $n++
+                        $mark = ''
+                        if ($r.private) { $mark = ' (private)' }
+                        Write-Host ("{0}. {1}{2}" -f $n, $r.fullName, $mark)
+                    }
+                    $pick = Read-Host "Repository number (blank = cancel)"
+                    if ([string]::IsNullOrWhiteSpace($pick)) { continue }
+                    $index = 0
+                    if (-not [int]::TryParse($pick.Trim(),[ref]$index) -or $index -lt 1 -or $index -gt $repos.Count) {
+                        Write-Host "That number is not in the list." -ForegroundColor Yellow
+                        Wait-GangplankEnter
+                        continue
+                    }
+                    $url = [string]$repos[$index - 1].url
+                }
                 Write-Host "Connecting..." -ForegroundColor DarkGray
-                $session = Open-GangplankRepository -Url $url.Trim()
+                $session = Open-GangplankRepository -Url $url
                 Show-Session $session
                 if ($session.Branches.Count -eq 0) {
                     Write-Host "This repository has no branches yet. First-commit workflow is not supported in Smart Save." -ForegroundColor Yellow

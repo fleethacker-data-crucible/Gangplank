@@ -42,7 +42,7 @@ Double-click **Launch-Gangplank.bat**. Gangplank starts a local server on `http:
 **Runtime files.** While it runs, the host writes `Logs\gangplank-server-<pid>.json` (pid, port, url, start time, saved-session folder; never the launch link, cookie or client secret) and deletes it when it stops. The launcher and `Stop-Gangplank.ps1` read these files and delete stale ones whose process has gone.
 
 ## Connect → Start → Edit → Smart Save
-1. Add a token in **Credentials** (or set an environment variable), paste a GitHub or GitLab project URL and connect.
+1. Paste a GitHub or GitLab URL and connect. A public GitHub repository, organization, or user profile loads without a personal access token, including repositories spread across multiple result pages. GitLab, private repositories, and publishing still need a token in **Credentials** (or `GITHUB_TOKEN` / `GITLAB_TOKEN`).
 2. Optionally name your branch (for example `dummy-dev`), then **Start my safe workspace**. Gangplank creates that branch from the default branch and downloads it to `%USERPROFILE%\Gangplank\<repository>\<branch>`, like a normal clone (change the folder in **Settings**). Existing folders are never overwritten. To just look at an existing branch, use **Explore this branch**.
 3. Edit files with your normal tools.
 4. In **Smart Save**, refresh and choose which added or modified files to publish. Deletions start unselected; likely secrets and files over 5 MB are blocked.
@@ -58,6 +58,8 @@ Gangplank looks for a token in this order:
 1. **Environment:** `GITHUB_TOKEN` or `GITLAB_TOKEN`.
 2. **Saved in Gangplank:** paste a token once in **Credentials**. It is sealed with Windows DPAPI for your Windows account in `%LOCALAPPDATA%\Gangplank\credentials.json`, never shown again and never sent back to the browser. Remove it there at any time.
 3. **Lazarette**, only if you turn it on (below).
+
+A GitHub token is optional for public repository, organization, and profile browsing. GitHub allows a small number of anonymous requests per hour; if that limit is reached, Gangplank explains it and you can wait or add an optional token. Private repositories and every publish still require a token.
 
 Only HTTPS github.com, your organization's GitLab host (`GANGPLANK_GITLAB_HOST`, or `GitLabHost` in `config\gangplank-config.json`; none by default) and administrator-approved `GANGPLANK_GITLAB_ALLOWED_HOSTS` are accepted for repositories. Provider errors are reported as codes (`AUTH_REJECTED`, `FORBIDDEN`, `NOT_FOUND`, `RATE_LIMITED`...); response bodies stay in the local log.
 
@@ -103,7 +105,7 @@ Every remote write (branch, commit, review request) and every credential or Laza
 
 Gangplank runs on this PC and serves its page on `127.0.0.1` only. Data leaves the machine only where you set it up:
 
-- **Your Git host.** Downloads and saves go to and from github.com or your allowlisted GitLab host, using your token.
+- **Your Git host.** Public GitHub reads can be anonymous. Private access, GitLab, and saves use your token and go to github.com or your allowlisted GitLab host.
 - **The AI model.** An AI request sends your question and the project content it includes to the configured endpoint. The default is the Fleet router on this PC, and Gangplank asks it to keep every request on local models, so nothing leaves; if you point Gangplank at a cloud or organization endpoint, that provider's terms and your organization's AI policy apply.
 
 Tokens are sealed with DPAPI for your Windows account and never sent to the browser. The audit log records what changed and where, never file contents or tokens. Gangplank sends no usage data anywhere.

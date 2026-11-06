@@ -13,6 +13,13 @@ function Invoke-GangplankJobConnect {
     return @{ Session = (ConvertTo-GangplankSessionSnapshot $session) }
 }
 
+function Invoke-GangplankJobCatalog {
+    param($Shared,[hashtable]$Arguments)
+    Set-GangplankJobProgress $Shared 'Loading repositories'
+    $catalog = Get-GangplankGitHubRepositoryCatalog -Url ([string]$Arguments.Url) -Token ([string]$Arguments.Token)
+    return @{ Catalog = $catalog }
+}
+
 function Invoke-GangplankJobStart {
     param($Shared,[hashtable]$Arguments)
     $session = New-GangplankSessionFromSnapshot -Snapshot $Arguments.Session -Token $Arguments.Token

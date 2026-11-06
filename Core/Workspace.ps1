@@ -14,7 +14,9 @@ function Assert-GangplankTrustedRepositoryUrl {
     if ($uri.Host.ToLowerInvariant() -notin $hosts) {
         throw 'Repository host not allowlisted. Ask an administrator to set GANGPLANK_GITLAB_HOST (or GANGPLANK_GITLAB_ALLOWED_HOSTS) for approved self-hosted GitLab.'
     }
-    if ($uri.Host -eq 'github.com' -and @($uri.AbsolutePath.Trim('/') -split '/').Count -lt 2) { throw 'GitHub project URL needs an owner and repository.' }
+    # One path segment is a GitHub organization or user profile. A repository URL
+    # still has an owner and a name; that is checked when the project is opened.
+    if ($uri.Host -eq 'github.com' -and [string]::IsNullOrWhiteSpace($uri.AbsolutePath.Trim('/'))) { throw 'GitHub URL needs an organization, a user, or a repository.' }
     if ($uri.AbsolutePath.Trim('/') -eq '') { throw 'Repository path is missing.' }
 }
 # All writes are restricted to changed, explicitly selected files.
@@ -48,6 +50,7 @@ function ConvertTo-GangplankBranchName {
 function New-GangplankWorkBranch {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session,[string]$Name)
+    Assert-GangplankWriteCredential -Session $Session -Action 'Creating a branch'
     $base = $Session.DefaultBranch
     $head = Get-GangplankRemoteHead -Session $Session -Branch $base
     if (-not $head) { throw 'The default branch has no commit. Initialize this repository through the provider first.' }
@@ -164,6 +167,7 @@ function Invoke-GangplankWorkspaceSave {
         [switch]$PublicConfirmed,
         [hashtable]$Acknowledgements = @{}
     )
+    Assert-GangplankWriteCredential -Session $Session -Action 'Publishing'
     $preview = Get-GangplankWorkspacePreview -Session $Session
     if ($preview.RemoteChanged) { throw 'The project changed online. No files were uploaded. Download a fresh workspace and reconcile your edits.' }
     $available = @{}

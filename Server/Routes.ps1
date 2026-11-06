@@ -46,7 +46,9 @@ function Get-GangplankLiveSession {
     param([switch]$Required)
     if (-not $script:GangplankApp.Session -and $script:GangplankApp.Restored) {
         try {
-            $token = (Resolve-GangplankCredential -Provider $script:GangplankApp.Restored.Provider -TargetHost (Get-GangplankSnapshotHost $script:GangplankApp.Restored)).Value
+            # GitHub with no token comes back anonymous so a public session can continue.
+            # GitLab and Lazarette errors still leave the session waiting.
+            $token = Get-GangplankOptionalProviderToken -Provider $script:GangplankApp.Restored.Provider -TargetHost (Get-GangplankSnapshotHost $script:GangplankApp.Restored)
             $script:GangplankApp.Session = New-GangplankSessionFromSnapshot -Snapshot $script:GangplankApp.Restored -Token $token
             $script:GangplankApp.Restored = $null
         } catch {
@@ -63,7 +65,7 @@ function Set-GangplankAppSession {
         $script:GangplankApp.Session = $null
         $script:GangplankApp.Restored = $null
     } else {
-        if (-not $Token) { $Token = (Resolve-GangplankCredential -Provider $Snapshot.Provider -TargetHost (Get-GangplankSnapshotHost $Snapshot)).Value }
+        if ([string]::IsNullOrWhiteSpace($Token)) { $Token = Get-GangplankOptionalProviderToken -Provider $Snapshot.Provider -TargetHost (Get-GangplankSnapshotHost $Snapshot) }
         $script:GangplankApp.Session = New-GangplankSessionFromSnapshot -Snapshot $Snapshot -Token $Token
         $script:GangplankApp.Restored = $null
     }
@@ -78,7 +80,7 @@ function Update-GangplankSessionCredential {
     $s = $script:GangplankApp.Session
     if (-not $s -or $s.Provider -ne $Provider) { return }
     try {
-        $token = (Resolve-GangplankCredential -Provider $Provider -TargetHost (Get-GangplankSnapshotHost (ConvertTo-GangplankSessionSnapshot $s))).Value
+        $token = Get-GangplankOptionalProviderToken -Provider $Provider -TargetHost (Get-GangplankSnapshotHost (ConvertTo-GangplankSessionSnapshot $s))
         $script:GangplankApp.Session = New-GangplankSessionFromSnapshot -Snapshot (ConvertTo-GangplankSessionSnapshot $s) -Token $token
     } catch {
         # No credential any more: keep the work as a restorable snapshot.
@@ -136,7 +138,7 @@ function Get-GangplankJobArguments {
     param([Parameter(Mandatory)]$Session)
     return @{
         Session = (ConvertTo-GangplankSessionSnapshot $Session)
-        Token = (Resolve-GangplankCredential -Provider $Session.Provider -TargetHost (Get-GangplankSnapshotHost (ConvertTo-GangplankSessionSnapshot $Session))).Value
+        Token = (Get-GangplankOptionalProviderToken -Provider $Session.Provider -TargetHost (Get-GangplankSnapshotHost (ConvertTo-GangplankSessionSnapshot $Session)))
         WorkRoot = $script:GangplankApp.WorkRoot
         DevGitHubUrl = (Get-GangplankDevProvider)
         DevGitLabUrl = (Get-GangplankDevGitLabProvider)
@@ -184,6 +186,18 @@ $script:GangplankOnReviewJob = {
     return @{ url = $Result.Url; title = $Result.Title }
 }
 
+$script:GangplankOnCatalogJob = {
+    param($Result,$Context)
+    $catalog = $null
+    if ($null -ne $Result) {
+        if ($Result -is [System.Collections.IDictionary]) { $catalog = $Result['Catalog'] }
+        else {
+            $p = $Result.PSObject.Properties['Catalog']
+            if ($p) { $catalog = $p.Value }
+        }
+    }
+    return [ordered]@{ catalog = $catalog }
+}
 $script:GangplankOnAdoptJob = {
     param($Result,$Context)
     if ($Context.Generation -ne $script:GangplankApp.Generation) {
@@ -332,9 +346,14 @@ function Invoke-GangplankRouteCore {
         $url = [string](Get-GangplankBodyValue $Req 'url')
         if (-not $url -or $url.Length -gt 500) { throw 'BAD_REQUEST|Enter a valid GitHub or GitLab project URL.' }
         Assert-GangplankTrustedRepositoryUrl -Url $url
-        $parsed = Parse-GangplankRepoUrl -Url $url
-        $token = (Resolve-GangplankCredential -Provider $parsed.Provider -TargetHost (Get-GangplankSnapshotHost $parsed)).Value
-        $id = Start-GangplankJob -Kind 'connect' -Group 'workspace' -Function 'Invoke-GangplankJobConnect' -Arguments @{ Url = $url; Token = $token; DevGitHubUrl = (Get-GangplankDevProvider); DevGitLabUrl = (Get-GangplankDevGitLabProvider) } -OnComplete $script:GangplankOnSessionJob -Context (Get-GangplankJobContext -Token $token -Kind 'connect')
+        $target = Resolve-GangplankConnectTarget -Url $url
+        $token = Get-GangplankOptionalProviderToken -Provider $target.Provider -TargetHost (Get-GangplankSnapshotHost $target)
+        $jobArgs = @{ Url = $url; Token = $token; DevGitHubUrl = (Get-GangplankDevProvider); DevGitLabUrl = (Get-GangplankDevGitLabProvider) }
+        if ($target.Mode -eq 'repository') {
+            $id = Start-GangplankJob -Kind 'connect' -Group 'workspace' -Function 'Invoke-GangplankJobConnect' -Arguments $jobArgs -OnComplete $script:GangplankOnSessionJob -Context (Get-GangplankJobContext -Token $token -Kind 'connect')
+        } else {
+            $id = Start-GangplankJob -Kind 'catalog' -Group 'workspace' -Function 'Invoke-GangplankJobCatalog' -Arguments $jobArgs -OnComplete $script:GangplankOnCatalogJob -Context (Get-GangplankJobContext -Token $token -Kind 'catalog')
+        }
         Send-GangplankJobStarted $id
         return
     }

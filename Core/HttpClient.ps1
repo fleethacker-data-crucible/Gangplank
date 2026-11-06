@@ -29,6 +29,27 @@ function Get-GangplankProviderErrorCode {
     return "HTTP_$Status"
 }
 
+function Get-GangplankGitHubRateLimitMessage {
+    # Anonymous GitHub is 60 requests an hour (search is 10). A token is optional:
+    # say so, and never claim public repositories require one. No header values
+    # other than the numeric limit and reset time are included.
+    param([hashtable]$Headers = @{})
+    $limit = ''
+    if ($Headers -and $Headers.ContainsKey('x-ratelimit-limit')) { $limit = [string]$Headers['x-ratelimit-limit'] }
+    $resetText = ''
+    $resetRaw = ''
+    if ($Headers -and $Headers.ContainsKey('x-ratelimit-reset')) { $resetRaw = [string]$Headers['x-ratelimit-reset'] }
+    $epoch = [int64]0
+    if ($resetRaw -and [int64]::TryParse($resetRaw,[ref]$epoch) -and $epoch -gt 0) {
+        $when = (New-Object DateTime(1970,1,1,0,0,0,[DateTimeKind]::Utc)).AddSeconds($epoch)
+        $resetText = ' The limit resets at ' + $when.ToString('yyyy-MM-dd HH:mm') + ' UTC.'
+    }
+    if ($limit -eq '60' -or $limit -eq '10') {
+        return ("GitHub's limit for requests without a token was reached ({0} per hour from this address). Public repositories do not require a token. Wait and try again, or add an optional token in Settings to raise the limit.{1}" -f $limit, $resetText)
+    }
+    return ("GitHub's rate limit was reached for this address. Public repositories do not require a token. Wait and try again, or add an optional token in Settings if you want a higher limit.{0}" -f $resetText)
+}
+
 function Get-GangplankRetryDelayMs {
     param([hashtable]$Headers,[int]$Attempt)
     $after = [string]$Headers['retry-after']
@@ -162,6 +183,9 @@ function ConvertFrom-GangplankApiResponse {
     if ($detail.Length -gt 500) { $detail = $detail.Substring(0,500) + '...' }
     if ($status -eq 0) { $detail = $Response.NetworkError }
     Write-GangplankLog -Level ERROR -Message ("{0} API fail {1} {2} status={3} {4}" -f $Provider, $Method, $Endpoint, $status, $detail)
+    if ($Provider -eq 'GitHub' -and $code -eq 'RATE_LIMITED') {
+        throw ("RATE_LIMITED|" + (Get-GangplankGitHubRateLimitMessage -Headers $Response.Headers))
+    }
     $statusText = if ($status) { [string]$status } else { 'no response' }
     throw ("{0}|{1} API {2} {3} failed (HTTP {4})." -f $code, $Provider, $Method, $Endpoint, $statusText)
 }

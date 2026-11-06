@@ -308,6 +308,7 @@ function Add-GangplankReviewComment {
     # Reply to a review request. Plain text, 1..4000 characters.
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session,[Parameter(Mandatory)]$Number,[Parameter(Mandatory)][string]$Text)
+    Assert-GangplankWriteCredential -Session $Session -Action 'Commenting on a review'
     $body = ConvertTo-GangplankReviewCommentText -Text $Text
     $n = ConvertTo-GangplankReviewNumber $Number
     [void](Assert-GangplankOpenReview -Session $Session -Number $n)
@@ -344,6 +345,7 @@ function Merge-GangplankReview {
     # Merge one open review request. Never forced. Needs -Confirmed:$true and the head sha the user saw.
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session,[Parameter(Mandatory)]$Number,[Parameter(Mandatory)][string]$Sha,[bool]$Confirmed = $false)
+    Assert-GangplankWriteCredential -Session $Session -Action 'Merging a review'
     if ($Confirmed -ne $true) { throw 'BAD_REQUEST|Confirm the merge first. Nothing was merged.' }
     if ($Sha -notmatch '^[0-9a-fA-F]{40,64}$') { throw 'BAD_REQUEST|The version to merge is missing. Reload the review request and try again.' }
     $n = ConvertTo-GangplankReviewNumber $Number
