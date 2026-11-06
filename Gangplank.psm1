@@ -76,18 +76,18 @@ function Open-GangplankRepository {
         [Parameter(Mandatory)][string]$Url,
         [string]$Token
     )
-    Assert-GangplankTrustedRepositoryUrl -Url $Url
-    $parsed = Parse-GangplankRepoUrl -Url $Url
-    Write-GangplankLog -Level INFO -Message "Provider=$($parsed.Provider) Path=$($parsed.ProjectPath)"
-
-    if (-not $Token) {
+    $target = Resolve-GangplankConnectTarget -Url $Url
+    if ($target.Mode -ne 'repository') {
+        throw 'BAD_REQUEST|That address is a GitHub organization or user profile. Choose a repository from its list, then connect.'
+    }
+    $parsed = $target
+    if (-not $PSBoundParameters.ContainsKey('Token')) {
         $targetHost = ''
         try { $targetHost = ([uri][string]$parsed.BaseUrl).Host } catch { $targetHost = '' }
-        $Token = Get-GangplankToken -Provider $parsed.Provider -TargetHost $targetHost
+        $Token = Get-GangplankOptionalProviderToken -Provider $parsed.Provider -TargetHost $targetHost
     }
-    if (-not $Token) {
-        throw "No token for $($parsed.Provider). Set env or Lazarette Service name."
-    }
+    $anonymous = [string]::IsNullOrWhiteSpace($Token)
+    Write-GangplankLog -Level INFO -Message "Provider=$($parsed.Provider) Path=$($parsed.ProjectPath) anonymous=$anonymous"
 
     $prov = New-GangplankProvider -Provider $parsed.Provider -BaseUrl $parsed.BaseUrl -Token $Token
     $project = $null
@@ -97,11 +97,23 @@ function Open-GangplankRepository {
     } catch {
         $message = [string]$_.Exception.Message
         # Do not pass raw API responses/headers to the web browser.
-        if ($message -match '\b401\b|unauthorized|bad credentials') {
-            throw "GIT_AUTH_FAILED|$($parsed.Provider) rejected the credential. Check the Lazarette item and token permissions."
-        } elseif ($message -match '\b403\b|forbidden|resource not accessible') {
+        if ($message -match '^RATE_LIMITED\|') { throw }
+        if ($parsed.Provider -eq 'GitHub' -and $anonymous) {
+            if ($message -match '^NOT_FOUND\|') {
+                throw 'GIT_REPOSITORY_NOT_FOUND|That repository is not public, or the address is wrong. Public repositories load without a token. Private repositories need a GitHub token in Settings.'
+            }
+            if ($message -match '^AUTH_REJECTED\|') {
+                throw 'GIT_AUTH_FAILED|GitHub refused the anonymous request. Public repositories do not require a token. If this repository is private, add an optional token in Settings.'
+            }
+            if ($message -match '^FORBIDDEN\|') {
+                throw 'GIT_PERMISSION_DENIED|GitHub denied anonymous access. Public repositories do not require a token. If this repository is private, add a token in Settings.'
+            }
+        }
+        if ($message -match '\b401\b|unauthorized|bad credentials|^AUTH_REJECTED\|') {
+            throw "GIT_AUTH_FAILED|$($parsed.Provider) rejected the credential. Check the token permissions."
+        } elseif ($message -match '\b403\b|forbidden|resource not accessible|^FORBIDDEN\|') {
             throw "GIT_PERMISSION_DENIED|$($parsed.Provider) denied access. Verify repository membership, SSO authorization, and token scopes."
-        } elseif ($message -match '\b404\b|not found') {
+        } elseif ($message -match '\b404\b|not found|^NOT_FOUND\|') {
             throw "GIT_REPOSITORY_NOT_FOUND|Repository not found or not visible to this credential. Check the URL and repository access."
         }
         throw "GIT_CONNECTION_FAILED|Cannot verify repository access. Inspect the Gangplank host diagnostics and check the approved network endpoint."
@@ -178,6 +190,7 @@ function New-GangplankMergeRequest {
         [string]$Description = ''
     )
     if (-not $Session) { throw 'Open a project first.' }
+    Assert-GangplankWriteCredential -Session $Session -Action 'Creating a review request'
     if (-not $SourceBranch) { $SourceBranch = $Session.LastBranch }
     if (-not $TargetBranch) { $TargetBranch = $Session.DefaultBranch }
     if (-not $SourceBranch -or -not $TargetBranch) { throw 'Source and target branches are required.' }
@@ -209,6 +222,8 @@ Export-ModuleMember -Function @(
     "Select-GangplankFolder",
     "Get-GangplankSuggestedWorkPath",
     "Parse-GangplankRepoUrl",
+    "Resolve-GangplankConnectTarget",
+    "Get-GangplankGitHubRepositoryCatalog",
     "Resolve-GangplankProviderFromUrl",
     "New-GangplankProvider",
     "Import-GangplankLazaretteSession",

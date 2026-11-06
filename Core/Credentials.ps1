@@ -317,6 +317,45 @@ function Resolve-GangplankCredential {
     throw "CREDENTIAL_MISSING|No $Provider token is configured. Add one in Integrations or set $envName before starting Gangplank."
 }
 
+function Get-GangplankOptionalProviderToken {
+    # Configured token, or '' for GitHub when none is set. Public GitHub reads use
+    # that empty result. GitLab and Lazarette failures still throw: a locked vault
+    # is not the same as "no token".
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Provider,[string]$TargetHost)
+    try {
+        return [string](Resolve-GangplankCredential -Provider $Provider -TargetHost $TargetHost).Value
+    } catch {
+        $msg = [string]$_.Exception.Message
+        if ($Provider -eq 'GitHub' -and $msg -match '^CREDENTIAL_MISSING\|') { return '' }
+        throw
+    }
+}
+
+function Test-GangplankProviderInstance {
+    # True for GitHubProvider / GitLabProvider and test subclasses. Plain test
+    # doubles are not, so they keep working without a Token property.
+    param($Obj)
+    if (-not $Obj) { return $false }
+    $t = $Obj.GetType()
+    while ($t) {
+        if ($t.Name -in @('GitProviderBase','GitHubProvider','GitLabProvider')) { return $true }
+        $t = $t.BaseType
+    }
+    return $false
+}
+
+function Assert-GangplankWriteCredential {
+    # Publishing, new branches and review writes need a real token. An empty
+    # GitHub token is allowed only for public reads.
+    param($Session,[string]$Action)
+    if (-not $Session -or -not (Test-GangplankProviderInstance $Session.ProviderObj)) { return }
+    if (-not [string]::IsNullOrWhiteSpace([string]$Session.ProviderObj.Token)) { return }
+    $provider = if ($Session.Provider) { [string]$Session.Provider } else { 'repository' }
+    $why = if ($Action) { $Action } else { 'This action' }
+    throw "CREDENTIAL_MISSING|$why needs a $provider token. Public GitHub browsing and downloads do not. Add a token in Settings, or set the provider environment variable."
+}
+
 function Get-GangplankCredentialStatus {
     $lazaretteOn = Test-GangplankLazaretteConfigured
     $lazaretteStatus = if ($lazaretteOn) { Get-GangplankLazaretteConnectionStatus } else { $null }
