@@ -114,3 +114,5 @@ Tokens are sealed with DPAPI for your Windows account and never sent to the brow
 - The browser flow needs an existing, initialised remote branch; bootstrapping an empty repository is a future feature.
 - Secret detection is pattern-based for common credential files and formats; it is not complete DLP.
 - Enterprise SSO, RBAC, signing and formal security authorization are future milestones.
+
+# The END
