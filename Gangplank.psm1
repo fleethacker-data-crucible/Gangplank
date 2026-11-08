@@ -289,6 +289,8 @@ Export-ModuleMember -Function @(
     "Get-GangplankSentinelDestination",
     "Test-GangplankSentinelPublication",
     "Get-GangplankSafeErrorMessage",
+    "Get-GangplankLazaretteProviderKind",
+
     "Test-GangplankLazaretteFolder",
     "Get-GangplankLazaretteCredential",
     "Resolve-GangplankCredential",
