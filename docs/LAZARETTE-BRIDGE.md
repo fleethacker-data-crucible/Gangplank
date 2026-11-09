@@ -11,7 +11,7 @@ vault on the workstation (roadmap W1); that needs the real card and Lazarette's 
 
 1. Credentials → Lazarette vault → tick **Use Lazarette** and enter the Lazarette folder (the one that
    contains `lib\Lazarette.ps1`, or that engine's previous loader file). `GANGPLANK_LAZARETTE_PATH` does the same
-   from the environment. Generic names such as `LAZARETTE_PATH` never enable it. A Lazarette Lite folder works the same way: enter the Lite folder (the one that contains `LazaretteLite.psd1` and `lib\Lazarette.ps1`).
+   from the environment. Generic names such as `LAZARETTE_PATH` never enable it.
 2. Restart Gangplank. It loads Lazarette once and runs Lazarette's own unlock
    (`Unlock-LazaretteVaultInteractive`) in the console, **once, at startup**. Gangplank never implements
    unlock itself and never unlocks from a browser request.
@@ -24,7 +24,7 @@ vault on the workstation (roadmap W1); that needs the real card and Lazarette's 
 | GitLab | `gitlab` | `GANGPLANK_LAZARETTE_ITEM_GitLab`, or the mapping |
 
 A token is looked up in this order: the environment variable, Gangplank's own store (sealed with Windows
-DPAPI), then the Lazarette item (or the Lazarette Lite item, when the configured folder is Lite). Items are read by name with `Get-LazaretteSecret`; the names the vault
+DPAPI), then the Lazarette item. Items are read by name with `Get-LazaretteSecret`; the names the vault
 offers come from `Get-LazaretteItemNames`.
 
 ## What Gangplank never does
@@ -34,32 +34,6 @@ offers come from `Get-LazaretteItemNames`.
   `tests/LazaretteVaultFlow.Tests.ps1` scans those places for the tokens it read. The audit and run logs
   record item names and sources, never values, by design; that suite does not scan them.
 - Unlock the vault a second time, or read it while it is locked.
-
-## Lazarette Lite fallback
-
-A Lazarette Lite folder can stand in for Lazarette when the full vault is not
-running or not present, under the same opt-in rule: point
-`GANGPLANK_LAZARETTE_PATH` (or Integrations Lazarette.Enabled + Path) at the
-Lite folder. Generic `LAZARETTE_PATH` never enables it, Lite or full.
-
-What changes with Lite:
-
-- No unlock prompt. Lite has no lock: its unlock is a no-op success, so the
-  passphrase + second-factor gate is dropped while Lite answers. Anything the
-  Windows user can read in Credential Manager, Gangplank can read.
-- Secret-only. Lite keeps one secret per item: no custom fields, no TOTP, no
-  attachments, no item history, and a 2,560-byte secret cap. Anything needing
-  those still needs full Lazarette.
-- The connection status reports `lazaretteKind: lite` and `lazaretteVersion:
-  lite` (never `5` for Lite), so the UI and logs never mistake Lite for the
-  full vault.
-
-What does not change: the lookup order (environment, then Gangplank's own DPAPI
-store, then the Lazarette/Lite item), the item names (`github`, `gitlab`,
-`data-platform-api` and their `GANGPLANK_LAZARETTE_ITEM_*` overrides), and the
-rules that no token ever goes to the browser, the log or the audit trail. AI
-still goes to Fairlead with the `Fairlead/Gangplank` Credential Manager key;
-Lite is never consulted for it.
 
 ## The Fleet router (Fairlead)
 

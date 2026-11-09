@@ -25,6 +25,8 @@ function Start-GangplankWebHost {
         if ($DevGitLabUrl) { Set-GangplankDevProvider -GitLabUrl $DevGitLabUrl }
     }
     Initialize-GangplankApp -WorkRoot $WorkRoot -StateRoot $StateRoot -WorkRootFixed:$WorkRootFixed -LocalDev:$LocalDev
+    # UI requests must fail fast (no multi-minute hangs on Git/Fairlead).
+    $script:GangplankHttpInteractive = $true
     Reset-GangplankPresence -AutoStop $AutoStop
     $script:GangplankHostLife = @{ AutoStop = $AutoStop; RuntimeFile = $null; StopEvent = $null; StopReason = $null; Pending = $null; WaitLogged = $false }
     $onReady = {

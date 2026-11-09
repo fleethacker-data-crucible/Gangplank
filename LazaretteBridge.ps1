@@ -3,14 +3,6 @@
 #   Load <folder>\lib\Lazarette.ps1 once, then use Unlock-LazaretteVaultInteractive,
 #   Get-LazaretteSecret, Get-LazaretteItemNames and Test-LazaretteVaultUnlocked
 #   (Lazarette docs/INTEGRATION.md). No other loader or function name is used.
-# Lazarette Lite is a permitted provider under the same opt-in rule: a folder
-# with LazaretteLite.psd1 at its root and lib\Lazarette.ps1 present. Lite ships
-# only three of the four integration functions (no Test-LazaretteVaultUnlocked,
-# because Lite has no lock); the engine import shims only that one test, only
-# for Lite, as always-unlocked. Lite is secret-only (no -Field, no TOTP, no
-# attachments, no history) and its unlock is a no-op, so the passphrase +
-# second-factor gate is dropped while Lite answers. Generic LAZARETTE_PATH
-# never enables Lite either. See docs/LAZARETTE-BRIDGE.md.
 # Status codes (LAZARETTE_NOT_FOUND, LAZARETTE_LOCKED, ...) are a wire format the UI reads.
 # Gangplank never implements unlock itself: smart card PIN, passphrase and TOTP prompts are
 # Lazarette's own console flow, run once before the web host starts.
@@ -24,7 +16,6 @@ $script:GangplankLazaretteRoot = $null
 $script:GangplankLazaretteModule = $null
 $script:GangplankLazaretteLastError = ''
 $script:GangplankLazaretteErrorCode = ''
-$script:GangplankLazaretteKind = $null  # 'lazarette' | 'lite'; set when the engine loads.
 
 function Get-GangplankLazaretteLoader {
     # The engine loader in a Lazarette folder: lib\Lazarette.ps1, or $null.
@@ -40,20 +31,6 @@ $script:GangplankLazaretteApi = [ordered]@{
     Secret    = 'Get-LazaretteSecret'
     ItemNames = 'Get-LazaretteItemNames'
     Unlocked  = 'Test-LazaretteVaultUnlocked'
-}
-
-function Get-GangplankLazaretteProviderKind {
-    # 'lite' when the folder is Lazarette Lite (LazaretteLite.psd1 at the folder
-    # root, lib\Lazarette.ps1 present), 'lazarette' for full Lazarette, $null
-    # when the folder holds no loader at all. The marker is the only thing that
-    # distinguishes Lite: a full Lazarette checkout never has LazaretteLite.psd1.
-    [CmdletBinding()]
-    param([string]$LazaretteRoot)
-
-    if (-not $LazaretteRoot) { return $null }
-    if (-not (Test-Path -LiteralPath (Join-Path (Join-Path $LazaretteRoot 'lib') 'Lazarette.ps1') -PathType Leaf)) { return $null }
-    if (Test-Path -LiteralPath (Join-Path $LazaretteRoot 'LazaretteLite.psd1') -PathType Leaf) { return 'lite' }
-    return 'lazarette'
 }
 
 function Test-GangplankLazaretteFolder {
@@ -133,29 +110,14 @@ function Import-GangplankLazaretteEngine {
     # session state lives in one place and its functions are visible globally.
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$LazaretteRoot,[switch]$Quiet)
-    $kind = Get-GangplankLazaretteProviderKind -LazaretteRoot $LazaretteRoot
-
     $loader = Get-GangplankLazaretteLoader -LazaretteRoot $LazaretteRoot
     try {
         $module = New-Module -Name GangplankLazarette -ScriptBlock {
-            param([string]$LoaderPath,[bool]$LiteKind)
-
+            param([string]$LoaderPath)
             $ErrorActionPreference = 'Stop'
-
             . $LoaderPath
-
-            # Lazarette Lite ships only three of the four integration functions: it
-            # has no Test-LazaretteVaultUnlocked, because it has no lock (its unlock
-            # is a no-op success). When the folder is Lite, define the missing test
-            # as always unlocked. Only for Lite, only for this one function: any
-            # other missing function still fails the helpers check below, and a
-            # folder without the Lite marker is never shimmed.
-            if ($LiteKind -and -not (Get-Command Test-LazaretteVaultUnlocked -ErrorAction SilentlyContinue)) {
-                function Test-LazaretteVaultUnlocked { return $true }
-            }
-
             Export-ModuleMember -Function * -ErrorAction SilentlyContinue
-        } -ArgumentList $loader, ($kind -eq 'lite')
+        } -ArgumentList $loader
         Import-Module -ModuleInfo $module -Global -ErrorAction Stop -WarningAction SilentlyContinue
         $script:GangplankLazaretteModule = $module
     } catch {
@@ -173,8 +135,6 @@ function Import-GangplankLazaretteEngine {
     $script:GangplankLazaretteLoaded = $true
     $script:GangplankLazaretteErrorCode = ''
     $script:GangplankLazaretteLastError = ''
-    $script:GangplankLazaretteKind = $kind
-
     if (-not $Quiet) { Write-Host '[+] Lazarette engine loaded into Gangplank host process.' -ForegroundColor Green }
     return $true
 }
@@ -199,7 +159,7 @@ function Initialize-GangplankLazaretteAuthentication {
         }
     }
     if (-not $SkipUnlock -and -not (Test-GangplankLazaretteVaultUnlocked)) {
-        if (-not $Quiet -and $script:GangplankLazaretteKind -ne 'lite') {
+        if (-not $Quiet) {
             Write-Host ''
             Write-Host '[*] Lazarette authentication: complete the standard smart card + TOTP steps in this PowerShell window.' -ForegroundColor Cyan
             Write-Host '[*] You can cancel to launch Gangplank without Lazarette; env credentials will still work.' -ForegroundColor DarkGray
@@ -218,8 +178,7 @@ function Initialize-GangplankLazaretteAuthentication {
         $script:GangplankLazaretteLastError = ''
         if (-not $Quiet) { Write-Host '[+] Lazarette vault unlocked in the Gangplank host process.' -ForegroundColor Green }
     } elseif (-not $Quiet) {
-        if ($script:GangplankLazaretteKind -eq 'lite') { Write-Warning 'Lazarette Lite could not be read. Check the Lite folder and its items.' }
-        else { Write-Warning 'Lazarette is locked. Restart Gangplank and complete smart card/TOTP, or use an approved environment credential.' }
+        Write-Warning 'Lazarette is locked. Restart Gangplank and complete smart card/TOTP, or use an approved environment credential.'
     }
     return [pscustomobject]@{
         Found = $true; Loaded = $true; Unlocked = [bool]$ready
@@ -242,9 +201,6 @@ function Get-GangplankLazaretteConnectionStatus {
     param()
     $configured = Get-GangplankConfiguredLazarettePath
     $root = Find-GangplankLazaretteRoot
-    $kind = $script:GangplankLazaretteKind
-    if (-not $kind -and $root) { $kind = Get-GangplankLazaretteProviderKind -LazaretteRoot $root }
-
     $loaded = Test-GangplankLazaretteHelpersAvailable
     $unlocked = Test-GangplankLazaretteVaultUnlocked
     $names = @()
@@ -268,18 +224,16 @@ function Get-GangplankLazaretteConnectionStatus {
     }
     return [pscustomobject]@{
         lazaretteFound = [bool]$root
-        lazaretteKind = $(if ($kind) { $kind } else { '' })
-
         lazaretteLoaded = [bool]$loaded
         lazaretteUnlocked = [bool]$unlocked
         lazarettePath = $(if ($root) { $root } else { '' })
-        lazaretteVersion = $(if ($kind -eq 'lite') { 'lite' } elseif ($loaded -or $root) { '5' } else { '' })
+        lazaretteVersion = $(if ($loaded -or $root) { '5' } else { '' })
         code = $(if (-not $configured) { 'LAZARETTE_NOT_CONFIGURED' } elseif ($loaded) { '' } elseif ($script:GangplankLazaretteErrorCode) { $script:GangplankLazaretteErrorCode } else { 'LAZARETTE_NOT_LOADED' })
         helpers = Get-GangplankLazaretteHelperDiagnostics
         configured = [bool]$configured
         message = $(if (-not $configured) { 'Lazarette is not configured. It is optional: enable it in Integrations with the Lazarette folder path.' }
-                    elseif ($loaded -and $unlocked) { if ($kind -eq 'lite') { 'Lazarette Lite is unlocked (Windows Credential Manager; no passphrase or second factor).' } else { 'Lazarette is unlocked.' } }
-                    elseif ($loaded) { if ($kind -eq 'lite') { 'Lazarette Lite loaded but could not be read. Check the Lite folder and its items.' } else { 'Lazarette loaded but locked. Restart Gangplank and complete smart card + TOTP in its console.' } }
+                    elseif ($loaded -and $unlocked) { 'Lazarette is unlocked.' }
+                    elseif ($loaded) { 'Lazarette loaded but locked. Restart Gangplank and complete smart card + TOTP in its console.' }
                     elseif ($script:GangplankLazaretteLastError) { $script:GangplankLazaretteLastError }
                     elseif (-not $root) { 'Lazarette not found. Turn on Lazarette in Integrations with its folder (the one containing lib\Lazarette.ps1), or set GANGPLANK_LAZARETTE_PATH.' }
                     else { 'Lazarette was located but could not be loaded. Check the Gangplank console and Lazarette installation.' })

@@ -18,15 +18,11 @@ class GitHubProvider : GitProviderBase {
     }
 
     [hashtable] GetAuthHeaders([string]$method) {
-        # No Authorization header at all when there is no token. An empty
-        # "Bearer" value makes GitHub reject public requests as bad credentials.
         $h = @{
+            "Authorization"        = "Bearer $($this.Token)"
             "Accept"               = "application/vnd.github+json"
             "User-Agent"           = "Gangplank"
             "X-GitHub-Api-Version" = "2022-11-28"
-        }
-        if (-not [string]::IsNullOrWhiteSpace($this.Token)) {
-            $h["Authorization"] = "Bearer $($this.Token)"
         }
         if ($method -in @("POST", "PUT", "PATCH")) {
             $h["Content-Type"] = "application/json"
@@ -237,143 +233,5 @@ class GitHubProvider : GitProviderBase {
             body  = $bodyText
         }
         return $this.InvokeApi("POST", "repos/$projectPath/pulls", $payload)
-    }
-}
-
-function ConvertTo-GangplankPublicRepoRow {
-    # A browser-safe repository row. The URL is built here; the API html_url is not trusted.
-    param($Item,[string]$Owner)
-    $full = [string]$Item.full_name
-    $prefix = $Owner + '/'
-    if (-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) { return $null }
-    $repoName = $full.Substring($prefix.Length)
-    if ($repoName -notmatch '^[A-Za-z0-9_.-]{1,100}$' -or $repoName -eq '.' -or $repoName -eq '..') { return $null }
-    $desc = [string]$Item.description
-    $desc = $desc -replace '[\r\n\x00-\x1F]+',' '
-    $desc = $desc.Trim()
-    if ($desc.Length -gt 180) { $desc = $desc.Substring(0,180) + '...' }
-    return [ordered]@{
-        name        = $repoName
-        fullName    = $full
-        private     = [bool]$Item.private
-        description = $desc
-        url         = ('https://github.com/' + $full)
-    }
-}
-
-function Resolve-GangplankGitHubAccount {
-    # @{ Kind; Name } from GET /users/{name}. Organizations answer here too.
-    param($Provider,[string]$Name,[string]$ExplicitMode)
-    $info = $null
-    try {
-        $info = $Provider.InvokeApi('GET', ('users/' + [uri]::EscapeDataString($Name)))
-    } catch {
-        $msg = [string]$_.Exception.Message
-        if ($msg -match '^RATE_LIMITED\|') { throw }
-        if ($msg -match '^NOT_FOUND\|') {
-            $what = if ($ExplicitMode -eq 'user') { 'user profile' } else { 'GitHub account' }
-            throw ("NOT_FOUND|No public {0} named '{1}' was found. Public lists do not require a token. If the account is private, add an optional token in Settings." -f $what, $Name)
-        }
-        throw
-    }
-    $canonical = $Name
-    if ($info.login) {
-        $candidate = [string]$info.login
-        if ($candidate -match '^[A-Za-z0-9]([A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$') { $canonical = $candidate }
-    }
-    $type = [string]$info.type
-    $kind = ''
-    if ($type -eq 'Organization') { $kind = 'organization' }
-    elseif ($type -eq 'User') { $kind = 'user' }
-    else { throw "NOT_FOUND|GitHub did not recognize '$Name' as a user or an organization." }
-    return @{ Kind = $kind; Name = $canonical }
-}
-
-function Get-GangplankGitHubRepositoryCatalog {
-    # Public organization or user repositories. With no token the request is
-    # anonymous (public only). A configured token is sent and private repositories
-    # that token can see are included. The token is never returned or logged.
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$Url,
-        [string]$Token
-    )
-    $target = Resolve-GangplankConnectTarget -Url $Url
-    if ($target.Provider -ne 'GitHub' -or $target.Mode -eq 'repository') {
-        throw 'BAD_REQUEST|Enter a GitHub organization or user profile to list repositories.'
-    }
-    if (-not $PSBoundParameters.ContainsKey('Token')) {
-        $hostName = ''
-        try { $hostName = ([uri][string]$target.BaseUrl).Host } catch { }
-        $Token = Get-GangplankOptionalProviderToken -Provider 'GitHub' -TargetHost $hostName
-    }
-    $base = if ([string]$target.BaseUrl -match 'github\.com') { 'https://api.github.com' } else { [string]$target.BaseUrl }
-    $prov = New-GangplankProvider -Provider 'GitHub' -BaseUrl $base -Token $Token
-    $anonymous = [string]::IsNullOrWhiteSpace($prov.Token)
-    $kind = [string]$target.Mode
-    $name = [string]$target.Owner
-    if ($kind -eq 'owner' -or $kind -eq 'user') {
-        $account = Resolve-GangplankGitHubAccount -Provider $prov -Name $name -ExplicitMode $kind
-        $kind = [string]$account.Kind
-        $name = [string]$account.Name
-    }
-    $escaped = [uri]::EscapeDataString($name)
-    $listPath = ''
-    if ($kind -eq 'organization') {
-        $repoType = if ($anonymous) { 'public' } else { 'all' }
-        $listPath = "orgs/$escaped/repos?per_page=100&type=$repoType"
-    } else {
-        $listPath = "users/$escaped/repos?per_page=100&type=owner"
-        if (-not $anonymous) {
-            $me = $null
-            try { $me = $prov.InvokeApi('GET','user') } catch {
-                $msg = [string]$_.Exception.Message
-                if ($msg -match '^RATE_LIMITED\|') { throw }
-                if ($msg -match '^AUTH_REJECTED\|') {
-                    throw 'GIT_AUTH_FAILED|GitHub rejected the configured token. Public browsing does not require a token, but a rejected token is not ignored. Check it in Settings.'
-                }
-                throw
-            }
-            if ($me.login -and [string]::Equals([string]$me.login, $name, [StringComparison]::OrdinalIgnoreCase)) {
-                $listPath = 'user/repos?per_page=100&type=owner'
-            }
-        }
-    }
-    $uri = ($prov.ApiRoot.TrimEnd('/') + '/' + $listPath)
-    $items = @()
-    try {
-        $items = @(Invoke-GangplankPagedGet -Provider 'GitHub' -Uri $uri -Headers $prov.GetAuthHeaders('GET'))
-    } catch {
-        $msg = [string]$_.Exception.Message
-        if ($msg -match '^RATE_LIMITED\|') { throw }
-        if ($anonymous -and $msg -match '^AUTH_REJECTED\|') {
-            throw 'GIT_AUTH_FAILED|GitHub refused the anonymous request. Public repositories do not require a token. If this account is private, add an optional token in Settings.'
-        }
-        if ($anonymous -and $msg -match '^FORBIDDEN\|') {
-            throw 'GIT_PERMISSION_DENIED|GitHub denied anonymous access. Public repositories do not require a token. Add an optional token in Settings for private access or a higher limit.'
-        }
-        if (-not $anonymous -and $msg -match '^AUTH_REJECTED\|') {
-            throw 'GIT_AUTH_FAILED|GitHub rejected the configured token. Public browsing does not require a token, but a rejected token is not ignored. Check it in Settings.'
-        }
-        if ($msg -match '^NOT_FOUND\|') {
-            $label = if ($kind -eq 'organization') { 'organization' } else { 'user profile' }
-            throw ("NOT_FOUND|No public {0} named '{1}' was found. Public lists do not require a token. If it is private, add an optional token in Settings." -f $label, $name)
-        }
-        throw
-    }
-    $repos = New-Object System.Collections.Generic.List[object]
-    foreach ($item in @($items)) {
-        $row = ConvertTo-GangplankPublicRepoRow -Item $item -Owner $name
-        if ($row) { [void]$repos.Add($row) }
-    }
-    # A real object array, so a single repository is not unwrapped into one row.
-    $rows = New-Object object[] $repos.Count
-    for ($i = 0; $i -lt $repos.Count; $i++) { $rows[$i] = $repos[$i] }
-    Write-GangplankLog -Level INFO -Message ("GitHub repository list for {0} ({1}), anonymous={2}, count={3}" -f $name, $kind, $anonymous, $rows.Length)
-    return [pscustomobject]@{
-        kind           = $kind
-        name           = $name
-        anonymous      = [bool]$anonymous
-        repositories   = $rows
     }
 }

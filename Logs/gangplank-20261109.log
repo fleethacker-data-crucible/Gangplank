@@ -1,0 +1,7 @@
+﻿[2026-11-09 11:26:24.156] [INFO ] Logging initialized -> C:\git\Gangplank-main\Logs\gangplank-20261109.log
+[2026-11-09 11:26:24.173] [INFO ] Gangplank C:\git\Gangplank-main
+[2026-11-09 11:26:24.348] [INFO ] Restored session for fleethacker-data-crucible/phoenix-perfectus (branch master).
+[2026-11-09 11:26:24.565] [INFO ] Listening on http://127.0.0.1:8769/ (peer check enabled)
+[2026-11-09 11:26:24.614] [INFO ] Web host started: PID 16932, port 8769, auto-stop True
+[2026-11-09 11:26:50.361] [INFO ] Gangplank host stopped.
+[2026-11-09 11:26:50.392] [INFO ] Web host stopping: Browser tab closed; Gangplank stops itself (GANGPLANK_AUTO_STOP=0 or --stay keeps it running).
