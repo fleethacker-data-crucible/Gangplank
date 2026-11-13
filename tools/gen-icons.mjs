@@ -37,27 +37,18 @@ const ICONS = {
   warning: 'triangle-alert',
 };
 
-// Drop HTML comments until the text no longer contains <!--.
-// One pass is not enough: <!<!--x-->--> becomes <!--> , which still starts a comment.
-// A closer that never arrives drops the <!-- marker and keeps the tail.
-export function stripHtmlComments(input) {
-  let current = input;
-  let previous;
-  do {
-    previous = current;
-    const parts = [];
-    let i = 0;
-    while (i < current.length) {
-      const start = current.indexOf('<!--', i);
-      if (start < 0) { parts.push(current.slice(i)); break; }
-      parts.push(current.slice(i, start));
-      const end = current.indexOf('-->', start + 4);
-      if (end < 0) { parts.push(current.slice(start + 4)); break; }
-      i = end + 3;
-    }
-    current = parts.join('');
-  } while (current !== previous);
-  return current;
+// HTML comments do not nest. The first --> ends the comment, and an unclosed <!--
+// runs to the end of the file. Deleting one <!--...--> can reassemble the marker
+// (<!<!--x-->--> becomes <!-->), so the scan repeats.
+export function stripHtmlComments(text) {
+  let out = text;
+  for (;;) {
+    const start = out.indexOf('<!--');
+    if (start < 0) return out;
+    const end = out.indexOf('-->', start + 4);
+    if (end < 0) return out.slice(0, start);
+    out = out.slice(0, start) + out.slice(end + 3);
+  }
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
