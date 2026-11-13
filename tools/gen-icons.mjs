@@ -37,18 +37,34 @@ const ICONS = {
   warning: 'triangle-alert',
 };
 
-// HTML comments do not nest. The first --> ends the comment, and an unclosed <!--
-// runs to the end of the file. Deleting one <!--...--> can reassemble the marker
-// (<!<!--x-->--> becomes <!-->), so the scan repeats.
-export function stripHtmlComments(text) {
-  let out = text;
-  for (;;) {
-    const start = out.indexOf('<!--');
-    if (start < 0) return out;
-    const end = out.indexOf('-->', start + 4);
-    if (end < 0) return out.slice(0, start);
-    out = out.slice(0, start) + out.slice(end + 3);
+function commentEnd(s, from) {
+  for (let j = from; j < s.length - 2; j++) {
+    if (s[j] !== '-' || s[j + 1] !== '-') continue;
+    if (s[j + 2] === '>') return j + 3;
+    if (s[j + 2] === '!' && s[j + 3] === '>') return j + 4;
   }
+  return -1;
+}
+function stripOnce(s) {
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    const start = s.indexOf('<!--', i);
+    if (start < 0) return out + s.slice(i);
+    out += s.slice(i, start);
+    if (s[start + 4] === '>') { i = start + 5; continue; }
+    if (s[start + 4] === '-' && s[start + 5] === '>') { i = start + 6; continue; }
+    const end = commentEnd(s, start + 4);
+    if (end < 0) return out;
+    i = end;
+  }
+  return out;
+}
+export function stripHtmlComments(input) {
+  let cur = String(input);
+  let prev;
+  do { prev = cur; cur = stripOnce(cur); } while (cur !== prev);
+  return cur;
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;

@@ -7,8 +7,17 @@ test('HTML comments are removed, including ones a single pass would re-form', ()
   assert.equal(stripHtmlComments('<!-- a -->keep<!-- b -->'), 'keep');
   assert.equal(stripHtmlComments('before <!-- unterminated'), 'before ');
   assert.equal(stripHtmlComments('a<!--unclosed <path d="1"/>'), 'a');
-  const spliced = '<!<!--x-->-->';
-  assert.equal(stripHtmlComments(spliced), '');
-  assert.equal(stripHtmlComments(spliced + '<path d="M0"/>'), '');
-  assert.equal(stripHtmlComments('<!<!<!--x-->-->-->'), '<!');
+  assert.equal(stripHtmlComments('<!<!--x-->-->'), '');
+
+  const cases = [
+    ['a<!-- x -->b', 'ab'],
+    ['a<!-->b', 'ab'],
+    ['a<!--->b', 'ab'],
+    ['a<!-- x --!>b', 'ab'],
+    ['a<!--unclosed <path d="1"/>', 'a'],
+    ['<!<!---->-->x', 'x'],
+    ['<<!-- -->!--<path/>-->y', 'y'],
+    ['<path d="1"/>', '<path d="1"/>'],
+  ];
+  for (const [input, expected] of cases) assert.equal(stripHtmlComments(input), expected, input);
 });
