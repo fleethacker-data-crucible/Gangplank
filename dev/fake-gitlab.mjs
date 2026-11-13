@@ -18,7 +18,7 @@
 import { createServer } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { buildZip } from './fake-github.mjs';
+import { authHeaderCredential, buildZip } from './fake-github.mjs';
 
 export const DEFAULT_TOKEN = 'fake-gangplank-gitlab-token';
 const SEED_EPOCH = Date.UTC(2026, 9, 20, 9, 0, 0) / 1000; // 2026-10-20T09:00:00Z, fixed so seed SHAs are stable
@@ -454,9 +454,14 @@ function send(res, status, buf, headers = {}) {
   res.writeHead(status, { 'Content-Length': buf.length, 'X-Request-Id': randomBytes(8).toString('hex'), ...headers });
   res.end(buf);
 }
+// JSON with <, > and & written as escapes. An error string built from the request
+// (a ref, a path) must not be raw markup if a client treats the body as HTML.
+function jsonForHtml(payload) {
+  return JSON.stringify(payload).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
+}
 function sendJson(res, status, payload, headers = {}) {
-  const body = payload === undefined ? Buffer.alloc(0) : Buffer.from(JSON.stringify(payload));
-  send(res, status, body, { 'Content-Type': 'application/json', ...headers });
+  const body = payload === undefined ? Buffer.alloc(0) : Buffer.from(jsonForHtml(payload));
+  send(res, status, body, { 'Content-Type': 'application/json', 'X-Content-Type-Options': 'nosniff', ...headers });
 }
 function sendError(res, err) { sendJson(res, err.status, err.payload, err.headers); }
 
@@ -467,8 +472,8 @@ function decode(raw) {
 function authorised(req, token) {
   const h = req.headers['private-token'];
   if (h !== undefined) return h === token;
-  const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization ?? '');
-  return Boolean(bearer) && bearer[1].trim() === token;
+  const bearer = authHeaderCredential(req.headers.authorization ?? '', ['bearer']);
+  return bearer !== null && bearer === token;
 }
 
 async function handleControl(store, req, res, path, body) {

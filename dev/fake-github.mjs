@@ -653,11 +653,44 @@ function decodeTail(raw) {
   }
 }
 
+function isAuthWhitespace(ch) {
+  if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f' || ch === '\v') return true;
+  const c = ch.charCodeAt(0);
+  return c === 0x00a0 || c === 0x1680 || (c >= 0x2000 && c <= 0x200a) || c === 0x2028 || c === 0x2029
+    || c === 0x202f || c === 0x205f || c === 0x3000 || c === 0xfeff;
+}
+function isAuthLineTerminator(ch) {
+  return ch === '\n' || ch === '\r' || ch === '\u2028' || ch === '\u2029';
+}
+
+// Authorization: <scheme> <credential>, in one forward pass. `\s+` and `.+` both match
+// spaces, so a regexp is polynomial in a long run of spaces after the scheme.
+export function authHeaderCredential(header, schemes) {
+  if (typeof header !== 'string') return null;
+  const lower = header.toLowerCase();
+  let schemeLen = -1;
+  for (const scheme of schemes) {
+    if (lower.startsWith(scheme)) { schemeLen = scheme.length; break; }
+  }
+  if (schemeLen < 0) return null;
+  const rest = header.slice(schemeLen);
+  if (rest.length < 2 || !isAuthWhitespace(rest[0])) return null;
+  let i = 0;
+  while (i < rest.length && isAuthWhitespace(rest[i])) i++;
+  if (i < rest.length) {
+    for (let k = i; k < rest.length; k++) if (isAuthLineTerminator(rest[k])) return null;
+    return rest.slice(i).trim();
+  }
+  if (isAuthLineTerminator(rest[rest.length - 1])) return null;
+  for (let k = 0; k < rest.length; k++) if (!isAuthLineTerminator(rest[k])) return '';
+  return null;
+}
+
 function authState(req, token) {
   const h = req.headers.authorization;
   if (!h) return 'none';
-  const m = /^(?:Bearer|token)\s+(.+)$/i.exec(h);
-  return m && m[1].trim() === token ? 'valid' : 'invalid';
+  const presented = authHeaderCredential(h, ['bearer', 'token']);
+  return presented !== null && presented === token ? 'valid' : 'invalid';
 }
 
 async function handleControl(store, req, res, path, body) {

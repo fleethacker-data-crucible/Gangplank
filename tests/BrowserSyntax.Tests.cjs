@@ -12,11 +12,47 @@ const shell=fs.readFileSync(path.join(web,'shell.js'),'utf8');
 const icons=fs.readFileSync(path.join(web,'icons.js'),'utf8');
 
 // The CSP is script-src 'self'; style-src 'self': nothing inline may remain.
-const scripts=[...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
+// A scan, not a tag regexp: browsers accept end tags such as </script > and </script\t\n bar>.
+function isHtmlWs(c){return c===' '||c==='\t'||c==='\n'||c==='\r'||c==='\f'}
+function scriptElements(html){
+  const out=[],lower=html.toLowerCase();
+  let from=0;
+  while(from<html.length){
+    const start=lower.indexOf('<script',from);
+    if(start<0)break;
+    const boundary=html[start+7];
+    if(boundary&&boundary!=='>'&&!isHtmlWs(boundary)){from=start+7;continue}
+    let j=start+7,quote='';
+    for(;j<html.length;j++){
+      const c=html[j];
+      if(quote){if(c===quote)quote='';continue}
+      if(c==='"'||c==="'"){quote=c;continue}
+      if(c==='>')break;
+    }
+    if(j>=html.length)break;
+    const attrs=html.slice(start+7,j);
+    const end=lower.indexOf('</script',j+1);
+    if(end<0){out.push([attrs,html.slice(j+1)]);break}
+    const endBoundary=html[end+8];
+    if(endBoundary&&endBoundary!=='>'&&!isHtmlWs(endBoundary)){from=start+7;continue}
+    let k=end+8;
+    while(k<html.length&&html[k]!=='>')k++;
+    if(k>=html.length){out.push([attrs,html.slice(j+1,end)]);break}
+    out.push([attrs,html.slice(j+1,end)]);
+    from=k+1;
+  }
+  return out;
+}
+const scripts=scriptElements(html);
+const odd=scriptElements('<ScRiPt src="a.js"></script ><script>alert(1)</script\t\n bar>');
+assert.equal(odd.length,2,'script end tags with spaces still close the element');
+assert.equal((/src="([^"]+)"/.exec(odd[0][0])||[])[1],'a.js');
+assert.equal(odd[0][1],'');
+assert.equal(odd[1][1],'alert(1)');
 // shell.js applies the remembered theme before the first paint; icons.js (generated Lucide icons) and app.js are deferred.
-assert.deepEqual(scripts.map(x=>(/src="([^"]+)"/.exec(x[1])||[])[1]),['shell.js','icons.js','app.js'],'Expected only the external shell.js, icons.js and app.js');
-for(const x of scripts)assert.equal(x[2].trim(),'','No inline script allowed');
-assert.match(scripts[2][1],/\bdefer\b/,'app.js must be deferred');
+assert.deepEqual(scripts.map(x=>(/src="([^"]+)"/.exec(x[0])||[])[1]),['shell.js','icons.js','app.js'],'Expected only the external shell.js, icons.js and app.js');
+for(const x of scripts)assert.equal(x[1].trim(),'','No inline script allowed');
+assert.match(scripts[2][0],/\bdefer\b/,'app.js must be deferred');
 assert.doesNotMatch(html,/<style\b/i,'No inline <style> allowed');
 assert.doesNotMatch(html,/\sstyle="/i,'No inline style attributes allowed');
 assert.doesNotMatch(html,/\son[a-z]+=/i,'No inline event handlers allowed');

@@ -8,7 +8,7 @@
 // 1.75 px stroke, currentColor.
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const LUCIDE_VERSION = '1.54.0';
 // Gangplank's icon name -> Lucide icon name.
@@ -37,6 +37,31 @@ const ICONS = {
   warning: 'triangle-alert',
 };
 
+// Drop HTML comments until the text no longer contains <!--.
+// One pass is not enough: <!<!--x-->--> becomes <!--> , which still starts a comment.
+// A closer that never arrives drops the <!-- marker and keeps the tail.
+export function stripHtmlComments(input) {
+  let current = input;
+  let previous;
+  do {
+    previous = current;
+    const parts = [];
+    let i = 0;
+    while (i < current.length) {
+      const start = current.indexOf('<!--', i);
+      if (start < 0) { parts.push(current.slice(i)); break; }
+      parts.push(current.slice(i, start));
+      const end = current.indexOf('-->', start + 4);
+      if (end < 0) { parts.push(current.slice(start + 4)); break; }
+      i = end + 3;
+    }
+    current = parts.join('');
+  } while (current !== previous);
+  return current;
+}
+
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
 const dir = process.argv[2];
 if (!dir) {
   console.error('usage: node tools/gen-icons.mjs <lucide-static>/icons');
@@ -44,7 +69,7 @@ if (!dir) {
 }
 const data = {};
 for (const [name, lucide] of Object.entries(ICONS)) {
-  const svg = readFileSync(path.join(dir, `${lucide}.svg`), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+  const svg = stripHtmlComments(readFileSync(path.join(dir, `${lucide}.svg`), 'utf8'));
   const inner = svg.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
   const nodes = [...inner.matchAll(/<([a-z]+)\s([^>]*?)\/?>/g)].map(([, tag, attrs]) => {
     const a = {};
@@ -78,3 +103,4 @@ fill();
 `;
 writeFileSync(path.join(root, 'web', 'icons.js'), out);
 console.log('wrote web/icons.js with ' + Object.keys(data).length + ' icons');
+}

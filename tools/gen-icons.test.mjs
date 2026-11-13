@@ -1,0 +1,13 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { stripHtmlComments } from './gen-icons.mjs';
+
+test('HTML comments are removed, including ones a single pass would re-form', () => {
+  assert.equal(stripHtmlComments('<svg><!-- logo --><path d="M0"/></svg>'), '<svg><path d="M0"/></svg>');
+  assert.equal(stripHtmlComments('<!-- a -->keep<!-- b -->'), 'keep');
+  assert.equal(stripHtmlComments('before <!-- unterminated'), 'before  unterminated');
+  const spliced = '<!<!--x-->-->';
+  assert.equal(stripHtmlComments(spliced), '>');
+  assert.equal(stripHtmlComments(spliced + '<path d="M0"/>').includes('<!--'), false);
+  assert.equal(stripHtmlComments('<!<!<!--x-->-->-->').includes('<!--'), false);
+});

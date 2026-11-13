@@ -66,6 +66,26 @@ function unzip(buf) {
   return out;
 }
 
+test('bearer authorization is a linear parse and error JSON is not raw HTML', async () => {
+  const project = async (authorization) => {
+    const res = await fetch(`${fake.url}${P}`, { headers: { Authorization: authorization } });
+    await res.text();
+    return res.status;
+  };
+  assert.equal(await project(`Bearer ${DEFAULT_TOKEN}`), 200);
+  assert.equal(await project(`bearer\t\t${DEFAULT_TOKEN}`), 200);
+  assert.equal(await project(`Bearer ${' '.repeat(4000)}${DEFAULT_TOKEN}`), 200);
+  assert.equal(await project(`token ${DEFAULT_TOKEN}`), 401, 'GitLab does not use the token scheme');
+  assert.equal(await project('Bearer'), 401);
+  const bad = await api('POST', `${P}/repository/branches`, { branch: 'ok', ref: '<script>alert(1)</script>' });
+  assert.equal(bad.status, 400);
+  assert.equal(bad.json.message, 'Invalid reference name: <script>alert(1)</script>');
+  assert.doesNotMatch(bad.text, /[<>&]/, 'the body must not contain raw HTML metacharacters');
+  assert.match(bad.text, /\\u003cscript\\u003ealert\(1\)\\u003c\/script\\u003e/);
+  assert.equal(bad.headers.get('content-type'), 'application/json');
+  assert.equal(bad.headers.get('x-content-type-options'), 'nosniff');
+});
+
 test('auth: PRIVATE-TOKEN is required (401), unknown project is 404, paths must be encoded', async () => {
   assert.equal((await api('GET', P, undefined, { token: null })).status, 401);
   const wrong = await api('GET', P, undefined, { token: 'wrong' });
