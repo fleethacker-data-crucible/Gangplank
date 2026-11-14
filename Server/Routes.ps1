@@ -221,7 +221,7 @@ function Invoke-GangplankRoute {
     try {
         Invoke-GangplankRouteCore -Req $Req
     } catch {
-        $parts = Split-GangplankCodedMessage -Message $_.Exception.Message
+        $parts = Split-GangplankCodedMessage -Message (Get-GangplankReportedErrorMessage $_)
         Write-GangplankLog -Level WARN -Message ("{0} {1} failed: {2}" -f $Req.Method, $Req.Path, $parts.Code)
         if (-not $script:GangplankHttp.Responded) { Send-GangplankError (Get-GangplankErrorStatus $parts.Code) $parts.Code $parts.Message }
     } finally {

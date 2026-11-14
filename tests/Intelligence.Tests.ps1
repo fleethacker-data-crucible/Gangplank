@@ -118,6 +118,23 @@ try {
         Assert ((Get-GangplankWorkspaceRoot) -eq $default) 'Reset to default'
         $p = Get-GangplankSafeWorkspacePath -Base $mine -Project 'fleethacker-data-crucible/dumping-grounds' -Branch 'dummy-dev'
         Assert ($p -eq (Join-Path (Join-Path $mine 'dumping-grounds') 'dummy-dev')) ('Workspace layout should be <root>\<repo>\<branch>, got ' + $p)
+
+        # --- Fairlead 503, and a class-method error that hides its code ----------
+        $wrapped = 'Exception calling "InvokeApi" with "2" argument(s): "RATE_LIMITED|GitHub limit for this address."'
+        Assert ((Get-GangplankReportedErrorMessage $wrapped) -eq 'RATE_LIMITED|GitHub limit for this address.') 'A wrapped class-method error keeps its code'
+        Assert ((Split-GangplankCodedMessage -Message (Get-GangplankReportedErrorMessage $wrapped)).Code -eq 'RATE_LIMITED') 'The route can read the code'
+        $script:GangplankHttpTransport = {
+            param($Request)
+            return [pscustomobject]@{ Status = 503; Headers = @{}; Text = '{"error":"no model"}'; File = $null; NetworkError = '' }
+        }
+        Set-GangplankFairleadKeyReader -Reader { param($Target) 'fl-test-key-1' }
+        $fail = ''
+        try { [void](Invoke-GangplankAI -Question 'hi') } catch { $fail = [string]$_.Exception.Message }
+        Assert ($fail -eq 'SERVER_ERROR|Fairlead is running but no local model answered (HTTP 503). In Fairlead, check that a local model is on the route.') ("A 503 should name the model route: $fail")
+        Assert ((Get-GangplankFairleadFailureMessage -Status 500) -eq 'SERVER_ERROR|Fairlead request failed (HTTP 500).') 'Other Fairlead statuses keep the status line'
+        Assert ((Get-GangplankFairleadFailureMessage -Status 0) -eq 'NETWORK|Fairlead request failed (HTTP no response).') 'No response stays a network failure'
+        Set-GangplankFairleadKeyReader -Reader $null
+        $script:GangplankHttpTransport = $null
     } $temp
     Write-Host 'Fairlead client, branch naming and workspace folder checks passed.' -ForegroundColor Green
 } finally {
