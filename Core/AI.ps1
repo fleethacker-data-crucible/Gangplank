@@ -46,6 +46,7 @@ function Invoke-GangplankAIStream {
     param([Parameter(Mandatory)][string]$Question, $Session, [Parameter(Mandatory)][scriptblock]$OnChunk, [string]$Token)
     $config = Get-GangplankAiConfiguration
     $token = if ($Token) { $Token } else { Get-GangplankAiRequestToken -Config $config }
+    if ($token) { Assert-GangplankFairleadReady }
     $payload = New-GangplankAiPayload -Question $Question -Session $Session -Model $config.Model -Stream
     $body = [Text.Encoding]::UTF8.GetBytes(($payload | ConvertTo-Json -Depth 8 -Compress))
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12

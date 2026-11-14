@@ -6,14 +6,19 @@
 #    Address   GANGPLANK_FAIRLEAD_URL (loopback only), default http://127.0.0.1:8776/v1/chat/completions
 #    Route     GANGPLANK_FAIRLEAD_MODEL, default 'auto'
 #    Key       Windows Credential Manager, generic credential Fairlead/Gangplank (Fairlead writes it:
-#              Fairlead, Clients, install a key for Gangplank). Never an environment variable or a vault item.
+#              Fairlead, Clients, install a key for Gangplank). If that credential is absent, the first
+#              line of %LOCALAPPDATA%\Fairlead\local-token (Fairlead's own file for this Windows account).
+#              Never an environment variable or a vault item. FAIRLEAD_LOCAL_TOKEN=off skips the file;
+#              FAIRLEAD_LOCAL_TOKEN_FILE is Fairlead's own path for it.
+#  The host's Assert-GangplankFairleadReady runs before the key is attached: /__fleethacker/id must be
+#  Fairlead, and nothing on port 8776 is started with Start-FleetService. The id request carries no key.
 #  Every request carries Authorization: Bearer <key>, X-Fairlead-Label: Gangplank and
 #  X-Fairlead-Privacy: local, so prompts stay on this PC.
 # ============================================================
-# Shared module. Gangplank Intelligence, version 2.0.0 (docs/SHARED-AI-MODULE.md).
+# Shared module. Gangplank Intelligence, version 2.1.0 (docs/SHARED-AI-MODULE.md).
 # Copied, not forked, into sibling products: change it here, bump the version, copy it back.
-# Host functions it needs, and nothing else of Gangplank: ConvertFrom-GangplankApiResponse,
-# Get-GangplankSafeUrl, Invoke-GangplankHttpRequest.
+# Host functions it needs, and nothing else of Gangplank: Assert-GangplankFairleadReady,
+# ConvertFrom-GangplankApiResponse, Get-GangplankSafeUrl, Invoke-GangplankHttpRequest.
 
 $script:GangplankFairleadDefaultUrl = 'http://127.0.0.1:8776/v1/chat/completions'
 $script:GangplankFairleadDefaultModel = 'auto'
@@ -21,6 +26,8 @@ $script:GangplankFairleadApp = 'Gangplank'
 $script:GangplankFairleadTargetPattern = '^Fairlead/[A-Za-z][A-Za-z0-9-]{0,39}$'
 # Replaceable for tests: { param([string]$Target) -> key text or $null }.
 $script:GangplankFairleadKeyReader = $null
+# Tests point this at a scratch file so a suite never reads the real local token.
+$script:GangplankFairleadLocalTokenPath = $null
 
 function Initialize-GangplankCredentialReader {
     if ('Gangplank.FairleadCredential' -as [type]) { return }
@@ -104,19 +111,57 @@ function Set-GangplankFairleadKeyReader {
     $script:GangplankFairleadKeyReader = $Reader
 }
 
+function Test-GangplankFairleadKeyShape {
+    # A Fairlead client key: "fl-" then letters, digits, '-' or '_'. The local-token file is checked
+    # before it is used. A Credential Manager blob keeps its own printable-text check.
+    param([string]$Key)
+    return ($null -ne $Key -and $Key -cmatch '\Afl-[A-Za-z0-9_-]{8,256}\z')
+}
+
+function Get-GangplankFairleadLocalTokenPath {
+    if ($script:GangplankFairleadLocalTokenPath) { return $script:GangplankFairleadLocalTokenPath }
+    $moved = [Environment]::GetEnvironmentVariable('FAIRLEAD_LOCAL_TOKEN_FILE')
+    if (-not [string]::IsNullOrWhiteSpace($moved)) { return $moved.Trim().Trim('"') }
+    $base = $env:LOCALAPPDATA
+    if ([string]::IsNullOrWhiteSpace($base)) {
+        try { $base = [Environment]::GetFolderPath('LocalApplicationData') } catch { $base = '' }
+    }
+    if ([string]::IsNullOrWhiteSpace($base)) { return $null }
+    return (Join-Path (Join-Path $base 'Fairlead') 'local-token')
+}
+
+function Read-GangplankFairleadLocalToken {
+    # First line of Fairlead's local-token file, or $null. Never logged. A file over 4 KB is ignored.
+    $off = [Environment]::GetEnvironmentVariable('FAIRLEAD_LOCAL_TOKEN')
+    if ($off -and $off.Trim().ToLowerInvariant() -eq 'off') { return $null }
+    $path = Get-GangplankFairleadLocalTokenPath
+    try {
+        if (-not $path -or -not [IO.File]::Exists($path)) { return $null }
+        if ((New-Object IO.FileInfo $path).Length -gt 4096) { return $null }
+        $text = [IO.File]::ReadAllText($path)
+        $line = ($text -split '\r?\n', 2)[0]
+        if ($null -eq $line) { return $null }
+        $line = $line.Trim().TrimStart([char]0xFEFF)
+        if (-not (Test-GangplankFairleadKeyShape $line)) { return $null }
+        return $line
+    } catch { return $null }
+}
+
 function Get-GangplankFairleadKey {
-    # The client key Fairlead saved for Gangplank, or $null.
+    # Credential Manager first (Fairlead/Gangplank), then Fairlead's local-token file. Never an env var.
     $target = Get-GangplankFairleadTarget
+    $fromStore = $null
     if ($script:GangplankFairleadKeyReader) {
         $v = & $script:GangplankFairleadKeyReader $target
-        if ($v) { return ([string]$v).Trim() }
-        return $null
+        if ($v) { $fromStore = ([string]$v).Trim() }
+    } elseif ($env:OS -eq 'Windows_NT') {
+        try {
+            Initialize-GangplankCredentialReader
+            $fromStore = ConvertFrom-GangplankCredentialBlob -Blob ([Gangplank.FairleadCredential]::ReadBlob($target))
+        } catch { $fromStore = $null }
     }
-    if ($env:OS -ne 'Windows_NT') { return $null }
-    try {
-        Initialize-GangplankCredentialReader
-        return (ConvertFrom-GangplankCredentialBlob -Blob ([Gangplank.FairleadCredential]::ReadBlob($target)))
-    } catch { return $null }
+    if ($fromStore) { return $fromStore }
+    return (Read-GangplankFairleadLocalToken)
 }
 
 function Get-GangplankAiToken {
@@ -128,7 +173,7 @@ function Get-GangplankAiRequestToken {
     # The key for a chat request. Without one Fairlead would refuse the call, so say what to do.
     param($Config)
     $key = Get-GangplankFairleadKey
-    if (-not $key) { throw 'AI_TOKEN_MISSING|Open Fairlead and install a key for Gangplank (Fairlead, Clients).' }
+    if (-not $key) { throw 'AI_TOKEN_MISSING|No Fairlead key for Gangplank. In Fairlead, open Clients and install a key, or start Fairlead once so it can write a local token for this Windows account.' }
     return $key
 }
 
@@ -173,6 +218,8 @@ function Get-GangplankAiConfiguration {
 
 function Get-GangplankAiAuthHeaders {
     param([string]$Token)
+    # The key is attached only after the host has checked /__fleethacker/id (and started Fairlead if needed).
+    if ($Token) { Assert-GangplankFairleadReady }
     $h = @{
         'Content-Type' = 'application/json'
         Accept = 'application/json'

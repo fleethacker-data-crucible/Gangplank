@@ -19,6 +19,10 @@ export function startFakeAi({ port = 0, mode = 'openai', token = 'fake-ai-token'
       calls.push({ method: req.method, path: url.pathname, authorizationSent: !!auth });
       const json = (status, obj) => { const b = JSON.stringify(obj); res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(b) }); res.end(b); };
       if (url.pathname === '/__fake/state') return json(200, { mode, calls });
+      // Same shape as Fairlead's FleetPort id. No token: Gangplank checks this before it sends the key.
+      if (req.method === 'GET' && url.pathname === '/__fleethacker/id') {
+        return json(200, { tool: 'fairlead', version: 'test', pid: process.pid, path: process.execPath });
+      }
       const needsAuth = mode === 'openai';
       if (needsAuth && auth !== `Bearer ${token}`) return json(401, { error: { message: 'invalid api key' } });
       if (req.method === 'GET' && url.pathname === '/v1/models' && mode === 'openai') return json(200, { object: 'list', data: MODELS.map((id) => ({ id, object: 'model' })) });

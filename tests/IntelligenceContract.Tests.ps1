@@ -24,7 +24,7 @@ Assert ($guide.Contains("version $version")) "docs/SHARED-AI-MODULE.md must quot
 $defined = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object Name)
 $called = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() } | Where-Object { $_ -match '-Gangplank' } | Sort-Object -Unique)
 $needs = @($called | Where-Object { $_ -notin $defined })
-$expected = @('ConvertFrom-GangplankApiResponse','Get-GangplankSafeUrl','Invoke-GangplankHttpRequest') | Sort-Object
+$expected = @('Assert-GangplankFairleadReady','ConvertFrom-GangplankApiResponse','Get-GangplankSafeUrl','Invoke-GangplankHttpRequest') | Sort-Object
 Assert (($needs -join ',') -eq ($expected -join ',')) ("The host functions the module needs changed.`n  needs:    " + ($needs -join ', ') + "`n  expected: " + ($expected -join ', ') + "`n  Update the list in this test and in docs/SHARED-AI-MODULE.md, and bump the version.")
 foreach ($name in $expected) { Assert ($guide.Contains($name)) "The guide must document the host function $name" }
 

@@ -18,8 +18,9 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'gangplank-e2e-'));
 const workRoot = path.join(temp, 'work');
 const fake = await startFakeGitHub({ port: 0 });
 const fakeAi = await startFakeAi({ port: 0, mode: 'openai' });
-// Gangplank reads its Fairlead key from Windows Credential Manager only. The test saves one under its own
+// Gangplank reads its Fairlead key from Windows Credential Manager first. The test saves one under its own
 // Fairlead/<App> name (GANGPLANK_FAIRLEAD_TARGET) and removes it afterwards; it never touches Fairlead/Gangplank.
+// The synthetic router answers /__fleethacker/id as this process, which is what the key check requires.
 const fairleadTarget = 'Fairlead/Gangplank-e2e-' + Math.random().toString(36).slice(2, 10);
 const haveCredentialManager = process.platform === 'win32';
 if (haveCredentialManager) {

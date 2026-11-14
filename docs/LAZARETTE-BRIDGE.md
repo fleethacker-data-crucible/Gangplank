@@ -63,8 +63,7 @@ Lite is never consulted for it.
 
 ## The Fleet router (Fairlead)
 
-Gangplank does **not** read the vault for AI. Every AI request goes to Fairlead on this PC, and the client key for it
-comes from Windows Credential Manager (`Fairlead/Gangplank`), installed by Fairlead. See the README for the setup.
+Gangplank does **not** read the vault for AI. Every AI request goes to Fairlead on this PC. The client key comes from Windows Credential Manager (`Fairlead/Gangplank`), then from `%LOCALAPPDATA%\Fairlead\local-token` if that credential is absent. See the README for the setup.
 
 ## Tests
 
