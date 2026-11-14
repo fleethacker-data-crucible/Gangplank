@@ -529,6 +529,19 @@ test('a closed pull is not mergeable and reports unknown mergeability', async ()
   assert.equal((await api('PUT', `/repos/${REPO}/pulls/2/merge`, {})).status, 405);
 });
 
+test('authorization accepts bearer and token with any run of spaces', async () => {
+  const user = (authorization) => fetch(`${fake.url}/user`, { headers: authorization === undefined ? {} : { Authorization: authorization } });
+  const status = async (authorization) => { const res = await user(authorization); await res.text(); return res.status; };
+  assert.equal(await status(`Bearer ${DEFAULT_TOKEN}`), 200);
+  assert.equal(await status(`bearer\t${DEFAULT_TOKEN}`), 200);
+  assert.equal(await status(`TOKEN  ${DEFAULT_TOKEN}  `), 200);
+  assert.equal(await status(`token ${' '.repeat(4000)}${DEFAULT_TOKEN}`), 200);
+  assert.equal(await status(`Basic ${DEFAULT_TOKEN}`), 401);
+  assert.equal(await status('Bearer'), 401);
+  assert.equal(await status('Bearer '), 401);
+  assert.equal(await status(undefined), 401);
+});
+
 test('CLI prints one JSON line with url and token', async () => {
   const script = fileURLToPath(new URL('./fake-github.mjs', import.meta.url));
   const child = spawn(process.execPath, [script, '0', '--token=cli-token'], { stdio: ['ignore', 'pipe', 'inherit'] });

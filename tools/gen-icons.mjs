@@ -8,7 +8,7 @@
 // 1.75 px stroke, currentColor.
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const LUCIDE_VERSION = '1.54.0';
 // Gangplank's icon name -> Lucide icon name.
@@ -37,6 +37,38 @@ const ICONS = {
   warning: 'triangle-alert',
 };
 
+function commentEnd(s, from) {
+  for (let j = from; j < s.length - 2; j++) {
+    if (s[j] !== '-' || s[j + 1] !== '-') continue;
+    if (s[j + 2] === '>') return j + 3;
+    if (s[j + 2] === '!' && s[j + 3] === '>') return j + 4;
+  }
+  return -1;
+}
+function stripOnce(s) {
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    const start = s.indexOf('<!--', i);
+    if (start < 0) return out + s.slice(i);
+    out += s.slice(i, start);
+    if (s[start + 4] === '>') { i = start + 5; continue; }
+    if (s[start + 4] === '-' && s[start + 5] === '>') { i = start + 6; continue; }
+    const end = commentEnd(s, start + 4);
+    if (end < 0) return out;
+    i = end;
+  }
+  return out;
+}
+export function stripHtmlComments(input) {
+  let cur = String(input);
+  let prev;
+  do { prev = cur; cur = stripOnce(cur); } while (cur !== prev);
+  return cur;
+}
+
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
 const dir = process.argv[2];
 if (!dir) {
   console.error('usage: node tools/gen-icons.mjs <lucide-static>/icons');
@@ -44,7 +76,7 @@ if (!dir) {
 }
 const data = {};
 for (const [name, lucide] of Object.entries(ICONS)) {
-  const svg = readFileSync(path.join(dir, `${lucide}.svg`), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+  const svg = stripHtmlComments(readFileSync(path.join(dir, `${lucide}.svg`), 'utf8'));
   const inner = svg.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
   const nodes = [...inner.matchAll(/<([a-z]+)\s([^>]*?)\/?>/g)].map(([, tag, attrs]) => {
     const a = {};
@@ -78,3 +110,4 @@ fill();
 `;
 writeFileSync(path.join(root, 'web', 'icons.js'), out);
 console.log('wrote web/icons.js with ' + Object.keys(data).length + ' icons');
+}
