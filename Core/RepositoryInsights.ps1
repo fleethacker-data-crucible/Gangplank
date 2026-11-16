@@ -12,7 +12,7 @@ function Assert-GangplankKnownBranch {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Session,[Parameter(Mandatory)][string]$Branch)
     if ($Branch.Length -gt 200 -or $Branch -cnotin @(Get-GangplankKnownBranches -Session $Session)) {
-        throw 'Select an existing branch from this repository.'
+        throw 'BAD_REQUEST|Select an existing branch from this repository.'
     }
     return $Branch
 }
@@ -65,7 +65,7 @@ function Get-GangplankRepositoryHistory {
                 Url=[string]$c.web_url
             }
         }
-    } else { throw 'Unsupported repository provider.' }
+    } else { throw 'BAD_REQUEST|Unsupported repository provider.' }
     return @($items | Select-Object -First $Limit)
 }
 
@@ -85,7 +85,11 @@ function Get-GangplankRepositoryComparison {
         $ahead = $result.ahead_by
         $behind = $result.behind_by
         $files = @($result.files | Select-Object -First 100 | ForEach-Object {
-            [pscustomobject]@{ Path=[string]$_.filename; Status=[string]$_.status; Additions=[int]$_.additions; Deletions=[int]$_.deletions }
+            [pscustomobject]@{
+                Path=[string]$_.filename; Status=[string]$_.status
+                Additions=$(if ($null -eq $_.additions) { 0 } else { [int]$_.additions })
+                Deletions=$(if ($null -eq $_.deletions) { 0 } else { [int]$_.deletions })
+            }
         })
     } elseif ($Session.Provider -eq 'GitLab') {
         $project = $provider.EncodePath([string]$Session.ProjectPath)
@@ -94,7 +98,7 @@ function Get-GangplankRepositoryComparison {
             $kind = if ($_.new_file) { 'added' } elseif ($_.deleted_file) { 'removed' } elseif ($_.renamed_file) { 'renamed' } else { 'modified' }
             [pscustomobject]@{ Path=[string]$_.new_path; Status=$kind; Additions=$null; Deletions=$null }
         })
-    } else { throw 'Unsupported repository provider.' }
+    } else { throw 'BAD_REQUEST|Unsupported repository provider.' }
     return [pscustomobject]@{
         Base=$Base; Head=$Head; AheadBy=$ahead; BehindBy=$behind
         Files=@($files); Truncated=(@($files).Count -ge 100)
@@ -112,8 +116,8 @@ function Get-GangplankRepositoryReviews {
             if (-not $pr -or -not $pr.number) { continue }
             [pscustomobject]@{
                 Number=[int]$pr.number; Title=[string]$pr.title
-                Source=[string]$pr.head.ref; Target=[string]$pr.base.ref
-                Author=[string]$pr.user.login; Url=[string]$pr.html_url
+                Source=$(if ($pr.head) { [string]$pr.head.ref } else { '' }); Target=$(if ($pr.base) { [string]$pr.base.ref } else { '' })
+                Author=$(if ($pr.user) { [string]$pr.user.login } else { '' }); Url=[string]$pr.html_url
             }
         }
     } elseif ($Session.Provider -eq 'GitLab') {
@@ -124,10 +128,10 @@ function Get-GangplankRepositoryReviews {
             [pscustomobject]@{
                 Number=[int]$mr.iid; Title=[string]$mr.title
                 Source=[string]$mr.source_branch; Target=[string]$mr.target_branch
-                Author=[string]$mr.author.username; Url=[string]$mr.web_url
+                Author=$(if ($mr.author) { [string]$mr.author.username } else { '' }); Url=[string]$mr.web_url
             }
         }
-    } else { throw 'Unsupported repository provider.' }
+    } else { throw 'BAD_REQUEST|Unsupported repository provider.' }
     return @($items | Select-Object -First 30)
 }
 

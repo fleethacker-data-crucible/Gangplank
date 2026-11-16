@@ -65,11 +65,7 @@ function Start-GangplankJob {
 
 function Get-GangplankJobErrorMessage {
     param($ErrorRecordOrException)
-    $e = $ErrorRecordOrException
-    if ($e -is [Management.Automation.ErrorRecord]) { $e = $e.Exception }
-    while ($e -and ($e -is [Management.Automation.MethodInvocationException] -or $e -is [Management.Automation.CmdletInvocationException]) -and $e.InnerException) { $e = $e.InnerException }
-    if (-not $e) { return 'The job failed.' }
-    return (Get-GangplankSafeErrorMessage -Message $e.Message)
+    return (Get-GangplankSafeErrorMessage -Message (Get-GangplankReportedErrorMessage $ErrorRecordOrException))
 }
 
 function Update-GangplankJobs {
@@ -98,7 +94,7 @@ function Update-GangplankJobs {
         } catch {
             $job.Error = Get-GangplankJobErrorMessage $_
             $job.State = $(if ($wasCancelling) { 'cancelled' } else { 'failed' })
-            Write-GangplankLog -Level WARN -Message "Job $($job.Id) ($($job.Kind)) failed: $($_.Exception.Message)"
+            Write-GangplankLog -Level WARN -Message ("Job {0} ({1}) failed: {2}" -f $job.Id, $job.Kind, (Get-GangplankReportedErrorMessage $_))
         } finally {
             $job.Finished = (Get-Date).ToUniversalTime().ToString('o')
             try { $job.PowerShell.Dispose() } catch { }

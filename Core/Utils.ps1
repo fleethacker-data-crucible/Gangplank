@@ -40,6 +40,29 @@ function ConvertTo-GangplankRefPath {
     return (($Ref -split '/') | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
 }
 
+function Get-GangplankReportedErrorMessage {
+    # The message a person should see. Windows PowerShell 5.1 wraps a throw inside a class
+    # method as "Exception calling \"X\" with \"N\" argument(s): \"CODE|...\"", which hides the code.
+    param($ErrorRecord)
+    $text = ''
+    if ($ErrorRecord -is [string]) {
+        $text = [string]$ErrorRecord
+    } else {
+        $e = $ErrorRecord
+        if ($e -is [System.Management.Automation.ErrorRecord]) { $e = $e.Exception }
+        while ($e -and $e.InnerException -and (
+            $e -is [System.Management.Automation.MethodInvocationException] -or
+            $e -is [System.Management.Automation.MethodException] -or
+            $e -is [System.Management.Automation.CmdletInvocationException])) {
+            $e = $e.InnerException
+        }
+        if ($e) { $text = [string]$e.Message }
+    }
+    if ($text -match '^Exception calling "[^"]+" with "\d+" argument\(s\): "(.*)"$') { $text = $Matches[1] }
+    if (-not $text) { return 'The request failed.' }
+    return $text
+}
+
 function Get-GangplankSafeErrorMessage {
     # Reduce an exception message to something safe to return to the browser:
     # one line, bounded, and with any provider response body (" | ...") removed.

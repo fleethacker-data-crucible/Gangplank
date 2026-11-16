@@ -25,6 +25,17 @@ function New-GangplankAiPayload {
     }
 }
 
+function Get-GangplankFairleadFailureMessage {
+    # A 503 from Fairlead means the router answered and its model did not. Say that, not a bare status.
+    param([int]$Status)
+    if ($Status -eq 503) {
+        return 'SERVER_ERROR|Fairlead is running but no local model answered (HTTP 503). In Fairlead, check that a local model is on the route.'
+    }
+    $code = Get-GangplankProviderErrorCode -Status $Status
+    $statusText = if ($Status) { [string]$Status } else { 'no response' }
+    return ("{0}|Fairlead request failed (HTTP {1})." -f $code, $statusText)
+}
+
 function Invoke-GangplankAI {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Question, $Session, [switch]$CommitTitle, [string]$Token)
@@ -33,6 +44,7 @@ function Invoke-GangplankAI {
     $payload = New-GangplankAiPayload -Question $Question -Session $Session -Model $config.Model -CommitTitle:$CommitTitle
     $response = Invoke-GangplankHttpRequest -Method POST -Uri $config.Url -Headers (Get-GangplankAiAuthHeaders -Token $token) -Body ($payload | ConvertTo-Json -Depth 8 -Compress) -TimeoutSec 90
     $token = $null
+    if ([int]$response.Status -eq 503) { throw (Get-GangplankFairleadFailureMessage -Status 503) }
     $result = ConvertFrom-GangplankApiResponse -Provider 'AI' -Method POST -Endpoint (Get-GangplankSafeUrl $config.Url) -Response $response
     $answer = Get-GangplankAiAnswerText -Response $result
     if (-not $answer) { throw 'AI_EMPTY|Fairlead returned an empty answer.' }
@@ -72,8 +84,7 @@ function Invoke-GangplankAIStream {
         catch [Net.WebException] {
             $status = 0
             if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
-            $code = Get-GangplankProviderErrorCode -Status $status
-            throw "$code|Fairlead request failed (HTTP $(if ($status) { $status } else { 'no response' }))."
+            throw (Get-GangplankFairleadFailureMessage -Status $status)
         }
         $reader = New-Object IO.StreamReader($upstream.GetResponseStream(),[Text.Encoding]::UTF8)
         while (-not $reader.EndOfStream) {
