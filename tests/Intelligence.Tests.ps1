@@ -219,6 +219,13 @@ try {
         Assert ((Get-GangplankWorkspaceRoot) -eq $default) 'Reset to default'
         $p = Get-GangplankSafeWorkspacePath -Base $mine -Project 'fleethacker-data-crucible/dumping-grounds' -Branch 'dummy-dev'
         Assert ($p -eq (Join-Path (Join-Path $mine 'dumping-grounds') 'dummy-dev')) ('Workspace layout should be <root>\<repo>\<branch>, got ' + $p)
+
+        # The Fairlead key must not be offered to a system proxy. Streaming is Fairlead-only.
+        # The shared client is also used for GitHub, so it drops the proxy only for loopback.
+        $httpSrc = [IO.File]::ReadAllText((Join-Path $script:GangplankRoot 'Core\HttpClient.ps1'))
+        $aiSrc = [IO.File]::ReadAllText((Join-Path $script:GangplankRoot 'Core\AI.ps1'))
+        Assert ($httpSrc -match 'IsLoopback\)\s*\{\s*\$req\.Proxy\s*=\s*\$null') 'Loopback requests must set Proxy to null'
+        Assert ($aiSrc -match '\$request\.Proxy\s*=\s*\$null') 'The streaming Fairlead request must set Proxy to null'
     } $temp
     Write-Host 'Fairlead client, branch naming and workspace folder checks passed.' -ForegroundColor Green
 } finally {

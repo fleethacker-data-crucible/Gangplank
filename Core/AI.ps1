@@ -62,6 +62,7 @@ function Invoke-GangplankAIStream {
     $request.ReadWriteTimeout = 90000
     $request.ContentLength = $body.Length
     $request.AllowAutoRedirect = $false
+    try { $request.Proxy = $null } catch { }
     $requestStream = $request.GetRequestStream()
     try { $requestStream.Write($body,0,$body.Length) } finally { $requestStream.Dispose() }
     $upstream = $null
