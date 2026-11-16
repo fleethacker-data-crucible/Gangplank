@@ -5,7 +5,7 @@ holds no gateway address, provider token or model id: it calls one loopback addr
 (`auto` by default) and its own Fairlead client key, read from Windows Credential Manager
 (`Fairlead/<AppName>`). Halyard and Shellback can use the same file.
 
-This is **version 2.0.0** of the module. It is copied into each product, not forked: change it here,
+This is **version 2.1.0** of the module. It is copied into each product, not forked: change it here,
 bump the version, and copy it back. The version is the line `# Shared module. Gangplank Intelligence,
 version X.Y.Z` at the top of the file; `tests/IntelligenceContract.Tests.ps1` checks that it matches
 this guide.
@@ -20,6 +20,7 @@ provides them (Gangplank's own are in `Core/`):
 | `Invoke-GangplankHttpRequest` | One HTTP call returning `{ Status; Headers; Text }`, no redirects across hosts, bounded retry for GET |
 | `ConvertFrom-GangplankApiResponse` | Turn a response into data, or throw a coded `CODE|message` error without the body |
 | `Get-GangplankSafeUrl` | A URL without its query string, safe for logs |
+| `Assert-GangplankFairleadReady` | Before the key is attached: `GET /__fleethacker/id` must be Fairlead on this port (no key on that request). Nothing listening on port 8776 is started with `Start-FleetService`. Throws `AI_DOWN`, `AI_NOT_FAIRLEAD` or `AI_PORT_CHECK` instead of sending the key |
 
 In another product the `Gangplank` in the names stays, so the file is the same everywhere; the
 product supplies thin functions with those names.
@@ -29,8 +30,8 @@ product supplies thin functions with those names.
 - The address is `http://127.0.0.1:8776/v1/chat/completions`, or `GANGPLANK_FAIRLEAD_URL` when it
   is a loopback address. Anything else is refused.
 - The route is `GANGPLANK_FAIRLEAD_MODEL`, default `auto`.
-- The key is only ever read from Credential Manager. With no key the module says
-  "Open Fairlead and install a key for Gangplank."
+- The key is read from Credential Manager (`Fairlead/Gangplank`). If that credential is absent, the first line of `%LOCALAPPDATA%\Fairlead\local-token` is used when it has the `fl-` shape. `FAIRLEAD_LOCAL_TOKEN=off` skips the file. `LLM_TOKEN`, `OPENAI_API_KEY` and the vault are never the key. With no key the module says to install one in Fairlead's Clients, or to start Fairlead once so it can write the local token.
+- Before that key is attached, the host runs `Assert-GangplankFairleadReady`.
 - Every request carries `X-Fairlead-Label: Gangplank` and `X-Fairlead-Privacy: local`.
 
 ## What it does not know

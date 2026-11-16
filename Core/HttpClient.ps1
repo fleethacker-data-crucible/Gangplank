@@ -65,6 +65,12 @@ function Invoke-GangplankHttpOnce {
     $req = [Net.HttpWebRequest]::Create($Request.Uri)
     $req.Method = $Request.Method
     $req.AllowAutoRedirect = $false
+    # Loopback calls can carry the Fairlead key. Do not consult WPAD or a PAC file for them.
+    # GitHub and GitLab stay on the system proxy.
+    try {
+        $dest = $null
+        if ([uri]::TryCreate([string]$Request.Uri,[UriKind]::Absolute,[ref]$dest) -and $dest.IsLoopback) { $req.Proxy = $null }
+    } catch { }
     $req.Timeout = $Request.TimeoutSec * 1000
     $req.ReadWriteTimeout = $Request.TimeoutSec * 1000
     $req.UserAgent = 'Gangplank'

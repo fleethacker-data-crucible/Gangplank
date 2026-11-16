@@ -28,6 +28,7 @@ if (-not $script:GangplankRoot) {
 . (Join-Path $script:GangplankRoot "Core\Sentinel.ps1")
 . (Join-Path $script:GangplankRoot "Core\RepositoryInsights.ps1")
 . (Join-Path $script:GangplankRoot "Core\Reviews.ps1")
+. (Join-Path $script:GangplankRoot "Core\FairleadHost.ps1")
 . (Join-Path $script:GangplankRoot "Core\Intelligence.ps1")
 . (Join-Path $script:GangplankRoot "Core\AI.ps1")
 . (Join-Path $script:GangplankRoot "LazaretteBridge.ps1")
